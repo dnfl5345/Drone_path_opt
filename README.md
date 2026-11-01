@@ -3,7 +3,8 @@
 바람·지형·탑재중량을 반영해 **도착 SOC(배터리 잔량)를 최대화**하는 드론 물류 경로계획 알고리즘입니다.
 지난 회의에서 선정한 최단 경로 알고리즘(Lazy Theta*)을 3D 시공간 에너지 탐색기 **WE-LT\* (Wind-aware Energy Lazy Theta\*)**로 확장했습니다.
 
-- 회의 보고 자료: [`docs/drone_soc_path_planning_dev.pptx`](docs/drone_soc_path_planning_dev.pptx) (기존 회의자료와 같은 포맷, 17장)
+- 회의 보고 자료: [`docs/drone_soc_path_planning_dev.pptx`](docs/drone_soc_path_planning_dev.pptx) (기존 회의자료와 같은 포맷, 21장)
+- 최신 연구 대비 정식화 비교: [`docs/algorithm_comparison.md`](docs/algorithm_comparison.md) (문제 (P) 정의, 문헌별 정식화, 가정 축소 실험)
 - 결과 그림: `results/figures/` · 수치 요약: `results/summary.json`
 
 ## 개발 항목별 구현
@@ -28,6 +29,7 @@
 - 출발시각(09~20시, 시간별 예보)에 따라 경로·SOC가 바뀌며, 예비 SOC 20 %를 지키는 경우는 기존 방식 0/24회, WE-LT* 23/24회입니다.
 - 장애물 시간표(띠 모양 임시 비행제한): 해제까지 30 s면 **28 s 호버링**(57.9 kJ)을, 300 s면 **우회**(70.9 kJ)를 고릅니다.
 - 비행 중 돌발 금지구역이 생기면 롤링 재계획(60 s 주기 + 이벤트 발생 시)으로 피해 갑니다. 재계획 1회에 평균 5.3 s가 걸립니다.
+- 가정 축소 실험(E6) 결과, 비교 축별 기여는 **구간 속도 최적화 +10.2~13.0 %p**(10 m/s 고정이면 비행 불가) > **에너지 비교형 any-angle +4.1 %p** > **3D 고도 선택 +2.8~3.1 %p** 순입니다.
 
 ## 실행
 
@@ -35,13 +37,26 @@
 pip install -r requirements.txt
 PYTHONPATH=src python -m dpo.data_terrain                  # DSM·건물 수집 → data/processed/site_grid.npz
 PYTHONPATH=src python -m dpo.data_wind                     # GFS 10월 강풍일 스캔
-PYTHONPATH=src python scripts/run_experiments.py           # E0~E5 (약 10분)
+PYTHONPATH=src python scripts/run_experiments.py           # E0~E6 (약 12분)
 PYTHONPATH=src python scripts/make_figures.py && PYTHONPATH=src python scripts/make_figures.py gif
 PYTHONPATH=src python scripts/build_ppt.py <회의자료 템플릿.pptx> docs/drone_soc_path_planning_dev.pptx
 PYTHONPATH=src python -m pytest -q tests
 ```
 
 GFS 원자료(`data/raw/gfs_*.npz`)와 격자(`data/processed/site_grid.npz`)는 저장소에 포함되어 있어, 실험은 네트워크 없이 다시 돌릴 수 있습니다(실측 CSV는 처음 실행할 때 내려받습니다).
+
+## 참고문헌
+
+1. A. Nash, S. Koenig, C. Tovey, “Lazy Theta\*: Any-Angle Path Planning and Path Length Analysis in 3D,” *AAAI*, 2010.
+2. M. Phillips, M. Likhachev, “SIPP: Safe Interval Path Planning for Dynamic Environments,” *IEEE ICRA*, 2011.
+3. Y. Zeng, J. Xu, R. Zhang, “Energy Minimization for Wireless Communication With Rotary-Wing UAV,” *IEEE TWC*, 2019. DOI: 10.1109/TWC.2019.2902559
+4. F. Betti Sorbelli, F. Corò, S. K. Das, C. M. Pinotti, “Energy-Constrained Delivery of Goods With Drones Under Varying Wind Conditions,” *IEEE T-ITS*, 22(9):6048–6060, 2021. DOI: 10.1109/TITS.2020.3044420
+5. F. Lian, B. Li, Q. Yang, H. Zhu, D. Du, “WA-LPA\*: An Energy-Aware Path-Planning Algorithm for UAVs in Dynamic Wind Environments,” *Drones*, 9(12):850, 2025. DOI: 10.3390/drones9120850
+6. F. Lian, Q. Yang, B. Li, P. Wang, H. Luo, D. Du, “Optimal Path Planning of Unmanned Aerial Vehicle with Wind Field,” *IEEE ITSC*, pp. 4195–4200, 2025.
+7. R. Gu, Y. Zhao, X. Ren, “Integrating wind field analysis in UAV path planning: Enhancing safety and energy efficiency for urban logistics,” *Chinese Journal of Aeronautics*, 39(1):103605, 2026. DOI: 10.1016/j.cja.2025.103605
+8. T. A. Rodrigues et al., “In-flight positional and energy use data set of a DJI Matrice 100 quadcopter for small package delivery,” *Scientific Data*, 8:155, 2021. DOI: 10.1038/s41597-021-00930-x
+9. J. G. Leishman, *Principles of Helicopter Aerodynamics*, 2nd ed., Cambridge University Press, 2006.
+10. S. Koenig, M. Likhachev, D. Furcy, “Lifelong Planning A\*,” *Artificial Intelligence*, 155, 2004.
 
 ## 데이터 출처
 

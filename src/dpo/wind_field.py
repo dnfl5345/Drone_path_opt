@@ -141,6 +141,28 @@ class Site3D:
         self.tnfz_id[:] = -1
         self.tnfz_win = np.zeros((0, 2))
 
+    # ---------------- 비교 실험용 변형 (기존 연구의 가정 재현)
+    def frozen_wind(self, t):
+        """시간 불변 바람장: 시각 t 의 바람으로 고정 (정적 CFD/스냅샷 가정)."""
+        import copy
+        s = copy.copy(self)
+        a = np.interp(t, self.t_axis, np.arange(len(self.t_axis)))
+        a0 = int(np.floor(min(a, len(self.t_axis) - 1.0001)))
+        w = a - a0
+        s.U = ((1 - w) * self.U[a0] + w * self.U[a0 + 1])[None].astype(np.float32)
+        s.V = ((1 - w) * self.V[a0] + w * self.V[a0 + 1])[None].astype(np.float32)
+        s.t_axis = np.array([t])
+        return s
+
+    def terrain_following(self, n_layers=2):
+        """고도 선택 없음: 열마다 최저 비행가능 레이어부터 n_layers 개만 허용 (2.5D 지형추종)."""
+        import copy
+        s = copy.copy(self)
+        kmin = np.argmax(self.free, axis=0)
+        K = np.arange(self.nz)[:, None, None]
+        s.free = self.free & (K >= kmin[None]) & (K < kmin[None] + n_layers)
+        return s
+
     def lowest_free_k(self, x, y):
         i, j = int(x // self.dx), int(y // self.dx)
         ks = np.where(self.free[:, j, i])[0]

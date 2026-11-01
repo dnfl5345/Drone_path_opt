@@ -47,6 +47,7 @@ class Drone:
     va_max: float = 17.0        # 최대 대기속도 [m/s]
     vz_up: float = 3.0          # 상승률 [m/s]
     vz_dn: float = 2.0          # 하강률 [m/s]
+    va_fix: float = 0.0         # >0 이면 '고정 대기속도' 정책(비교 실험용, 속도 최적화 비활성)
 
     @property
     def area(self):
@@ -55,7 +56,7 @@ class Drone:
     def params(self):
         """numba 함수용 파라미터 배열."""
         return np.array([self.area, self.u_tip, self.k_ind, self.eta, self.p0, self.cda,
-                         self.p_av, self.c_desc], dtype=np.float64)
+                         self.p_av, self.c_desc, self.va_fix], dtype=np.float64)
 
     def to_dict(self):
         d = asdict(self)
@@ -105,6 +106,25 @@ def edge_energy_per_m(dx, dy, dz, wu, wv, m, rho, prm, va_max, vz_up, vz_dn, spe
         return p / abs(vz), abs(vz)
     ex, ey = dx / lh, dy / lh
     slope = dz / lh
+    if prm.shape[0] > 8 and prm[8] > 0.0:
+        # 고정 대기속도 Va: 바람 삼각형 |Vg·ê − w| = Va 를 풀어 대지속도 결정 (속도 최적화 없음)
+        va = prm[8]
+        wa = wu * ex + wv * ey            # 진행방향 바람 성분(순풍 +)
+        wc = -wu * ey + wv * ex           # 측풍 성분
+        if va * va <= wc * wc:
+            return np.inf, 0.0
+        vg = wa + math.sqrt(va * va - wc * wc)
+        if vg < 0.5:
+            return np.inf, 0.0
+        vz = vg * slope
+        if vz > vz_up:
+            vg = vz_up / slope
+            vz = vz_up
+        elif vz < -vz_dn:
+            vg = -vz_dn / slope
+            vz = -vz_dn
+        p = power_w(va, vz, m, rho, prm)
+        return p / (vg * math.sqrt(1.0 + slope * slope)), vg
     for k in range(speeds.shape[0]):
         vg = speeds[k]                # 수평 대지속도
         vz = vg * slope

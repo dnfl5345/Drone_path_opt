@@ -83,3 +83,12 @@ def test_wait_chosen_for_short_temporal_block():
 
 def test_kma_grid_conversion():
     assert dfs_xy(37.5665, 126.9780) == (60, 127)
+
+
+def test_fixed_airspeed_never_beats_speed_optimization():
+    import dataclasses
+    prm_fix = dataclasses.replace(DR, va_fix=12.0).params()
+    for wu in (-6.0, 0.0, 6.0):
+        e_opt, _ = edge_energy_per_m(25.0, 0, 0, wu, 2.0, 3.1, 1.225, PRM, DR.va_max, DR.vz_up, DR.vz_dn, SPD)
+        e_fix, _ = edge_energy_per_m(25.0, 0, 0, wu, 2.0, 3.1, 1.225, prm_fix, DR.va_max, DR.vz_up, DR.vz_dn, SPD)
+        assert e_opt <= e_fix * 1.001

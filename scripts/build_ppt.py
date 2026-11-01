@@ -283,22 +283,22 @@ def build(template, out):
 
     # 3. 최신 연구 동향 ----------------------------------------------------
     s = D.content("최신 경로 최적화 연구 동향 및 적용 기법")
-    rows = [["연구 (연도)", "핵심 아이디어", "본 개발 반영"],
-            ["Lazy Theta* (AAAI 2010)", "가시선(LOS) 검사를 확장 시점으로 지연한 any-angle 탐색", "탐색 골격 (지난 회의 선정)"],
-            ["WA-LPA* (Drones, 2025)", "동적 바람장 + 유도·형상·유해 동력 모델, 증분(Lifelong) 재계획",
-             "에너지 비용·롤링 재계획"],
-            ["Wind-aware Theta* 도시물류\n(Chinese J. Aeronautics, 2026)", "CFD 바람장 + Theta*, 바람 미고려 대비 에너지 7.69% 절감",
-             "any-angle + 바람 에너지 결합"],
-            ["Highways in the Sky (TRB)", "시간가변 바람 → 4D 시간확장 네트워크 라벨 수정 탐색", "시간 보간 바람·출발시각 최적화"],
-            ["Betti Sorbelli 외 (IEEE T-ITS 2020)", "바람·탑재중량 의존 배송 에너지, 비행 중 경로 변경", "배송/회수 중량, 이벤트 재계획"],
-            ["SIPP (ICRA 2011)", "안전 시간구간 + 대기(wait) 행동", "호버링 대기 vs 우회 자동 판단"],
-            ["Zeng 외 (IEEE TWC 2019)\n· Leishman", "회전익 전진비행 전력 모델(운동량 이론)", "P(V, m) 수식, 실측 보정"]]
-    table(s, 0.6, 1.2, 12.1, rows, [3.4, 5.4, 3.3], row_h=0.66, head_size=14, body_size=12)
-    textbox(s, 0.6, 6.5, 12.1, 0.4, [[("→ 최신 기법의 공통점(바람 에너지 비용 + any-angle + 재계획)을 하나의 탐색기 ", {}),
+    rows = [["연구 (출처 번호)", "핵심 아이디어", "본 개발 반영"],
+            ["Lazy Theta* [1] (AAAI 2010)", "가시선(LOS) 검사를 확장 시점으로 지연한 any-angle 탐색", "탐색 골격 (지난 회의 선정)"],
+            ["SIPP [2] (ICRA 2011)", "안전 시간구간 + 대기(wait) 행동", "호버링 대기 vs 우회 판단"],
+            ["Betti Sorbelli 외 [4]\n(IEEE T-ITS 2021)", "바람·탑재중량 의존 배송 에너지, 비행 중 경로 변경",
+             "배송/회수 중량, 이벤트 재계획"],
+            ["WA-LPA* [5] (Drones 2025)", "LPA* 증분 재계획 + 에너지 모델 + 바람 정렬 휴리스틱 + 고도 계층", "에너지 비용·재계획"],
+            ["Wind-augmented A* [6]\n(IEEE ITSC 2025)", "국소 바람 기반 에너지 예측으로 A* 휴리스틱 조정", "에너지 하한 휴리스틱"],
+            ["Wind-aware Theta* [7]\n(Chinese J. Aeronautics 2026)", "CFD 도시 바람장 + Theta*, 바람 미고려 대비 에너지 7.69% 절감",
+             "any-angle + 바람 에너지"],
+            ["Zeng 외 [3] (IEEE TWC 2019)\n· Leishman [9]", "회전익 전진비행 전력 모델(운동량 이론)", "P(V, m) 수식, 실측 보정"]]
+    table(s, 0.6, 1.2, 12.1, rows, [3.6, 5.3, 3.2], row_h=0.66, head_size=14, body_size=12)
+    textbox(s, 0.6, 6.5, 12.1, 0.4, [[("→ 공통 요소(바람 에너지 비용 + any-angle + 재계획)를 하나의 탐색기 ", {}),
                                        ("WE-LT* (Wind-aware Energy Lazy Theta*)", {"color": ORANGE}),
-                                       ("로 통합", {})]], size=14)
-    notes(s, "출처: WA-LPA* mdpi.com/2504-446X/9/12/850, CJA doi 10.1016/j.cja.2025.103605, TRB trid 2761039, "
-             "Betti Sorbelli arXiv 2012.08602, Rodrigues et al. Sci Data 2021.")
+                                       ("로 통합", {})]], size=13)
+    notes(s, "모든 출처는 마지막 '참고문헌' 슬라이드에 번호로 정리. 1차 보고서의 'Highways in the Sky(TRB)'는 "
+             "저자·DOI 확인이 불가하여 제외하고 [6] ITSC 2025로 대체.")
 
     # 4. 실제 Map ----------------------------------------------------------
     s = D.content("실제 Map 구축 – 지형·건물·비행금지구역·바람")
@@ -412,6 +412,39 @@ def build(template, out):
             ["5. 3D 최적 경로", "3D 시공간 A* (26방향)", "고도 레이어 20 m, 30~150 m AGL, 출력: 고도·통과시각·에너지"]]
     table(s, 0.6, 5.0, 12.1, rows, [3.0, 3.0, 6.1], row_h=0.45, head_size=13, body_size=12)
 
+    # 9-1. 정식화 ------------------------------------------------------------
+    s = D.content("제안 알고리즘 정식화 – 문제 (P)와 핵심 규칙")
+    picture(s, FIG / "F12_formulation.png", 0.6, 1.0, 12.1, 5.25)
+    textbox(s, 0.6, 6.25, 12.1, 0.7, [
+        [("○ 결정변수: ", {"color": TITLE}), ("경로(any-angle·고도) + 구간 속도 + 대기 시간을 ", {}),
+         ("하나의 목적함수 ΔSOC", {"color": ORANGE}), ("로 동시 결정, 질량은 갈 때/올 때 별도", {})],
+        [("상세 유도: docs/algorithm_comparison.md", {"color": GRAY, "size": 11})]], size=13)
+
+    # 9-2. 최신 연구 대비 차이점 ---------------------------------------------
+    s = D.content("최신 연구 대비 차이점 – 정식화 구성요소 비교")
+    Y = [("● ", {"color": ORANGE})]
+    rows = [["구성요소", "[4] Betti Sorbelli\n(T-ITS 2021)", "[5] WA-LPA*\n(Drones 2025)", "[6] Wind A*\n(ITSC 2025)",
+             "[7] Wind Theta*\n(CJA 2026)", "제안 WE-LT*"],
+            ["목적함수", "에너지 (예산 내 배송)", "에너지", "에너지", "에너지", [("ΔSOC = ΣP·t / E_b", {"color": ORANGE})]],
+            ["바람 w", "변동 바람", "동적 바람장", "국소 바람", "CFD 도시 바람장", [("w(x, t) 3D·시간 보간", {"color": ORANGE})]],
+            ["탐색 공간", "배송 그래프", "격자 + 고도 계층", "격자 A*", "any-angle (Theta*)", "3D 26방향 + any-angle"],
+            ["지름길 규칙", "–", "–", "–", "LOS면 채택", [("LOS ∧ 에너지 비교", {"color": ORANGE})]],
+            ["속도 결정", "미확인", "미확인", "미확인", "미확인", [("구간별 내부 최적화 e*", {"color": ORANGE})]],
+            ["탑재 질량", "반영", "미확인", "미확인", "미확인", [("갈 때/올 때 별도 m_ℓ", {"color": ORANGE})]],
+            ["대기(호버링)", "–", "미확인", "–", "–", [("에너지 기준 대기 vs 우회", {"color": ORANGE})]],
+            ["재계획", "비행 중 경로 변경", "LPA* 증분 재계획", "–", "–", "롤링 호라이즌 + 바람 보정"],
+            ["실측 보정", "–", "미확인", "미확인", "미확인", "DJI M100 198회 [8]"]]
+    table(s, 0.6, 1.1, 12.1, rows, [1.6, 2.1, 2.0, 1.7, 2.0, 2.7], row_h=0.47, head_size=12, body_size=11,
+          highlight=(4, 5), aligns=[PP_ALIGN.CENTER] * 6)
+    textbox(s, 0.6, 5.85, 12.1, 1.1, [
+        [("○ 차이 ①: ", {"color": TITLE}), ("바람장에서 c_E(p,v) ≤ c_E(p,u)+c_E(u,v) 불성립 → 'LOS면 직결'(Theta*) 대신 ", {}),
+         ("에너지 비교로 직결 여부 결정", {"color": ORANGE})],
+        [("○ 차이 ②: ", {"color": TITLE}), ("속도를 간선 비용의 내부 최적화로 흡수 → 경로·고도·속도·대기·질량을 ", {}),
+         ("단일 ΔSOC로 동시 최적화", {"color": ORANGE})],
+        [("※ 문헌 항목은 공개 초록 기준이며, '미확인'은 원문에서 확인하지 못한 항목", {"color": GRAY, "size": 11})]], size=13)
+    notes(s, "[1] Lazy Theta*, [2] SIPP 는 구성 기법으로 사용(표에서 제외). 문헌 [5]~[7] 정식화는 초록 기준이며 "
+             "원문 미확인 항목은 '미확인'으로 표기. 상세: docs/algorithm_comparison.md")
+
     # 10. 결과 ① 경로 -------------------------------------------------------
     import pickle
     st1 = pickle.load(open(ROOT / "results" / "E1.pkl", "rb"))["store"]
@@ -508,6 +541,18 @@ def build(template, out):
                   [(f"· 예보 기반 예측 SOC {E5['static_pred_soc']:.1f}%p vs 실제 {E5['static_soc']:.1f}%p",
                     {"size": 12, "color": GRAY})]], anchor=MSO_ANCHOR.TOP)
 
+    # 15-1. 결과 ⑦ 가정 축소 실험 --------------------------------------------
+    s = D.content("결과 ⑦ 비교 축별 기여도 – 가정 축소 실험")
+    picture(s, FIG / "F11_ablation.png", 0.6, 1.0, 12.1, 4.95)
+    E6 = {(r["key"], r["kind"]): r for r in S["E6_ablation"]}
+    textbox(s, 0.6, 6.0, 12.1, 0.95, [
+        [("○ 기여 순위: ", {"color": TITLE}),
+         (f"속도 최적화 +{E6[('fixed_va14', 'delivery')]['d_soc']:.1f}~{E6[('fixed_va14', 'pickup')]['d_soc']:.1f}%p "
+          f"(10 m/s 고정은 비행 불가) > any-angle 에너지 규칙 +{E6[('grid', 'delivery')]['d_soc']:.1f}%p > "
+          f"3D 고도 선택 +{E6[('terrain_2p5d', 'pickup')]['d_soc']:.1f}~{E6[('terrain_2p5d', 'delivery')]['d_soc']:.1f}%p", {"color": ORANGE})],
+        [("○ 시간가변 바람·leg별 질량은 1회 비행의 경로 형상에는 영향 작음(≤0.3%p) → ", {}),
+         ("출발시각 선택(E2)·재계획(E5)·SOC 예측 정확도", {"color": TITLE}), ("에서 효과", {})]], size=13)
+
     # 16. 결론 ---------------------------------------------------------------
     s = D.content("결론 및 추후 개발할 내용")
     textbox(s, 0.8, 1.1, 7.4, 3.1, [
@@ -517,11 +562,13 @@ def build(template, out):
           f"{E0['test']['R2']:.2f}, MAPE {E0['test']['MAPE']:.1f}%", {})],
         [(" ○ WE-LT*: 강풍 배송 SOC ", {}), (f"{dA['soc_used']:.1f} → {dD['soc_used']:.1f}%p", {"color": ORANGE}),
          (", 회수 ", {}), (f"{pA['soc_used']:.1f} → {pD['soc_used']:.1f}%p", {"color": ORANGE})],
-        [(" ○ 시간가변: 출발시각별 경로, 호버링/우회 판단, 비행 중 재계획", {})]], size=14,
-        space_after=10)
-    textbox(s, 0.8, 3.6, 7.4, 2.6, [
+        [(" ○ 시간가변: 출발시각별 경로, 호버링/우회 판단, 비행 중 재계획", {})],
+        [(" ○ 최신 연구 대비: 속도 최적화·에너지 지름길·고도 선택이 핵심 기여", {})]], size=14,
+        space_after=8)
+    textbox(s, 0.8, 3.95, 7.4, 2.6, [
         [("□ 향후 계획", {"size": 18, "color": INK})],
         [(" ○ 기상청 LDAPS(1.5 km)·윈드프로파일러 연동, 도심 CFD 바람장", {})],
+        [(" ○ WA-LPA*[5]식 증분 재계획 결합으로 재계획 시간 단축", {})],
         [(" ○ 보유 기체 비행 로그로 계수 재보정, 계획 vs 실측 SOC 비교", {})],
         [(" ○ 배터리 전압·온도 모델, 돌풍 불확실성(강건) 계획", {})],
         [(" ○ 다중 배송지(VRP) 결합, UTM 비행승인·관제권 반영", {})]], size=14,
@@ -530,9 +577,33 @@ def build(template, out):
     textbox(s, 8.4, 4.35, 4.3, 0.35, [[("3D 경로 (지형·건물 위)", {"size": 12, "color": GRAY})]], align=PP_ALIGN.CENTER)
     sp = box(s, 8.4, 4.8, 4.3, 1.35, fill=LIGHT, shadow=False)
     box_text(sp, [[("코드·재현", {"color": TITLE, "size": 14})],
-                  [("src/dpo: 데이터·에너지·바람장·탐색기\nscripts/run_experiments.py → make_figures.py\ntests/: 단위 테스트 7종",
+                  [("src/dpo: 데이터·에너지·바람장·탐색기\nscripts/run_experiments.py → make_figures.py\ntests/: 단위 테스트 8종\ndocs/algorithm_comparison.md: 정식화 비교",
                     {"size": 11, "color": INK})]], anchor=MSO_ANCHOR.TOP)
     notes(s, "실제 운용 시 판교 일대는 서울공항 관제권으로 비행승인 필요. 비행금지구역 원은 예시(가상).")
+
+    # 17. 참고문헌 -----------------------------------------------------------
+    s = D.content("참고문헌")
+    refs = [
+        "[1] A. Nash, S. Koenig, C. Tovey, \"Lazy Theta*: Any-Angle Path Planning and Path Length Analysis in 3D,\" Proc. AAAI, 2010.",
+        "[2] M. Phillips, M. Likhachev, \"SIPP: Safe Interval Path Planning for Dynamic Environments,\" Proc. IEEE ICRA, 2011.",
+        "[3] Y. Zeng, J. Xu, R. Zhang, \"Energy Minimization for Wireless Communication With Rotary-Wing UAV,\" IEEE Trans. "
+        "Wireless Commun., 2019. DOI: 10.1109/TWC.2019.2902559",
+        "[4] F. Betti Sorbelli, F. Corò, S. K. Das, C. M. Pinotti, \"Energy-Constrained Delivery of Goods With Drones Under "
+        "Varying Wind Conditions,\" IEEE Trans. Intell. Transp. Syst., 22(9), 6048–6060, 2021. DOI: 10.1109/TITS.2020.3044420",
+        "[5] F. Lian, B. Li, Q. Yang, H. Zhu, D. Du, \"WA-LPA*: An Energy-Aware Path-Planning Algorithm for UAVs in Dynamic "
+        "Wind Environments,\" Drones, 9(12), 850, 2025. DOI: 10.3390/drones9120850",
+        "[6] F. Lian, Q. Yang, B. Li, P. Wang, H. Luo, D. Du, \"Optimal Path Planning of Unmanned Aerial Vehicle with Wind "
+        "Field,\" Proc. 28th IEEE ITSC, pp. 4195–4200, 2025.",
+        "[7] R. Gu, Y. Zhao, X. Ren, \"Integrating wind field analysis in UAV path planning: Enhancing safety and energy "
+        "efficiency for urban logistics,\" Chinese J. Aeronautics, 39(1), 103605, 2026. DOI: 10.1016/j.cja.2025.103605",
+        "[8] T. A. Rodrigues et al., \"In-flight positional and energy use data set of a DJI Matrice 100 quadcopter for small "
+        "package delivery,\" Scientific Data, 8, 155, 2021. DOI: 10.1038/s41597-021-00930-x",
+        "[9] J. G. Leishman, Principles of Helicopter Aerodynamics, 2nd ed., Cambridge University Press, 2006.",
+        "[10] S. Koenig, M. Likhachev, D. Furcy, \"Lifelong Planning A*,\" Artificial Intelligence, 155, 2004.",
+        "데이터: Copernicus GLO-30 DSM (ESA/AWS Open Data) · Overture Maps buildings 2026-10-21 (ODbL) · "
+        "NOAA GFS 0.25° (AWS Open Data)",
+    ]
+    textbox(s, 0.6, 1.1, 12.1, 5.8, [[(r, {"size": 12, "bold": False, "color": INK})] for r in refs], space_after=7)
 
     normalize_partnames(D.prs)
     D.prs.save(out)

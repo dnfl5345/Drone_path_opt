@@ -443,12 +443,85 @@ def fig_3d(g, fc):
     plt.close(fig)
 
 
+
+# ================================================================== F11 가정 축소 실험
+def fig_ablation():
+    E6 = L("E6")
+    rows = E6["rows"]
+    keys = []
+    for r in rows:
+        if r["key"] not in keys:
+            keys.append(r["key"])
+    fig, ax = plt.subplots(figsize=(13, 5.4))
+    y = np.arange(len(keys))[::-1]
+    for n, (kind, col) in enumerate((("delivery", "#1B6CA8"), ("pickup", "#E07B39"))):
+        for yi, k in zip(y, keys):
+            r = next(q for q in rows if q["key"] == k and q["kind"] == kind)
+            yy = yi + (0.2 if n == 0 else -0.2)
+            if r["soc_used"] is None:
+                ax.text(0.3, yy, "계획 불가 (역풍 > 고정 대기속도)", va="center", fontsize=10, color=col)
+                continue
+            d = r["d_soc"]
+            ax.barh(yy, d, 0.38, color=col, alpha=0.9 if r["feasible"] else 0.45,
+                    hatch=None if r["feasible"] else "//", edgecolor="white",
+                    label=("배송" if n == 0 else "회수") if k == keys[0] else None)
+            ax.text(d + 0.15 if d >= 0 else d - 0.15, yy,
+                    f"{r['soc_used']:.1f}%p ({d:+.1f})" + ("" if r["feasible"] else " 예비 미달"),
+                    va="center", ha="left" if d >= 0 else "right", fontsize=10, color=INK)
+    first = {k: next(q for q in rows if q["key"] == k) for k in keys}
+    ax.set_yticks(y)
+    ax.set_yticklabels([first[k]["label"] + "\n" + first[k]["ref"] for k in keys], fontsize=10)
+    ax.axvline(0, color=INK, lw=1)
+    ax.set_xlabel("제안 WE-LT* 대비 왕복 SOC 소모 증가 [%p]  (빗금: 예비 SOC 20% 미달)")
+    ax.set_title("가정 축소 실험: 비교 축을 하나씩 단순화하면 SOC가 얼마나 더 드는가 (15:00, 0.5 kg, 실제 바람)",
+                 fontsize=13)
+    ax.legend(frameon=False, loc="lower right")
+    ds = [q["d_soc"] for q in rows if q["d_soc"] is not None]
+    ax.set_xlim(min(ds + [0]) - 1.5, max(ds + [1]) + 7)
+    fig.tight_layout()
+    fig.savefig(C.FIG / "F11_ablation.png")
+    plt.close(fig)
+
+
+# ================================================================== F12 정식화(수식) 이미지
+def fig_formulation():
+    fig = plt.figure(figsize=(13, 5.6))
+
+    def T(x, y, s, **k):
+        fig.text(x, y, s, **{"fontsize": 15, "color": INK, **k})
+
+    H = dict(fontsize=14, weight="bold", color="#376092")
+    T(0.0, 0.94, "(P) 에너지 최적 경로 = 예상 SOC 감소량 최소화", **H)
+    T(0.02, 0.81, r"$\min_{\pi,\ V_{g,i},\ \tau_i}\ \Delta SOC=\frac{1+\epsilon_R}{E_b}\left[\sum_{\ell}\sum_{i\in\ell}"
+                  r"P\left(V_{a,i},\,V_{g,i}s_i,\,m_\ell,\,\rho(z_i)\right)\frac{d_i}{V_{g,i}\sqrt{1+s_i^2}}"
+                  r"+\sum_i P_h\,\tau_i+E_{TO}+E_{LD}\right]\times 100$", fontsize=17)
+    T(0.02, 0.67, r"s.t.  $V_{a,i}=\Vert V_{g,i}\hat{e}_i-\mathbf{w}(\mathbf{x}_i,t_i)\Vert\leq V_{a,\max}$,   "
+                  r"$t_{i+1}=t_i+\tau_i+\frac{d_i}{V_{g,i}\sqrt{1+s_i^2}}$,   "
+                  r"$\mathbf{x}(t)\in\mathcal{F},\ \mathbf{x}(t)\notin\mathcal{O}_k\ \forall t\in[a_k,b_k]$,   "
+                  r"$100-\Delta SOC\geq 20$", fontsize=14)
+    T(0.0, 0.53, "(1) 구간 속도 = 탐색 내부의 최적화 (간선 비용 정의)", **H)
+    T(0.02, 0.43, r"$e^\star(\hat{e},\mathbf{w},m)=\min_{V_g\in\mathcal{V}}\ \frac{P(\Vert V_g\hat{e}-\mathbf{w}\Vert,"
+                  r"\ V_g s,\ m)}{V_g\sqrt{1+s^2}}\ \leq\ e_{fix}\quad"
+                  r"(fixed\ V_a:\ V_g=w_\parallel+\sqrt{\bar V_a^2-w_\perp^2})$", fontsize=15)
+    T(0.0, 0.31, "(2) 에너지 비교형 지름길 (바람장에서는 삼각부등식이 성립하지 않음)", **H)
+    T(0.02, 0.22, r"$c_E(p,v)\ \nleq\ c_E(p,u)+c_E(u,v)\ \ \Rightarrow\ \ "
+                  r"par(v)\leftarrow\arg\min\{\,g(u)+c_E(u,v,t_u),\ g(p)+c_E(p,v,t_p)\,\}$", fontsize=15)
+    T(0.0, 0.10, "(3) 호버링 vs 우회 (대기 행동)                                (4) 배송/회수 질량 (leg별)", **H)
+    T(0.02, 0.01, r"hover $\Leftrightarrow P_h(m,\mathbf{w})\,\tau+E(\pi_{direct})<E(\pi_{detour})$", fontsize=15)
+    T(0.50, 0.01, r"$E_{pickup}-E_{delivery}\approx\frac{\partial P}{\partial m}\,\Delta m\,(T_{back}-T_{out})$",
+      fontsize=15)
+    fig.savefig(C.FIG / "F12_formulation.png")
+    plt.close(fig)
+
+
 if __name__ == "__main__":
     g, fc, tr = sites()
-    todo = sys.argv[1:] or ["site", "wind", "energy", "paths", "soc", "departure", "hover", "rolling", "payload", "3d"]
+    todo = sys.argv[1:] or ["site", "wind", "energy", "paths", "soc", "departure", "hover", "rolling", "payload", "3d",
+                            "ablation", "formulation"]
     fns = dict(site=lambda: fig_site(g, fc), wind=lambda: fig_wind_profile(g, fc, tr), energy=fig_energy,
                paths=lambda: fig_paths(g, fc), soc=lambda: fig_soc(fc), departure=lambda: fig_departure(g, fc),
                hover=lambda: fig_hover(g, fc), rolling=lambda: fig_rolling(g, fc), payload=fig_payload,
+               ablation=fig_ablation, formulation=fig_formulation,
                **{"3d": lambda: fig_3d(g, fc)})
     for t in todo:
         if t == "gif":

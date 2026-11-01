@@ -278,8 +278,61 @@ def E5():
     print(load_summary()["E5_rolling"])
 
 
+# ------------------------------------------------------------------ E6 가정 축소 실험 (최신 연구 가정 재현)
+ABLATIONS = [
+    # key, 라벨, 비교 축 (문헌별 해당 축 처리 방식은 docs/algorithm_comparison.md §3.2 참조)
+    ("full", "제안 WE-LT* (전체)", "-"),
+    ("static_wind", "시간불변 바람 (출발시각 스냅샷)", "시간가변성 축"),
+    ("grid", "격자 탐색 (any-angle 없음)", "탐색공간 축 ([5][6] A*/LPA* 계열)"),
+    ("fixed_va14", "고정 대기속도 14 m/s (속도 최적화 없음)", "속도 결정 축"),
+    ("fixed_va10", "고정 대기속도 10 m/s", "속도 결정 축"),
+    ("fixed_mass", "탑재중량 변화 무시 (왕복 같은 질량으로 계획)", "질량 축"),
+    ("terrain_2p5d", "고도 선택 없음 (지형추종 2.5D)", "고도 축"),
+    ("combined", "결합: 시간불변 바람 + 격자 + 중량 고정", "3개 축 동시 축소"),
+]
+
+
+def E6():
+    import dataclasses
+    g, fc, tr = sites()
+    dr = drone_calibrated()
+    rows = []
+    for key, label, ref in ABLATIONS:
+        for kind in ("delivery", "pickup"):
+            ms = Mission(HUB, DST, PAYLOAD, kind, T_MAIN)
+            site, drone, kw = fc, dr, {}
+            if key in ("static_wind", "combined"):
+                site = fc.frozen_wind(T_MAIN)
+            if key in ("grid", "combined"):
+                kw["any_angle"] = False
+            if key.startswith("fixed_va"):
+                drone = dataclasses.replace(dr, va_fix=float(key[-2:]))
+            if key in ("fixed_mass", "combined"):
+                kw["plan_mass"] = dr.m_empty + PAYLOAD
+            if key == "terrain_2p5d":
+                site = fc.terrain_following(2)
+            P = Planner(site, drone)
+            t = time.time()
+            rt = run_round_trip(P, ms, site_truth=tr, **kw)
+            if rt is None:
+                rows.append(dict(key=key, label=label, ref=ref, kind=kind, soc_used=None, feasible=False,
+                                 note="계획 실패(바람이 대기속도 한계 초과 구간 존재)"))
+            else:
+                rows.append(dict(key=key, label=label, ref=ref, kind=kind, soc_used=rt["soc_used"],
+                                 soc_out=rt["soc_out"], soc_back=rt["soc_back"], L=rt["L"],
+                                 feasible=bool(rt["feasible"]), t_total=rt["t_total"],
+                                 wp=len(rt["out"]["plan"]["path"]) + len(rt["back"]["plan"]["path"]),
+                                 cpu=rt["out"]["plan"]["cpu_s"] + rt["back"]["plan"]["cpu_s"], note=""))
+            print(rows[-1], f"{time.time() - t:.0f}s")
+    base = {r["kind"]: r["soc_used"] for r in rows if r["key"] == "full"}
+    for r in rows:
+        r["d_soc"] = None if r["soc_used"] is None else r["soc_used"] - base[r["kind"]]
+    save("E6", dict(rows=rows))
+    put_summary("E6_ablation", rows)
+
+
 if __name__ == "__main__":
-    todo = sys.argv[1:] or ["E0", "E1", "E2", "E3", "E4", "E5"]
+    todo = sys.argv[1:] or ["E0", "E1", "E2", "E3", "E4", "E5", "E6"]
     for name in todo:
         t = time.time()
         print(f"===== {name}")

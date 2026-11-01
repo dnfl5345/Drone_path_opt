@@ -35,10 +35,11 @@ class Mission:
 
 
 def _leg(planner, site_plan, site_truth, drone, a, b, t0, mass, mode, speed_policy, vconst, U=None, V=None, tax=None,
-         **pkw):
+         plan_mass=None, **pkw):
     st = site_plan.lowest_free_k(*a)
     gl = site_plan.lowest_free_k(*b)
-    r = planner.plan(st, gl, t_start=t0, mass=mass, mode=mode, vconst=vconst, **pkw)
+    r = planner.plan(st, gl, t_start=t0, mass=mass if plan_mass is None else plan_mass, mode=mode, vconst=vconst,
+                     **pkw)
     if r is None:
         return None
     sim = simulate(site_truth, drone, r["path"], r["wait_before"], t0, mass, speed_policy, vconst,
@@ -53,19 +54,21 @@ def _leg(planner, site_plan, site_truth, drone, a, b, t0, mass, mode, speed_poli
                 length=path_length(site_plan, r["path"]))
 
 
-def run_round_trip(planner, mission: Mission, mode=1, speed_policy="opt", vconst=10.0, site_truth=None, **pkw):
-    """계획(planner.site, 예보) → 실제(site_truth) 바람에서 평가."""
+def run_round_trip(planner, mission: Mission, mode=1, speed_policy="opt", vconst=10.0, site_truth=None,
+                   plan_mass=None, **pkw):
+    """계획(planner.site, 예보) → 실제(site_truth) 바람에서 평가.
+    plan_mass: 지정 시 갈 때/올 때 모두 이 질량으로 '계획'(중량 변화 무시 가정), 평가는 실제 질량."""
     sp = planner.site
     st = site_truth or sp
     d = planner.drone
     m_out, m_back = mission.masses(d.m_empty)
     out = _leg(planner, sp, st, d, mission.hub, mission.dst, mission.t_dep, m_out, mode, speed_policy, vconst,
-               U=st.U, V=st.V, tax=st.t_axis, **pkw)
+               U=st.U, V=st.V, tax=st.t_axis, plan_mass=plan_mass, **pkw)
     if out is None:
         return None
     t_back = out["t_end"] + mission.ground_time
     back = _leg(planner, sp, st, d, mission.dst, mission.hub, t_back, m_back, mode, speed_policy, vconst,
-                U=st.U, V=st.V, tax=st.t_axis, **pkw)
+                U=st.U, V=st.V, tax=st.t_axis, plan_mass=plan_mass, **pkw)
     if back is None:
         return None
     E = out["e_total"] + back["e_total"]
