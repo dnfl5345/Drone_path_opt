@@ -106,7 +106,7 @@ class App:
                     ground=[float(s.ground.min()), float(s.ground.max())], hub=DEFAULT_HUB, dst=DEFAULT_DST,
                     nfz=NFZ, wind=ws, limits=LIMITS, drone=dict(name=self.drone.name, battery_wh=self.drone.battery_wh,
                                                                 m_empty=self.drone.m_empty),
-                    date="2026-10-27 (GFS 00Z 예보)")
+                    date="2026-10-27 (GFS 00Z 예보)", adsb=ADSB)
 
     def _parse(self, req):
         obs = [DynObstacle.from_dict(o) for o in req.get("obstacles", [])]
@@ -144,6 +144,12 @@ class App:
         eps = float(eps) if eps not in (None, "", 0, "0") else None
         if eps is not None and not (1e-4 <= eps <= 0.5):
             raise ValueError("위험 한도 ε 는 0.0001~0.5")
+        shape = "adsb" if req.get("tube_shape") == "adsb" else "gauss"
+        if shape == "adsb" and eps is not None:
+            if ADSB is None:
+                raise ValueError("실측 ADS-B 오차 모델(results/adsb_error_model.json)이 없습니다")
+            if str(eps) not in ADSB["q"]:
+                raise ValueError("실측 분위수 모양은 ε = " + " / ".join(ADSB["q"]) + " 만 지원")
         d = self.drone
         m0 = d.m_empty
         m_out, m_back = (m0 + payload, m0) if kind == "delivery" else (m0, m0 + payload)
@@ -154,7 +160,7 @@ class App:
             self.planners[wind] = STPlanner(site, d)
         return dict(site=site, wind=wind, d=d, t_dep=(dep_hour - KST) * 3600.0, dep_hour=dep_hour, legs_req=legs_req,
                     E_usable=d.battery_wh * 3600 * (1 - reserve / 100.0), reserve=reserve, max_wait=max_wait,
-                    weight=weight, eps=eps, SP=self.planners[wind])
+                    weight=weight, eps=eps, shape=shape, SP=self.planners[wind])
 
     def _fly_legs(self, cx, legs_req, t, e_used, first=None, reuse=None):
         """legs_req 를 순서대로 계획·시뮬레이션. first=(시작노드, 시작시각, 실행된 앞부분 sim, 이륙에너지, 이륙시간)
@@ -251,6 +257,7 @@ class App:
             t_all = time.time()
             obs, errs = self._parse(req)
             cx = self._ctx(req)
+            apply_shape(obs, cx)
             cx["SP"].set_obstacles(obs, cx["t_dep"], eps=cx["eps"])
             legs = self._fly_legs(cx, cx["legs_req"], cx["t_dep"], 0.0)
             out = self._render(cx, legs, obs, errs, dict(revisions=[dict(t=0.0, obstacles=[o.to_dict() for o in obs])],
@@ -278,6 +285,7 @@ class App:
             obs, errs = self._parse(req)
             for o in obs:                       # 발표 시점에 새로 관측 → 불확실성은 이 시각부터 증가
                 o.t_obs = max(o.t_obs, t_now)
+            apply_shape(obs, cx)
             ta = t_dep + t_now
             legs = ss["legs"]
             # 활성 구간 찾기
@@ -344,6 +352,35 @@ class App:
     def _truth(self, ss):
         from ..st_rolling import ObstacleTimeline
         return ObstacleTimeline(list(ss["revisions"])).truth()
+
+
+def _load_adsb():
+    from .. import config as C
+    f = C.RES / "adsb_error_model.json"
+    if not f.exists():
+        return None
+    d = json.loads(f.read_text())
+    m = d["model_all"]
+    return dict(knots=d["knots"], q=m["q"], n_aircraft=d["n_aircraft"], n_obs=d["n_obs"])
+
+
+ADSB = _load_adsb()
+
+
+def apply_shape(obs, cx):
+    """'실측 ADS-B 분위수' 모양: 이동 장애물마다 팽창 반경 = (관측 시각의 속도) × (속도 정규화 1−ε 분위수 곡선)."""
+    if cx.get("shape") != "adsb" or cx.get("eps") is None:
+        return
+    q = ADSB["q"][str(cx["eps"])]
+    for o in obs:
+        if len(o.path) < 2:
+            continue                                     # 정지 장애물은 σ 입력(가우시안) 사용
+        ts = o.times()
+        k = int(np.clip(np.searchsorted(ts, o.t_obs, side="right") - 1, 0, len(ts) - 2))
+        p0, p1 = o.path[k], o.path[k + 1]
+        V = math.hypot(p1["x"] - p0["x"], p1["y"] - p0["y"]) / max(p1["t"] - p0["t"], 1e-9)
+        o.tube = [[float(t), float(V * r)] for t, r in zip(ADSB["knots"], q)]
+        o.sigma_t = 0.0
 
 
 def _samples(sim, t_dep, e_offset=0.0, drone=None, every=2.0):

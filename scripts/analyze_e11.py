@@ -57,6 +57,16 @@ def main(name="E11"):
                     E_kJ=boot(E / 1000), replans=float(np.mean([r[k]["replans"] for r in rows])),
                     degraded_frac=float(np.mean([r[k].get("degraded", 0) > 0 for r in rows])),
                     stuck_frac=float(np.mean([r[k].get("stuck", 0) > 0 for r in rows])))
+    # 어떤 방법도 피하지 못한 조우(기하적으로 회피 불가) 와 그 밖의 조우
+    unav = np.array([all(r[k]["nmac"] for k in KEYS) for r in rows])
+    out["unavoidable"] = dict(n=int(unav.sum()), frac=float(unav.mean()))
+    for k in KEYS:
+        nm_ = np.array([r[k]["nmac"] for r in rows])[~unav]
+        p_, lo_, hi_ = wilson(int(nm_.sum()), len(nm_))
+        M[k]["avoidable"] = dict(nmac=int(nm_.sum()), n=len(nm_), p=p_, lo=lo_, hi=hi_)
+        ms_ = np.array([r[k]["min_sep"] for r in rows])
+        M[k]["p_sep_lt_50"] = float(np.mean(ms_ < 50))
+        M[k]["min_sep_q10"] = float(np.percentile(ms_, 10))
     out["methods"] = M
     nm = {k: np.array([r[k]["nmac"] for r in rows]) for k in KEYS}
     out["paired"] = {f"{a}_vs_{b}": mcnemar(nm[a], nm[b]) for a, b in
@@ -69,6 +79,7 @@ def main(name="E11"):
     (C.RES / "e11_stats.json").write_text(json.dumps(out, indent=1, ensure_ascii=False))
     for k in KEYS:
         m = M[k]
+        print(f"   avoidable {m['avoidable']['nmac']}/{m['avoidable']['n']} P(<50) {m['p_sep_lt_50']:.2f} sep q10 {m['min_sep_q10']:.0f}")
         print(f"{k:6s} NMAC {m['nmac']:3d}/{m['n']} = {m['p'] * 100:5.1f}% [{m['lo'] * 100:.1f},{m['hi'] * 100:.1f}] "
               f"minsep med {m['min_sep_median']:5.0f} P(<100) {m['p_sep_lt_100']:.2f} E vs N {m['energy_vs_N'][0]:+5.1f}% "
               f"replans {m['replans']:.1f} degraded {m['degraded_frac']:.2f} stuck {m['stuck_frac']:.2f}")

@@ -207,6 +207,9 @@ def run_obstacle_replanning(site_plan, site_truth, drone, a, b, t_dep, mass, tim
             ev["reason"] = ("현재 위치가 위험구간 – 재계획 불가" if cur is None else "허용 범위 내 대안 없음") + \
                 " – 기존 경로 유지"
             events.append(ev); continue
+        if len(r2["path"]) < 2:                     # 이미 목표 노드 – 재계획할 구간 없음
+            ev["reason"] = "목표 노드 도달 – 기존 경로 유지"
+            events.append(ev); continue
         sim2 = simulate(site_truth, drone, r2["path"], r2["wait_before"], t_sw + r2.get("ground_delay", 0.0), mass,
                         U=site_truth.U, V=site_truth.V,
                         tax=site_truth.t_axis)

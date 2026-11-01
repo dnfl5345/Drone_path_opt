@@ -63,6 +63,18 @@ function tubeExtra(o, t) {
   // 기회 제약 튜브의 추가 반경 κ_ε·σ(t) (서버 obstacles.risk_kappa 와 같은 식)
   const e = Number($("eps").value);
   if (!e) return 0;
+  const A = S.site && S.site.adsb;
+  if ($("shape").value === "adsb" && A && o.path.length > 1 && A.q[String(e)]) {
+    // 실측 ADS-B 분위수 곡선 × 장애물 속도 (서버 apply_shape 와 같은 규칙, 관측 시각 이후 τ)
+    const P = o.path, ts = P.map(p => p.t), tob = o.t_obs || 0;
+    let k = 0; while (k < P.length - 2 && ts[k + 1] <= tob) k++;
+    const V = Math.hypot(P[k + 1].x - P[k].x, P[k + 1].y - P[k].y) / Math.max(P[k + 1].t - P[k].t, 1e-9);
+    const kn = A.knots, q = A.q[String(e)], tau = Math.max(t - tob, 0);
+    let r;
+    if (tau >= kn[kn.length - 1]) { const n = kn.length; r = q[n - 1] + (q[n - 1] - q[n - 2]) / (kn[n - 1] - kn[n - 2]) * (tau - kn[n - 1]); }
+    else { let j = 0; while (kn[j + 1] < tau) j++; r = q[j] + (q[j + 1] - q[j]) * (tau - kn[j]) / (kn[j + 1] - kn[j]); }
+    return V * r;
+  }
   const sig = (o.sigma0 || 0) + (o.sigma_v || 0) * Math.max(t - (o.t_obs || 0), 0);
   return Math.sqrt(2 * Math.log(1 / e)) * sig;
 }
@@ -353,7 +365,8 @@ function request() {
   return { obstacles: S.obs, hub: S.hub, dst: S.dst, dep_hour: Number($("dep").value), payload: Number($("payload").value),
            kind: $("kind").value, round_trip: $("round").checked, allow_wait: $("allowwait").checked,
            max_wait: Number($("maxwait").value), wind: $("wind").value, reserve: Number($("reserve").value),
-           weight: Number($("weight").value), eps: $("eps").value === "" ? null : Number($("eps").value) };
+           weight: Number($("weight").value), eps: $("eps").value === "" ? null : Number($("eps").value),
+           tube_shape: $("shape").value };
 }
 function showErrors(errs) { $("errors").innerHTML = (errs || []).map(e => `• ${e}`).join("<br>"); }
 async function doValidate() {
@@ -424,6 +437,7 @@ async function init() {
   $("clear").onclick = () => { S.obs = []; S.sel = -1; S.res = null; refreshList(); draw(); };
   $("example").onclick = async () => { const j = await api("/api/example"); S.obs = j.obstacles; S.sel = 0; S.res = null; refreshList(); draw(); };
   $("eps").onchange = () => draw();
+  $("shape").onchange = () => draw();
   $("export").onclick = () => { const blob = new Blob([JSON.stringify({ meta: request(), obstacles: S.obs }, null, 1)], { type: "application/json" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "scenario.json"; a.click(); };
   $("import").onchange = async e => { const f = e.target.files[0]; if (!f) return; const j = JSON.parse(await f.text());
