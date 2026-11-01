@@ -380,8 +380,104 @@ def E7():
     print({k: v for k, v in res.items() if k != "rows"})
 
 
+# ------------------------------------------------------------------ E8 3D 시공간: 동적 장애물
+def e8_scenario(fc, dr):
+    """기준(장애물 무시) 경로를 가로지르도록 시각을 맞춘 예시 시나리오 (scenarios/e8_dynamic.json)."""
+    from dpo.st_planner import STPlanner
+    from dpo.obstacles import DynObstacle
+    m = dr.m_empty + PAYLOAD
+    SP = STPlanner(fc, dr)
+    st, gl = fc.lowest_free_k(*HUB), fc.lowest_free_k(*DST)
+    r0 = SP.plan(st, gl, t_start=T_MAIN, mass=m, ignore_obstacles=True)
+    sim0 = simulate(fc, dr, r0["path"], r0["wait_before"], T_MAIN, m)
+    at = lambda t: [float(v[int(np.searchsorted(sim0["t"] - T_MAIN, t))]) for v in (sim0["x"], sim0["y"], sim0["z"])]
+    x1, y1, z1 = at(35.0); x2, y2, _ = at(70.0); x3, y3, _ = at(105.0)
+    obs = [
+        DynObstacle(name="타 드론 (같은 고도 횡단)", kind="cylinder", radius=30, z_min=z1 - 40, z_max=z1 + 40, margin=15,
+                    path=[dict(x=x1 - 420, y=y1 - 420, t=0.0), dict(x=x1, y=y1, t=35.0), dict(x=x1 + 420, y=y1 + 420, t=70.0)]),
+        DynObstacle(name="응급 헬기 (전 고도)", kind="cylinder", radius=150, z_min=0, z_max=1000, margin=30,
+                    path=[dict(x=x2 + 1700, y=y2 - 1700, t=10.0), dict(x=x2, y=y2, t=70.0), dict(x=x2 - 1700, y=y2 + 1700, t=130.0)]),
+        DynObstacle(name="행사 임시 비행제한 (정지)", kind="box", half_x=250, half_y=120, z_min=0, z_max=1000, margin=10,
+                    path=[dict(x=x3, y=y3, t=0.0)], t_start=0.0, t_end=150.0),
+    ]
+    return obs
+
+
+def E8():
+    import dataclasses
+    from dpo.st_planner import STPlanner, check_path_conflicts
+    from dpo.obstacles import validate, save_scenario
+    from dpo.layered import fit_linear_profile, linear_wind_site
+    g, fc, tr = sites()
+    dr = drone_calibrated()
+    m = dr.m_empty + PAYLOAD
+    obs = e8_scenario(fc, dr)
+    obs, errs = validate(obs, fc)
+    save_scenario(C.ROOT / "scenarios" / "e8_dynamic.json", obs,
+                  meta=dict(t_dep_kst=T_MAIN / 3600 + KST, payload=PAYLOAD, note="E8 예시: 기준 경로를 가로지르도록 시각 설정"))
+    st, gl = fc.lowest_free_k(*HUB), fc.lowest_free_k(*DST)
+    usable = (dr.battery_wh * 3600) * (1 - 0.20)       # 예비 20% 제외 사용 가능 에너지
+    f0 = dict(np.load(C.RAW / "gfs_20261027_00z.npz", allow_pickle=True))
+    prof = fit_linear_profile(f0, 0.5 * (C.LAT_MIN + C.LAT_MAX), 0.5 * (C.LON_MIN + C.LON_MAX), float(g["ground"].mean()))
+    sl = linear_wind_site(fc, prof)
+    cases = {
+        "static_WELT": dict(site=fc, kw=dict(ignore_obstacles=True), label="WE-LT* (동적 장애물 무시)"),
+        "st_nowait": dict(site=fc, kw=dict(max_wait=0.0), label="시공간 (대기 없이 우회만)"),
+        "st_full": dict(site=fc, kw=dict(), label="시공간 WE-SIPP-Theta* (대기+우회)"),
+        "st_linear": dict(site=sl, kw=dict(), label="시공간 (선형 바람, 빠름)"),
+    }
+    rows, store = [], {}
+    for key, cfg in cases.items():
+        SP = STPlanner(cfg["site"], dr)
+        SP.set_obstacles(obs, T_MAIN)
+        t = time.time()
+        r = SP.plan(st, gl, t_start=T_MAIN, mass=m, budget=usable, **cfg["kw"])
+        if r is None:
+            rows.append(dict(key=key, label=cfg["label"], feasible=False)); continue
+        sim = simulate(tr, dr, r["path"], r["wait_before"], T_MAIN, m, U=tr.U, V=tr.V, tax=tr.t_axis)
+        cf = check_path_conflicts(fc, sim, obs, T_MAIN)
+        rows.append(dict(key=key, label=cfg["label"], feasible=True, E_kJ=sim["e"][-1] / 1000,
+                         soc_leg=soc_drop(sim["e"][-1], dr), T=sim["t"][-1] - T_MAIN, wait=float(r["wait_before"].sum()),
+                         L=path_length(fc, r["path"]), wp=len(r["path"]), cpu=r["cpu_s"], n_exp=r["n_expanded"],
+                         min_clear=cf["min_clearance"], n_conf=cf["n_collision_samples"],
+                         conflicts=sorted({c[0] for c in cf["collisions"]}), table_s=SP.table_time,
+                         iv_cells=r["n_iv_cells"]))
+        store[key] = dict(path=r["path"], wait=r["wait_before"], sim=sim)
+        print(rows[-1], f"{time.time() - t:.1f}s")
+    # 시나리오 B: 지도 전체 폭을 가로막는 띠형 임시 제한 (우회 불가 → 대기만 가능)
+    from dpo.obstacles import DynObstacle
+    sim_b = store["static_WELT"]["sim"]
+    yb = float(sim_b["y"][int(np.searchsorted(sim_b["t"] - T_MAIN, 60.0))])
+    Wm = fc.nx * fc.dx
+    band = [DynObstacle(name=f"전면 통제 띠-{q + 1} (0~80 s)", kind="box", half_x=Wm / 6 + 30, half_y=60, z_min=0,
+                        z_max=1000, margin=10, path=[dict(x=Wm * (2 * q + 1) / 6, y=yb, t=0.0)], t_start=0.0, t_end=80.0)
+            for q in range(3)]                       # 박스 반폭 상한(1500 m) 때문에 3개로 지도 전체 폭을 덮음
+    band, berr = validate(band, fc)
+    assert not berr, berr
+    for key, kw, label in (("B_nowait", dict(max_wait=0.0), "B: 대기 금지"), ("B_full", dict(), "B: 시공간 (대기 허용)")):
+        SP = STPlanner(fc, dr); SP.set_obstacles(band, T_MAIN)
+        r = SP.plan(st, gl, t_start=T_MAIN, mass=m, budget=usable, **kw)
+        if r is None:
+            rows.append(dict(key=key, label=label, feasible=False)); print(key, "infeasible"); continue
+        sim = simulate(tr, dr, r["path"], r["wait_before"], T_MAIN, m, U=tr.U, V=tr.V, tax=tr.t_axis)
+        cf = check_path_conflicts(fc, sim, band, T_MAIN)
+        rows.append(dict(key=key, label=label, feasible=True, E_kJ=sim["e"][-1] / 1000, soc_leg=soc_drop(sim["e"][-1], dr),
+                         T=sim["t"][-1] - T_MAIN, wait=float(r["wait_before"].sum()), L=path_length(fc, r["path"]),
+                         wp=len(r["path"]), cpu=r["cpu_s"], min_clear=cf["min_clearance"],
+                         n_conf=cf["n_collision_samples"], conflicts=[]))
+        store[key] = dict(path=r["path"], wait=r["wait_before"], sim=sim, band=[o.to_dict() for o in band])
+        print(rows[-1])
+    # 허용 범위 검사 예: 배터리 예산을 줄이면 '계획 불가' 로 판정
+    SP = STPlanner(fc, dr); SP.set_obstacles(obs, T_MAIN)
+    tight = SP.plan(st, gl, t_start=T_MAIN, mass=m, budget=30000.0)
+    res = dict(rows=rows, validation_errors=errs, tight_budget_kJ=30.0, tight_feasible=tight is not None,
+               obstacles=[o.to_dict() for o in obs])
+    save("E8", dict(**res, store=store))
+    put_summary("E8_dynamic", res)
+
+
 if __name__ == "__main__":
-    todo = sys.argv[1:] or ["E0", "E1", "E2", "E3", "E4", "E5", "E6", "E7"]
+    todo = sys.argv[1:] or ["E0", "E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8"]
     for name in todo:
         t = time.time()
         print(f"===== {name}")

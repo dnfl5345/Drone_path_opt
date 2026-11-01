@@ -578,6 +578,48 @@ def build(template, out):
     notes(s, "상세: docs/extension_8way_linear_wind.md, src/dpo/layered.py, 실험 E7. 수직 이동만 허용하면 제자리 상승(약 180 J/m) "
              "때문에 +3.6~5.1%p 손해, 3D 지름길로 해소. 남은 1.4%p는 지형·도시 바람 효과 미반영 때문.")
 
+    # 15-3. 결과 ⑨ 3D 시공간 (동적 장애물) --------------------------------------
+    s = D.content("결과 ⑨ 3D 시공간 확장 – 동적 장애물 회피")
+    picture(s, FIG / "F14_dynamic_obstacles.png", 0.5, 1.0, 8.3, 5.1)
+    E8 = {r["key"]: r for r in S["E8_dynamic"]["rows"]}
+    sp = box(s, 9.0, 1.05, 3.75, 5.85, fill=LIGHT, shadow=False)
+    box_text(sp, [[("상태 = (노드, 안전구간)", {"color": TITLE, "size": 14})],
+                  [("장애물 이동 p(t)=p_a+v(t−t_a) → 셀별 위험 시간구간을 2차 부등식으로 해석 계산 → 여집합 = 안전구간 (SIPP)",
+                    {"size": 11})],
+                  [("전이: 즉시 출발 / 막히면 대기 / 이웃의 다음 안전구간 진입, 지름길은 시각과 함께 충돌 검사", {"size": 11})],
+                  [("", {"size": 5})],
+                  [("허용 범위만 탐색", {"color": TITLE, "size": 14})],
+                  [("공역 30~150 m AGL · 대기속도/상승률 한계 · 대기 ≤ 최대 · 배터리 g+h ≤ 예산 → 없으면 '계획 불가'", {"size": 11})],
+                  [("", {"size": 5})],
+                  [("결과 (장애물 3종)", {"color": TITLE, "size": 14})],
+                  [(f"· 무시: 3종 모두 충돌 (최대 {-E8['static_WELT']['min_clear']:.0f} m 침범)", {"size": 11, "color": RGBColor(0xD7, 0x26, 0x3D)})],
+                  [(f"· 시공간: 최소 이격 {E8['st_full']['min_clear']:.0f} m, 에너지 +{(E8['st_full']['E_kJ'] / E8['static_WELT']['E_kJ'] - 1) * 100:.1f}%, "
+                    f"계산 {E8['st_full']['cpu']:.1f} s", {"size": 11, "color": ORANGE})],
+                  [("· 20~30 s 지연은 호버링(≈400 W)보다 지연 비행(≈310 W)이 유리 → 대기 미선택", {"size": 11})]],
+             anchor=MSO_ANCHOR.TOP)
+    notes(s, "상세: docs/spatiotemporal_dynamic_obstacles.md. 배터리 예산 30 kJ로 줄이면 계획 불가 판정. "
+             "참고: Any-angle SIPP (Yakovlev & Andreychuk, ICAPS 2017).")
+
+    # 15-4. 장애물 편집 플랫폼 ----------------------------------------------------
+    s = D.content("장애물 편집·경로계획 플랫폼 (로컬 웹)")
+    picture(s, FIG / "platform_screenshot.png", 0.5, 1.0, 8.4, 5.9)
+    sp = box(s, 9.1, 1.05, 3.65, 5.85, fill=LIGHT, shadow=False)
+    box_text(sp, [[("실행", {"color": TITLE, "size": 14})],
+                  [("python -m dpo.webapp\n→ http://localhost:8765", {"size": 11})],
+                  [("", {"size": 5})],
+                  [("장애물 지정", {"color": TITLE, "size": 14})],
+                  [("· 원기둥/구/박스를 지도 클릭으로 배치\n· 반경·반폭·고도범위·안전이격·존재시간 입력\n"
+                    "· 경로점 클릭 추가 → 등속 이동, 드래그로 이동\n· JSON 저장/불러오기, 예시 시나리오", {"size": 11})],
+                  [("", {"size": 5})],
+                  [("허용 범위 검증", {"color": TITLE, "size": 14})],
+                  [("지도 밖·반경 5~1500 m 밖·속도 > 80 m/s·시각 역순 등은 오류 표시 후 계획에서 제외", {"size": 11})],
+                  [("", {"size": 5})],
+                  [("결과 확인", {"color": TITLE, "size": 14})],
+                  [("시공간 경로·비교 경로(충돌 ×)·대기 지점, 구간별 에너지/SOC/최소이격, 시간 슬라이더 재생, 고도·SOC 차트",
+                    {"size": 11})],
+                  [("왕복 계획 약 8~9 s (균형 모드)", {"size": 11, "color": ORANGE})]], anchor=MSO_ANCHOR.TOP)
+    notes(s, "표준 라이브러리 HTTP 서버 + HTML/JS 캔버스. Playwright 로 장애물 추가·수정·검증·재계획 자동 시험 완료.")
+
     # 16. 결론 ---------------------------------------------------------------
     s = D.content("결론 및 추후 개발할 내용")
     textbox(s, 0.8, 1.1, 7.4, 3.1, [
@@ -588,7 +630,8 @@ def build(template, out):
         [(" ○ WE-LT*: 강풍 배송 SOC ", {}), (f"{dA['soc_used']:.1f} → {dD['soc_used']:.1f}%p", {"color": ORANGE}),
          (", 회수 ", {}), (f"{pA['soc_used']:.1f} → {pD['soc_used']:.1f}%p", {"color": ORANGE})],
         [(" ○ 시간가변: 출발시각별 경로, 호버링/우회 판단, 비행 중 재계획", {})],
-        [(" ○ 최신 연구 대비: 속도 최적화·에너지 지름길·고도 선택이 핵심 기여", {})]], size=14,
+        [(" ○ 최신 연구 대비: 속도 최적화·에너지 지름길·고도 선택이 핵심 기여", {})],
+        [(" ○ 3D 시공간 확장: 동적 장애물 회피 + 장애물 편집 플랫폼", {})]], size=14,
         space_after=8)
     textbox(s, 0.8, 3.95, 7.4, 2.6, [
         [("□ 향후 계획", {"size": 18, "color": INK})],
@@ -602,7 +645,7 @@ def build(template, out):
     textbox(s, 8.4, 4.35, 4.3, 0.35, [[("3D 경로 (지형·건물 위)", {"size": 12, "color": GRAY})]], align=PP_ALIGN.CENTER)
     sp = box(s, 8.4, 4.8, 4.3, 1.35, fill=LIGHT, shadow=False)
     box_text(sp, [[("코드·재현", {"color": TITLE, "size": 14})],
-                  [("src/dpo: 데이터·에너지·바람장·탐색기\nscripts/run_experiments.py → make_figures.py\ntests/: 단위 테스트 9종\ndocs/: 정식화 비교 · 8방향 확장안",
+                  [("src/dpo: 데이터·에너지·바람장·탐색기\nscripts/run_experiments.py → make_figures.py\ntests/: 단위 테스트 11종 · 플랫폼: python -m dpo.webapp\ndocs/: 정식화 비교 · 8방향 확장 · 시공간 확장",
                     {"size": 11, "color": INK})]], anchor=MSO_ANCHOR.TOP)
     notes(s, "실제 운용 시 판교 일대는 서울공항 관제권으로 비행승인 필요. 비행금지구역 원은 예시(가상).")
 

@@ -115,3 +115,49 @@ def test_layered_lut_planner_avoids_wall_and_3d_shortcut_helps():
         res[aa] = (g[gid], len(p))
     assert res[True][1] < res[False][1]
     assert res[True][0] <= res[False][0] * 1.02
+
+
+class _ToySite:
+    """시공간 테스트용 최소 site."""
+    def __init__(self, nz=1, ny=30, nx=40):
+        self.free = np.ones((nz, ny, nx), bool)
+        self.nz, self.ny, self.nx = nz, ny, nx
+        self.dx, self.dz = 25.0, 20.0
+        self.z = 100.0 + 20.0 * np.arange(nz)
+        self.U = np.zeros((2, nz, ny, nx), np.float32); self.V = np.zeros_like(self.U)
+        self.t_axis = np.array([0.0, 3600.0])
+        self.tnfz_id = -np.ones((ny, nx), np.int32); self.tnfz_win = np.zeros((0, 2))
+        self.agl = np.full((nz, ny, nx), 80.0)
+
+    def rho_layers(self):
+        return np.full(self.nz, 1.225)
+
+
+def test_interval_table_moving_cylinder_times():
+    from dpo.obstacles import DynObstacle, build_interval_table
+    s = _ToySite()
+    # x=0→1000 m 를 0→100 s 에 이동 (10 m/s), y=375 m 고정, 반경 50 m
+    o = DynObstacle(kind="cylinder", radius=50, z_min=0, z_max=500, margin=0,
+                    path=[dict(x=0, y=375, t=0), dict(x=1000, y=375, t=100)])
+    T = build_interval_table(s, [o], t_offset=0.0)
+    n = (0 * s.ny + 15) * s.nx + 20            # 셀 중심 (512.5, 387.5)
+    q = T["off"][n]
+    assert q >= 0 and T["cnt"][n] == 1
+    lo, hi = T["lo"][q], T["hi"][q]
+    # |512.5 - 10t| ≤ 50 + 0.71*25 (보수적) → t ≈ 44.5 ~ 58.0
+    assert 43 < lo < 47 and 56 < hi < 60
+
+
+def test_st_planner_waits_for_crossing_wall():
+    from dpo.obstacles import DynObstacle
+    from dpo.st_planner import STPlanner
+    s = _ToySite()
+    wall = DynObstacle(kind="box", half_x=40, half_y=1000, z_min=0, z_max=500, margin=0,
+                       path=[dict(x=500, y=375, t=0)], t_start=0, t_end=120)   # 지도 전체 높이를 막는 벽 (0~120 s)
+    sp = STPlanner(s, DR)
+    sp.set_obstacles([wall], t_offset=0.0)
+    r = sp.plan((0, 15, 2), (0, 15, 37), t_start=0.0, mass=3.1, max_wait=300.0, heading_heuristic=False)
+    assert r is not None
+    assert r["t_arrive"] > 120            # 벽이 사라진 뒤 통과
+    r2 = sp.plan((0, 15, 2), (0, 15, 37), t_start=0.0, mass=3.1, max_wait=0.0, heading_heuristic=False)
+    assert r2 is None                     # 대기 금지 + 우회 불가 → 허용 범위 내 해 없음

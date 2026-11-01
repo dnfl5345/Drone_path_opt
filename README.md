@@ -6,6 +6,15 @@
 - 회의 보고 자료: [`docs/drone_soc_path_planning_dev.pptx`](docs/drone_soc_path_planning_dev.pptx) (기존 회의자료와 같은 포맷, 21장)
 - 최신 연구 대비 정식화 비교: [`docs/algorithm_comparison.md`](docs/algorithm_comparison.md) (문제 (P) 정의, 문헌별 정식화, 가정 축소 실험)
 - 확장안 (8방향 탐색 + 고도별 균일·선형 바람, LUT): [`docs/extension_8way_linear_wind.md`](docs/extension_8way_linear_wind.md)
+- 3D 시공간 확장 (동적 장애물) + 장애물 편집 플랫폼: [`docs/spatiotemporal_dynamic_obstacles.md`](docs/spatiotemporal_dynamic_obstacles.md)
+
+## 장애물 편집·경로계획 플랫폼
+
+```bash
+PYTHONPATH=src python -m dpo.webapp        # 브라우저에서 http://localhost:8765
+```
+
+지도를 클릭해 원기둥·구·박스 장애물을 놓고, 크기·고도 범위·존재 시간·안전 이격을 입력합니다. 경로점을 추가하면 장애물이 등속으로 이동하고, 드래그로 위치를 옮길 수 있습니다. `경로 계획 실행`을 누르면 3D 시공간 계획기(WE-SIPP-Theta*)가 장애물을 피하는 에너지 최적 경로를 계산합니다. 결과는 시간 슬라이더로 재생해 확인합니다. 허용 범위(지도 범위, 반경 5~1500 m, 이동 속도 ≤ 80 m/s, 공역·대기속도·배터리 예비 SOC)를 벗어난 입력은 거부하거나 "계획 불가"로 판정합니다.
 - 결과 그림: `results/figures/` · 수치 요약: `results/summary.json`
 
 ## 개발 항목별 구현
@@ -16,6 +25,7 @@
 | 2. 최적 경로 수식 | ① t=d/Vg ② E=P·t ③ ΣE ④ ΔSOC=E/E_batt×100 ⑤ argmin ΔSOC + 회전익 전력모델 P(Va,Vz,m) | `src/dpo/energy.py`, `mission.py` |
 | 3. 바람 정보 + 바람 지도 | NOAA GFS 0.25° 고도별(10~100 m, 975/950 hPa)·시간별 예보 → 지형·도시 보정 다운스케일 3D 바람장. 기상청 어댑터 별도 | `src/dpo/data_wind.py`, `wind_field.py`, `kma_adapter.py` |
 | 4. 최적 경로를 실제 지도에 적용 | WE-LT* (확장안: `layered.py` 8방향 + 선형 바람 LUT): 26방향 3D, 시간가변 바람 비용, 구간 속도 최적화, 에너지 비교형 Lazy Theta* 지름길, 호버링/우회 판단, 롤링 재계획 | `src/dpo/planner.py`, `mission.py` |
+| (추가) 3D 시공간·동적 장애물 | 이동 장애물의 위험 시간구간을 해석해로 계산하고, (노드, 안전구간) 상태의 SIPP + any-angle + 에너지 비용으로 탐색. 장애물 편집 웹 플랫폼 | `obstacles.py`, `st_planner.py`, `webapp/` |
 | 5. 드론 데이터와 비교 | CMU DJI Matrice 100 실측 198회(탑재 0~750 g)로 전력모델 보정·검증 (날짜 분리 검증 R² 0.77, MAPE 9.6%) | `energy.py`, `scripts/run_experiments.py: E0` |
 
 ## 주요 결과 (2026-10-27 강풍일, 15:00 KST, 거점↔배송지 2.4 km 왕복, 0.5 kg)
@@ -31,6 +41,7 @@
 - 장애물 시간표(띠 모양 임시 비행제한): 해제까지 30 s면 **28 s 호버링**(57.9 kJ)을, 300 s면 **우회**(70.9 kJ)를 고릅니다.
 - 비행 중 돌발 금지구역이 생기면 롤링 재계획(60 s 주기 + 이벤트 발생 시)으로 피해 갑니다. 재계획 1회에 평균 5.3 s가 걸립니다.
 - 확장안(E7): 바람을 "같은 고도면 같고, 고도에 따라 선형"으로 가정하면 간선 비용을 조회표(LUT)로 바꿀 수 있습니다. 이렇게 하면 계산이 8.9 s → 0.44 s로 **약 20배 빨라지고**, SOC는 같은 가정의 WE-LT*와 같습니다(78.2 vs 78.1 %p). 3D 바람장 대비로는 약 1.4 %p 손해입니다.
+- 3D 시공간(E8): 다른 드론·응급 헬기·행사 제한구역이 기존 경로를 가로지르는 시나리오에서, 동적 장애물을 무시한 경로는 3종 모두와 충돌합니다(최대 136 m 침범). 시공간 계획은 최소 29 m 이격으로 회피하고, 그 대가로 에너지가 +9.5 % 듭니다.
 - 가정 축소 실험(E6) 결과, 비교 축별 기여는 **구간 속도 최적화 +10.2~13.0 %p**(10 m/s 고정이면 비행 불가) > **에너지 비교형 any-angle +4.1 %p** > **3D 고도 선택 +2.8~3.1 %p** 순입니다.
 
 ## 실행
@@ -39,7 +50,7 @@
 pip install -r requirements.txt
 PYTHONPATH=src python -m dpo.data_terrain                  # DSM·건물 수집 → data/processed/site_grid.npz
 PYTHONPATH=src python -m dpo.data_wind                     # GFS 10월 강풍일 스캔
-PYTHONPATH=src python scripts/run_experiments.py           # E0~E7 (약 14분)
+PYTHONPATH=src python scripts/run_experiments.py           # E0~E8 (약 15분)
 PYTHONPATH=src python scripts/make_figures.py && PYTHONPATH=src python scripts/make_figures.py gif
 PYTHONPATH=src python scripts/build_ppt.py <회의자료 템플릿.pptx> docs/drone_soc_path_planning_dev.pptx
 PYTHONPATH=src python -m pytest -q tests

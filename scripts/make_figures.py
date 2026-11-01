@@ -606,14 +606,147 @@ def fig_layered(g, fc):
     plt.close(fig)
 
 
+
+# ================================================================== F14 3D 시공간 (동적 장애물)
+def _clearance_series(sim, o, t_off):
+    import math as _m
+    out = []
+    for t, x, y, z in zip(sim["t"], sim["x"], sim["y"], sim["z"]):
+        p = o.position(t - t_off)
+        if p is None:
+            out.append(np.nan); continue
+        if o.kind == "box":
+            dxy = max(abs(x - p[0]) - o.half_x, abs(y - p[1]) - o.half_y, 0.0)
+        elif o.kind == "sphere":
+            out.append(_m.sqrt((x - p[0]) ** 2 + (y - p[1]) ** 2 + (z - p[2]) ** 2) - o.radius); continue
+        else:
+            dxy = _m.hypot(x - p[0], y - p[1]) - o.radius
+        inz = o.z_min <= z <= o.z_max
+        out.append(dxy if inz else max(dxy, min(abs(z - o.z_min), abs(z - o.z_max))))
+    return np.array(out)
+
+
+def fig_dynamic(g, fc):
+    from dpo.obstacles import DynObstacle
+    E8 = L("E8")
+    obs = [DynObstacle.from_dict(o) for o in E8["obstacles"]]
+    st = E8["store"]
+    cols = ["#9B5DE5", "#E07B39", "#2CA58D"]
+    fig = plt.figure(figsize=(16, 10))
+    gsp = fig.add_gridspec(2, 2, width_ratios=[1.05, 1.2], hspace=0.32, wspace=0.18)
+    ax = fig.add_subplot(gsp[:, 0])
+    basemap(ax, g, fc)
+    s0, s1 = st["static_WELT"]["sim"], st["st_full"]["sim"]
+    for o, c in zip(obs, cols):
+        xs = [p["x"] / 1000 for p in o.path]; ys = [p["y"] / 1000 for p in o.path]
+        if len(xs) > 1:
+            ax.annotate("", (xs[-1], ys[-1]), (xs[0], ys[0]), arrowprops=dict(arrowstyle="->", color=c, lw=1.5, ls="--"))
+        # 기준 경로와 가장 가까워지는 시각의 형상
+        cl = _clearance_series(s0, o, T_MAIN)
+        q = int(np.nanargmin(cl)) if np.isfinite(cl).any() else 0
+        p = o.position(s0["t"][q] - T_MAIN) or (o.path[0]["x"], o.path[0]["y"], 0)
+        if o.kind == "box":
+            ax.add_patch(plt.Rectangle(((p[0] - o.half_x) / 1000, (p[1] - o.half_y) / 1000), 2 * o.half_x / 1000,
+                                       2 * o.half_y / 1000, fc=c, alpha=0.35, ec=c, lw=1.5))
+        else:
+            ax.add_patch(Circle((p[0] / 1000, p[1] / 1000), o.radius / 1000, fc=c, alpha=0.35, ec=c, lw=1.5))
+        ax.text(p[0] / 1000 + 0.05, p[1] / 1000 + 0.05, f"{o.name}\n(t={s0['t'][q] - T_MAIN:.0f} s)", fontsize=8, color=INK)
+    ax.plot(s0["x"] / 1000, s0["y"] / 1000, "--", color="#555555", lw=2, label="WE-LT* (동적 장애물 무시)")
+    ax.plot(s1["x"] / 1000, s1["y"] / 1000, "-", color="#1B6CA8", lw=3, label="시공간 WE-SIPP-Theta*")
+    for o in obs:
+        cl = _clearance_series(s0, o, T_MAIN)
+        bad = np.where(cl <= 0)[0]
+        if len(bad):
+            ax.plot(s0["x"][bad] / 1000, s0["y"][bad] / 1000, "x", color="#D7263D", ms=8, mew=2)
+    ax.plot([], [], "x", color="#D7263D", ms=8, mew=2, label="충돌 지점")
+    ax.set_xlim(2.4, 5.0); ax.set_ylim(1.2, 3.4)
+    ax.legend(fontsize=9, loc="lower left", framealpha=0.9)
+    ax.set_title("동적 장애물 3종 (배송 갈 때, 15:00, 0.5 kg)", fontsize=13)
+    # (b) 이격 거리
+    ax = fig.add_subplot(gsp[0, 1])
+    for o, c in zip(obs, cols):
+        for sim, ls, lab in ((s0, "--", "무시"), (s1, "-", "시공간")):
+            cl = _clearance_series(sim, o, T_MAIN)
+            ax.plot(sim["t"] - T_MAIN, cl, ls, color=c, lw=2 if ls == "-" else 1.5, label=f"{o.name} – {lab}")
+    ax.axhline(0, color="#D7263D", lw=1.5)
+    ax.fill_between([0, 150], -400, 0, color="#D7263D", alpha=0.07)
+    ax.set_ylim(-250, 800); ax.set_xlim(0, 150)
+    ax.set_xlabel("출발 후 시간 [s]"); ax.set_ylabel("장애물 표면까지 거리 [m]")
+    ax.set_title("시간별 이격 거리 (0 아래 = 충돌, 점선 = 장애물 무시 경로)", fontsize=12)
+    ax.legend(fontsize=7.5, ncol=2, frameon=False, loc="upper right")
+    # (c) 표
+    ax = fig.add_subplot(gsp[1, 1]); ax.axis("off")
+    rows = [r for r in E8["rows"] if r.get("feasible")]
+    tab = [[r["label"], f"{r['E_kJ']:.1f}", f"{r['soc_leg']:.1f}", f"{r['T']:.0f}", f"{r['wait']:.0f}",
+            f"{r['L'] / 1000:.2f}", ("충돌" if r["n_conf"] else f"{r['min_clear']:.0f}") if np.isfinite(r["min_clear"]) else "–",
+            f"{r['cpu']:.1f}"] for r in rows]
+    t = ax.table(cellText=tab, colLabels=["계획기", "에너지[kJ]", "SOC[%p]", "시간[s]", "대기[s]", "거리[km]",
+                                           "최소이격[m]", "계산[s]"], loc="center", cellLoc="center",
+                 colWidths=[0.34, 0.1, 0.09, 0.08, 0.08, 0.09, 0.11, 0.08])
+    t.auto_set_font_size(False); t.set_fontsize(9.5); t.scale(1, 1.8)
+    for (rr, cc), cell in t.get_celld().items():
+        if rr == 0:
+            cell.set_facecolor("#1B6E8C"); cell.set_text_props(color="white", weight="bold")
+        elif "충돌" in tab[rr - 1][6] and cc == 6:
+            cell.set_text_props(color="#D7263D", weight="bold")
+    ax.set_title("결과 (실제 바람 평가 · B = 지도 전폭 통제 띠 0~80 s)", fontsize=12)
+    fig.savefig(C.FIG / "F14_dynamic_obstacles.png")
+    plt.close(fig)
+
+
+def gif_dynamic(g, fc, n_frames=40):
+    import imageio.v2 as imageio
+    from dpo.obstacles import DynObstacle
+    E8 = L("E8")
+    obs = [DynObstacle.from_dict(o) for o in E8["obstacles"]]
+    cols = ["#9B5DE5", "#E07B39", "#2CA58D"]
+    s0, s1 = E8["store"]["static_WELT"]["sim"], E8["store"]["st_full"]["sim"]
+    tmax = max(s0["t"][-1], s1["t"][-1]) - T_MAIN
+    frames = []
+    for tf in np.linspace(0, tmax, n_frames):
+        fig, axs = plt.subplots(1, 2, figsize=(11, 4.9))
+        for ax, sim, title, col in ((axs[0], s0, "동적 장애물 무시 (WE-LT*)", "#555555"),
+                                    (axs[1], s1, "3D 시공간 계획 (WE-SIPP-Theta*)", "#1B6CA8")):
+            basemap(ax, g, fc, nfz=True)
+            ax.set_xlim(2.4, 5.0); ax.set_ylim(1.2, 3.4)
+            for o, c in zip(obs, cols):
+                p = o.position(tf)
+                if p is None:
+                    continue
+                if o.kind == "box":
+                    ax.add_patch(plt.Rectangle(((p[0] - o.half_x) / 1000, (p[1] - o.half_y) / 1000), 2 * o.half_x / 1000,
+                                               2 * o.half_y / 1000, fc=c, alpha=0.45, ec=c))
+                else:
+                    ax.add_patch(Circle((p[0] / 1000, p[1] / 1000), o.radius / 1000, fc=c, alpha=0.45, ec=c))
+            m = sim["t"] - T_MAIN <= tf
+            ax.plot(sim["x"] / 1000, sim["y"] / 1000, ":", color=col, lw=1)
+            ax.plot(sim["x"][m] / 1000, sim["y"][m] / 1000, "-", color=col, lw=3)
+            if m.any():
+                q = np.where(m)[0][-1]
+                hitting = any((_clearance_series({k: v[q:q + 1] for k, v in sim.items()}, o, T_MAIN) <= 0).any() for o in obs)
+                ax.plot(sim["x"][q] / 1000, sim["y"][q] / 1000, "o", ms=11, mfc="#D7263D" if hitting else "#FFD23F", mec=INK)
+                if hitting:
+                    ax.text(sim["x"][q] / 1000 + 0.08, sim["y"][q] / 1000, "충돌!", color="#D7263D", fontsize=13, weight="bold")
+            ax.set_title(f"{title}   t = {tf:4.0f} s", fontsize=11)
+            ax.set_xlabel(""); ax.set_ylabel("")
+        fig.tight_layout()
+        fig.canvas.draw()
+        frames.append(np.asarray(fig.canvas.buffer_rgba())[..., :3].copy())
+        plt.close(fig)
+    mid = frames[len(frames) // 2]
+    imageio.mimsave(C.FIG / "dynamic_obstacles.gif", [mid] + frames, duration=[1.5] + [0.22] * (len(frames) - 1) + [1.5],
+                    loop=0)
+
+
 if __name__ == "__main__":
     g, fc, tr = sites()
     todo = sys.argv[1:] or ["site", "wind", "energy", "paths", "soc", "departure", "hover", "rolling", "payload", "3d",
-                            "ablation", "formulation", "layered"]
+                            "ablation", "formulation", "layered", "dynamic", "gifdyn"]
     fns = dict(site=lambda: fig_site(g, fc), wind=lambda: fig_wind_profile(g, fc, tr), energy=fig_energy,
                paths=lambda: fig_paths(g, fc), soc=lambda: fig_soc(fc), departure=lambda: fig_departure(g, fc),
                hover=lambda: fig_hover(g, fc), rolling=lambda: fig_rolling(g, fc), payload=fig_payload,
                ablation=fig_ablation, formulation=fig_formulation, layered=lambda: fig_layered(g, fc),
+               dynamic=lambda: fig_dynamic(g, fc), gifdyn=lambda: gif_dynamic(g, fc),
                **{"3d": lambda: fig_3d(g, fc)})
     for t in todo:
         if t == "gif":
