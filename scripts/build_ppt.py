@@ -620,6 +620,29 @@ def build(template, out):
                   [("왕복 계획 약 8~9 s (균형 모드)", {"size": 11, "color": ORANGE})]], anchor=MSO_ANCHOR.TOP)
     notes(s, "표준 라이브러리 HTTP 서버 + HTML/JS 캔버스. Playwright 로 장애물 추가·수정·검증·재계획 자동 시험 완료.")
 
+    # 15-5. 결과 ⑩ 장애물 변경 → 이벤트 기반 재계획 --------------------------------
+    s = D.content("결과 ⑩ 장애물 궤적 변경 → 이벤트 기반 롤링 재계획")
+    picture(s, FIG / "F15_obstacle_replanning.png", 0.5, 1.0, 8.4, 5.15)
+    E9 = {r["policy"]: r for r in S["E9_replan"]["rows"]}
+    sp = box(s, 9.1, 1.05, 3.65, 5.85, fill=LIGHT, shadow=False)
+    box_text(sp, [[("방식 (변경이 드묾을 가정)", {"color": TITLE, "size": 14})],
+                  [("① 변경 발표 → 남은 경로를 위험구간 표로 '검사만' (수십 ms)\n② 충돌 시에만 현재 위치에서 3D 시공간 재계획 "
+                    "(지연 3 s 반영)\n③ 뒤 구간은 재검사 후 문제없으면 재사용", {"size": 11})],
+                  [("", {"size": 5})],
+                  [("결과 (변경 2회: 헬기 항로, 행사 확대)", {"color": TITLE, "size": 14})],
+                  [(f"· 1회 계획: 충돌 ({-E9['once']['min_clear']:.0f} m 침범)", {"size": 11, "color": RGBColor(0xD7, 0x26, 0x3D)})],
+                  [(f"· 이벤트 기반: 재계획 {E9['event']['n_replans']}회, 이격 {E9['event']['min_clear']:.0f} m, "
+                    f"{E9['event']['E_kJ']:.1f} kJ", {"size": 11, "color": ORANGE})],
+                  [(f"· 주기 30 s: 재계획 {E9['periodic']['n_replans']}회 (같은 안전성)", {"size": 11})],
+                  [("· 주기 60 s: 변경을 늦게 확인 → 충돌", {"size": 11, "color": RGBColor(0xD7, 0x26, 0x3D)})],
+                  [(f"· 오라클 하한 {E9['oracle']['E_kJ']:.1f} kJ (사전 인지 시 +{(E9['event']['E_kJ'] / E9['oracle']['E_kJ'] - 1) * 100:.0f}% 절감 여지)",
+                    {"size": 11})],
+                  [("", {"size": 5})],
+                  [("플랫폼", {"color": TITLE, "size": 14})],
+                  [("재생 중 시각 선택 → 장애물 수정 → '변경 반영': 유지 0.3 s / 재계획 약 2 s, 변경 이력·재계획 지점 표시",
+                    {"size": 11})]], anchor=MSO_ANCHOR.TOP)
+    notes(s, "상세: docs/spatiotemporal_dynamic_obstacles.md §7, src/dpo/st_rolling.py, 실험 E9, 플랫폼 /api/replan.")
+
     # 16. 결론 ---------------------------------------------------------------
     s = D.content("결론 및 추후 개발할 내용")
     textbox(s, 0.8, 1.1, 7.4, 3.1, [
@@ -631,7 +654,7 @@ def build(template, out):
          (", 회수 ", {}), (f"{pA['soc_used']:.1f} → {pD['soc_used']:.1f}%p", {"color": ORANGE})],
         [(" ○ 시간가변: 출발시각별 경로, 호버링/우회 판단, 비행 중 재계획", {})],
         [(" ○ 최신 연구 대비: 속도 최적화·에너지 지름길·고도 선택이 핵심 기여", {})],
-        [(" ○ 3D 시공간 확장: 동적 장애물 회피 + 장애물 편집 플랫폼", {})]], size=14,
+        [(" ○ 3D 시공간: 동적 장애물 회피, 변경 시 이벤트 기반 재계획, 편집 플랫폼", {})]], size=14,
         space_after=8)
     textbox(s, 0.8, 3.95, 7.4, 2.6, [
         [("□ 향후 계획", {"size": 18, "color": INK})],
@@ -645,7 +668,7 @@ def build(template, out):
     textbox(s, 8.4, 4.35, 4.3, 0.35, [[("3D 경로 (지형·건물 위)", {"size": 12, "color": GRAY})]], align=PP_ALIGN.CENTER)
     sp = box(s, 8.4, 4.8, 4.3, 1.35, fill=LIGHT, shadow=False)
     box_text(sp, [[("코드·재현", {"color": TITLE, "size": 14})],
-                  [("src/dpo: 데이터·에너지·바람장·탐색기\nscripts/run_experiments.py → make_figures.py\ntests/: 단위 테스트 11종 · 플랫폼: python -m dpo.webapp\ndocs/: 정식화 비교 · 8방향 확장 · 시공간 확장",
+                  [("src/dpo: 데이터·에너지·바람장·탐색기\nscripts/run_experiments.py → make_figures.py\ntests/: 단위 테스트 13종 · 플랫폼: python -m dpo.webapp\ndocs/: 정식화 비교 · 8방향 확장 · 시공간 확장",
                     {"size": 11, "color": INK})]], anchor=MSO_ANCHOR.TOP)
     notes(s, "실제 운용 시 판교 일대는 서울공항 관제권으로 비행승인 필요. 비행금지구역 원은 예시(가상).")
 

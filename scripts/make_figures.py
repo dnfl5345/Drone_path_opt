@@ -738,15 +738,190 @@ def gif_dynamic(g, fc, n_frames=40):
                     loop=0)
 
 
+
+# ================================================================== F15 장애물 변경 → 이벤트 기반 재계획
+def _draw_obs(ax, o, t, c, alpha=0.4, ls="-"):
+    p = o.position(t)
+    if p is None:
+        return
+    if o.kind == "box":
+        ax.add_patch(plt.Rectangle(((p[0] - o.half_x) / 1000, (p[1] - o.half_y) / 1000), 2 * o.half_x / 1000,
+                                   2 * o.half_y / 1000, fc=c, alpha=alpha, ec=c, ls=ls, lw=1.5))
+    else:
+        ax.add_patch(Circle((p[0] / 1000, p[1] / 1000), o.radius / 1000, fc=c, alpha=alpha, ec=c, ls=ls, lw=1.5))
+
+
+def fig_replan(g, fc):
+    from dpo.obstacles import DynObstacle
+    E9 = L("E9")
+    revs = [(r["t"], [DynObstacle.from_dict(o) for o in r["obstacles"]]) for r in E9["timeline"]]
+    st = E9["store"]
+    fig = plt.figure(figsize=(16, 10))
+    gsp = fig.add_gridspec(2, 2, width_ratios=[1.05, 1.2], height_ratios=[1, 1], hspace=0.35, wspace=0.18)
+    ax = fig.add_subplot(gsp[:, 0])
+    basemap(ax, g, fc)
+    # 헬기: 원래 항로(점선) vs 변경 항로(실선)
+    h0 = next(o for o in revs[0][1] if "헬기" in o.name)
+    h1 = next(o for o in revs[1][1] if "헬기" in o.name)
+    for o, ls, lab in ((h0, "--", "헬기 원래 항로"), (h1, "-", "헬기 변경 항로 (t=30 s 발표)")):
+        xs = [p["x"] / 1000 for p in o.path]; ys = [p["y"] / 1000 for p in o.path]
+        ax.plot(xs, ys, ls, color="#E07B39", lw=2, label=lab)
+    b0 = next(o for o in revs[0][1] if o.kind == "box")
+    b2 = next(o for o in revs[2][1] if o.kind == "box")
+    _draw_obs(ax, b0, 100, "#2CA58D", 0.15, "--")
+    _draw_obs(ax, b2, 100, "#2CA58D", 0.35)
+    ax.text((b2.path[0]["x"] + b2.half_x) / 1000 + 0.03, b2.path[0]["y"] / 1000, "행사 제한\n확대·연장\n(t=60 s 발표)",
+            fontsize=8, color="#1E6E5C")
+    t_once, t_ev, t_or = st["once"]["trace"], st["event"]["trace"], st["oracle"]["trace"]
+    ax.plot(t_once["x"] / 1000, t_once["y"] / 1000, "--", color="#555555", lw=2, label="1회 계획 (재계획 없음)")
+    ax.plot(t_or["x"] / 1000, t_or["y"] / 1000, "-", color="#2CA58D", lw=1.5, label="오라클 (미래를 미리 앎)")
+    ax.plot(t_ev["x"] / 1000, t_ev["y"] / 1000, "-", color="#1B6CA8", lw=3, label="이벤트 기반 재계획")
+    for e in st["event"]["events"]:
+        if e.get("replanned") and e["kind"] != "initial":
+            q = int(np.searchsorted(t_ev["t"] - T_MAIN, e["t_switch"]))
+            ax.plot(t_ev["x"][q] / 1000, t_ev["y"][q] / 1000, "*", ms=18, mfc="#E46C0A", mec=INK)
+            ax.annotate(f"재계획 (t={e['t_switch']:.0f} s)", (t_ev["x"][q] / 1000, t_ev["y"][q] / 1000),
+                        (t_ev["x"][q] / 1000 + 0.18, t_ev["y"][q] / 1000 + 0.14), fontsize=10, color="#E46C0A",
+                        weight="bold", arrowprops=dict(arrowstyle="->", color="#E46C0A"))
+    # 1회 계획 충돌 지점
+    from dpo.st_planner import check_path_conflicts
+    truth = []
+    for q, (ta, obs) in enumerate(revs):
+        tb = revs[q + 1][0] if q + 1 < len(revs) else np.inf
+        for o in obs:
+            import copy as _c
+            c = _c.deepcopy(o); w0, w1 = o.window(); c.t_start, c.t_end = max(w0, ta), min(w1, tb)
+            if c.t_end > c.t_start:
+                truth.append(c)
+    for o in truth:
+        cl = _clearance_series(t_once, o, T_MAIN)
+        bad = np.where(cl <= 0)[0]
+        if len(bad):
+            ax.plot(t_once["x"][bad] / 1000, t_once["y"][bad] / 1000, "x", color="#D7263D", ms=8, mew=2)
+    ax.plot([], [], "x", color="#D7263D", ms=8, mew=2, label="충돌 (1회 계획)")
+    ax.set_xlim(2.4, 5.1); ax.set_ylim(1.2, 3.4)
+    ax.legend(fontsize=8.5, loc="lower left", framealpha=0.92)
+    ax.set_title("비행 중 장애물 변경 → 이벤트 기반 재계획 (배송 갈 때)", fontsize=13)
+    # (b) 타임라인
+    ax = fig.add_subplot(gsp[0, 1])
+    rows = E9["rows"]
+    pols = [r["policy"] for r in rows]
+    for yi, r in enumerate(rows):
+        y = len(rows) - 1 - yi
+        tr_ = st[r["policy"]]["trace"]
+        ax.plot([0, tr_["t"][-1] - T_MAIN], [y, y], "-", color="#C9C9C9", lw=8, solid_capstyle="butt")
+        for o in truth:
+            cl = _clearance_series(tr_, o, T_MAIN)
+            bad = cl <= 0
+            if bad.any():
+                tt = tr_["t"][bad] - T_MAIN
+                ax.plot(tt, np.full(len(tt), y), "|", color="#D7263D", ms=16, mew=2)
+        for e in st[r["policy"]]["events"]:
+            if e["kind"] == "initial":
+                continue
+            ax.plot(e["t"], y + 0.28, "v", color="#4C5A66", ms=7)
+            if e.get("replanned"):
+                ax.plot(e.get("t_switch", e["t"]), y, "*", color="#E46C0A", ms=14, mec=INK)
+    for ta in (30, 60):
+        ax.axvline(ta, color="#9B5DE5", ls="--", lw=1.2)
+        ax.text(ta + 1, len(rows) - 0.45, f"변경 발표\nt={ta} s", fontsize=8.5, color="#6A2C9E")
+    ax.set_yticks(range(len(rows)))
+    ax.set_yticklabels([r["label"] for r in rows][::-1], fontsize=9)
+    ax.set_xlabel("출발 후 시간 [s]")
+    ax.set_xlim(0, 240); ax.set_ylim(-0.6, len(rows) - 0.1)
+    ax.plot([], [], "v", color="#4C5A66", label="충돌 검사(표 조회)"); ax.plot([], [], "*", color="#E46C0A", mec=INK, ms=12, label="재계획")
+    ax.plot([], [], "|", color="#D7263D", ms=12, mew=2, label="실제 충돌")
+    ax.legend(fontsize=8, loc="lower right", ncol=3, frameon=False)
+    ax.set_title("정책별 검사·재계획 시점과 충돌", fontsize=12)
+    # (c) 표
+    ax = fig.add_subplot(gsp[1, 1]); ax.axis("off")
+    tab = [[r["label"], f"{r['E_kJ']:.1f}", f"{r['soc_leg']:.1f}", f"{r['T']:.0f}",
+            "충돌" if r["n_conf"] else f"{r['min_clear']:.0f}", f"{r['n_replans']}", f"{r['n_checks']}",
+            f"{r['cpu_total']:.1f}"] for r in rows]
+    t = ax.table(cellText=tab, colLabels=["정책", "에너지[kJ]", "SOC[%p]", "시간[s]", "최소이격[m]", "재계획", "검사",
+                                           "계산 합[s]"], loc="center", cellLoc="center",
+                 colWidths=[0.36, 0.1, 0.09, 0.08, 0.11, 0.08, 0.07, 0.1])
+    t.auto_set_font_size(False); t.set_fontsize(9.5); t.scale(1, 1.9)
+    for (rr, cc), cell in t.get_celld().items():
+        if rr == 0:
+            cell.set_facecolor("#1B6E8C"); cell.set_text_props(color="white", weight="bold")
+        elif tab[rr - 1][4] == "충돌" and cc == 4:
+            cell.set_text_props(color="#D7263D", weight="bold")
+        elif rows[rr - 1]["policy"] == "event":
+            cell.set_facecolor("#E3EEF3")
+    ax.set_title("결과 (실제 바람 평가, 이륙·착륙 포함, 재계획 지연 3 s 반영)", fontsize=12)
+    fig.savefig(C.FIG / "F15_obstacle_replanning.png")
+    plt.close(fig)
+
+
+def gif_replan(g, fc, n_frames=48):
+    import imageio.v2 as imageio
+    from dpo.obstacles import DynObstacle
+    E9 = L("E9")
+    revs = [(r["t"], [DynObstacle.from_dict(o) for o in r["obstacles"]]) for r in E9["timeline"]]
+    st = E9["store"]
+    colf = lambda name: "#E07B39" if "헬기" in name else ("#2CA58D" if "행사" in name else "#9B5DE5")
+    tr_once, tr_ev = st["once"]["trace"], st["event"]["trace"]
+    plans = st["event"]["plans"]
+    tmax = max(tr_once["t"][-1], tr_ev["t"][-1]) - T_MAIN
+    frames = []
+    for tf in np.linspace(25, tmax, n_frames):
+        known = [obs for ta, obs in revs if ta <= tf][-1]
+        fig, axs = plt.subplots(1, 2, figsize=(11, 5.0))
+        for ax, trc, title, col in ((axs[0], tr_once, "1회 계획 (변경 무시)", "#555555"),
+                                    (axs[1], tr_ev, "이벤트 기반 재계획", "#1B6CA8")):
+            basemap(ax, g, fc)
+            ax.set_xlim(2.4, 5.1); ax.set_ylim(1.2, 3.4)
+            for o in known:
+                _draw_obs(ax, o, tf, colf(o.name), 0.45)
+            if trc is tr_ev:
+                cur = ([p for p in plans if p["t"] <= tf] or plans[:1])[-1]
+                x, y, _ = P2(fc, cur["path"])
+                ax.plot(x, y, ":", color="#8FB8DE", lw=2)
+            m = trc["t"] - T_MAIN <= tf
+            ax.plot(trc["x"][m] / 1000, trc["y"][m] / 1000, "-", color=col, lw=3)
+            if m.any():
+                q = np.where(m)[0][-1]
+                hit = False
+                for o in known:
+                    p = o.position(tf)
+                    if p is None:
+                        continue
+                    if o.kind == "box":
+                        hit |= abs(trc["x"][q] - p[0]) <= o.half_x and abs(trc["y"][q] - p[1]) <= o.half_y
+                    else:
+                        hit |= np.hypot(trc["x"][q] - p[0], trc["y"][q] - p[1]) <= o.radius and o.z_min <= trc["z"][q] <= o.z_max
+                ax.plot(trc["x"][q] / 1000, trc["y"][q] / 1000, "o", ms=11, mfc="#D7263D" if hit else "#FFD23F", mec=INK)
+                if hit:
+                    ax.text(trc["x"][q] / 1000 + 0.08, trc["y"][q] / 1000, "충돌!", color="#D7263D", fontsize=13,
+                            weight="bold")
+            ax.set_title(f"{title}   t = {tf:4.0f} s", fontsize=11)
+        msg = ""
+        if 30 <= tf < 45:
+            msg = "t=30 s 발표: 응급 헬기 항로 변경 → 남은 경로 충돌 예상 → 재계획"
+        elif 60 <= tf < 75:
+            msg = "t=60 s 발표: 행사 비행제한 확대·연장 → 충돌 예상 → 재계획"
+        if msg:
+            fig.suptitle(msg, color="#6A2C9E", fontsize=12, weight="bold")
+        fig.tight_layout()
+        fig.canvas.draw()
+        frames.append(np.asarray(fig.canvas.buffer_rgba())[..., :3].copy())
+        plt.close(fig)
+    mid = frames[int(len(frames) * 0.45)]
+    imageio.mimsave(C.FIG / "obstacle_replanning.gif", [mid] + frames,
+                    duration=[1.5] + [0.25] * (len(frames) - 1) + [1.5], loop=0)
+
+
 if __name__ == "__main__":
     g, fc, tr = sites()
     todo = sys.argv[1:] or ["site", "wind", "energy", "paths", "soc", "departure", "hover", "rolling", "payload", "3d",
-                            "ablation", "formulation", "layered", "dynamic", "gifdyn"]
+                            "ablation", "formulation", "layered", "dynamic", "gifdyn", "replan", "gifreplan"]
     fns = dict(site=lambda: fig_site(g, fc), wind=lambda: fig_wind_profile(g, fc, tr), energy=fig_energy,
                paths=lambda: fig_paths(g, fc), soc=lambda: fig_soc(fc), departure=lambda: fig_departure(g, fc),
                hover=lambda: fig_hover(g, fc), rolling=lambda: fig_rolling(g, fc), payload=fig_payload,
                ablation=fig_ablation, formulation=fig_formulation, layered=lambda: fig_layered(g, fc),
                dynamic=lambda: fig_dynamic(g, fc), gifdyn=lambda: gif_dynamic(g, fc),
+               replan=lambda: fig_replan(g, fc), gifreplan=lambda: gif_replan(g, fc),
                **{"3d": lambda: fig_3d(g, fc)})
     for t in todo:
         if t == "gif":

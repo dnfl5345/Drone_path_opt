@@ -168,11 +168,21 @@ def build_interval_table(site, obstacles, t_offset=0.0, extra=None):
             if t1w > ts[-1]:
                 segs.append((pts[-1], pts[-1], ts[-1], t1w))
         reach = (o.radius if o.kind != "box" else math.hypot(o.half_x, o.half_y)) + o.margin + c_cell
-        for pa, pb, ta, tb in segs:
-            ta, tb = max(ta, t0w), min(tb, t1w)
+        for pa, pb, ta0, tb0 in segs:
+            ta, tb = max(ta0, t0w), min(tb0, t1w)
             if tb <= ta and not (ta == tb == 0):
                 continue
-            x0, y0, x1, y1 = pa["x"], pa["y"], pb["x"], pb["y"]
+            # 존재 시간창으로 잘린 구간: 원래 구간의 속도를 유지하고 시작/끝점을 잘린 시각으로 이동
+            dt0 = tb0 - ta0
+            if math.isfinite(dt0) and dt0 > 1e-9:
+                ux, uy = (pb["x"] - pa["x"]) / dt0, (pb["y"] - pa["y"]) / dt0
+            else:
+                ux = uy = 0.0
+            x0, y0 = pa["x"] + ux * (ta - ta0), pa["y"] + uy * (ta - ta0)
+            if math.isfinite(tb):
+                x1, y1 = pa["x"] + ux * (tb - ta0), pa["y"] + uy * (tb - ta0)
+            else:
+                x1, y1 = x0, y0
             i0 = max(int((min(x0, x1) - reach) // dx), 0); i1 = min(int((max(x0, x1) + reach) // dx) + 1, nx)
             j0 = max(int((min(y0, y1) - reach) // dx), 0); j1 = min(int((max(y0, y1) + reach) // dx) + 1, ny)
             if i0 >= i1 or j0 >= j1:

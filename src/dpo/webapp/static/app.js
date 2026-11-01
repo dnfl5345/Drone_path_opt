@@ -2,7 +2,17 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const S = { site: null, img: new Image(), obs: [], sel: -1, mode: null, res: null, t: 0, playing: false,
-            hub: null, dst: null, drag: null };
+            hub: null, dst: null, drag: null, dirty: false, ghosts: [] };
+function markChanged() {
+  if (S.res) { S.dirty = true; $("replanbar").style.display = "block"; }
+}
+// 계획 이후의 장애물 표시: 변경 이력(revision) 중 시각 t 에 유효한 판을 사용
+function obsForTime(t) {
+  if (!S.res || S.dirty || !S.res.revisions) return S.obs;
+  let cur = S.res.revisions[0].obstacles;
+  S.res.revisions.forEach(r => { if (r.t <= t) cur = r.obstacles; });
+  return cur;
+}
 const KIND_KO = { cylinder: "원기둥", sphere: "구", box: "박스" };
 const COLORS = ["#9B5DE5", "#E07B39", "#2CA58D", "#D7263D", "#F2B134", "#0B3954", "#8F2D56"];
 
@@ -102,14 +112,15 @@ function draw() {
   ctx.save(); const [qx, qy] = toPx(nx, ny); ctx.fillStyle = "rgba(215,38,61,0.22)"; ctx.strokeStyle = "#D7263D";
   ctx.setLineDash([5, 4]); ctx.beginPath(); ctx.arc(qx, qy, nr * mScale(), 0, 2 * Math.PI); ctx.fill(); ctx.stroke(); ctx.restore();
   // 장애물 궤적 + 현재 위치
-  S.obs.forEach((o, i) => {
+  const shown = obsForTime(S.t);
+  shown.forEach((o, i) => {
     const col = COLORS[i % COLORS.length];
     if (o.path.length > 1) {
       ctx.save(); ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]); ctx.beginPath();
       o.path.forEach((p, k) => { const [px, py] = toPx(p.x, p.y); k ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
       ctx.stroke(); ctx.restore();
     }
-    if (i === S.sel) o.path.forEach((p, k) => {
+    if (i === S.sel && shown === S.obs) o.path.forEach((p, k) => {
       const [px, py] = toPx(p.x, p.y);
       ctx.save(); ctx.fillStyle = "#fff"; ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.fillRect(px - 5, py - 5, 10, 10); ctx.strokeRect(px - 5, py - 5, 10, 10);
       ctx.font = "11px sans-serif"; ctx.fillStyle = col; ctx.fillText(`t=${p.t}`, px + 7, py + 12); ctx.restore();
@@ -141,6 +152,17 @@ function draw() {
         const [px, py] = toPx(s.x, s.y); ctx.save(); ctx.strokeStyle = "#D7263D"; ctx.lineWidth = 3;
         ctx.beginPath(); ctx.moveTo(px - 6, py - 6); ctx.lineTo(px + 6, py + 6); ctx.moveTo(px + 6, py - 6); ctx.lineTo(px - 6, py + 6); ctx.stroke(); ctx.restore();
       });
+    });
+    S.ghosts.forEach(g => drawPathLine(g, "#E46C0A", 2, [3, 4]));
+    const allp = (S.res.legs || []).flatMap(l => l.samples || []);
+    (S.res.replans || []).forEach((e, k) => {
+      if (!e.replanned) return;
+      const p = sampleAt(allp, e.t_switch); if (!p) return;
+      const [px, py] = toPx(p.x, p.y);
+      ctx.save(); ctx.fillStyle = "#E46C0A"; ctx.strokeStyle = "#16202A"; ctx.lineWidth = 1.5; ctx.beginPath();
+      for (let q = 0; q < 10; q++) { const r = q % 2 ? 5 : 12, a = Math.PI / 5 * q - Math.PI / 2; ctx.lineTo(px + r * Math.cos(a), py + r * Math.sin(a)); }
+      ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.font = "bold 12px sans-serif"; ctx.fillStyle = "#E46C0A";
+      ctx.fillText(`재계획 #${k + 1} (t=${e.t_switch.toFixed(0)} s)`, px + 14, py - 6); ctx.restore();
     });
     // 현재 시각의 드론
     const all = (S.res.legs || []).flatMap(l => l.samples || []);
@@ -222,15 +244,15 @@ function refreshEditor() {
     tb.appendChild(tr);
   });
   tb.querySelectorAll("input").forEach(inp => inp.onchange = () => {
-    o.path[+inp.dataset.k][inp.dataset.f] = Number(inp.value); refreshList(); draw(); });
-  tb.querySelectorAll("button[data-del]").forEach(b => b.onclick = () => { o.path.splice(+b.dataset.del, 1); refreshList(); draw(); });
+    o.path[+inp.dataset.k][inp.dataset.f] = Number(inp.value); markChanged(); refreshList(); draw(); });
+  tb.querySelectorAll("button[data-del]").forEach(b => b.onclick = () => { o.path.splice(+b.dataset.del, 1); markChanged(); refreshList(); draw(); });
 }
 function bindEditor() {
   const num = (id, f, nullable) => $(id).onchange = () => { const o = S.obs[S.sel]; if (!o) return;
-    const v = $(id).value; o[f] = (nullable && v === "") ? null : Number(v); refreshList(); draw(); };
-  $("e_name").onchange = () => { S.obs[S.sel].name = $("e_name").value; refreshList(); };
+    const v = $(id).value; o[f] = (nullable && v === "") ? null : Number(v); markChanged(); refreshList(); draw(); };
+  $("e_name").onchange = () => { S.obs[S.sel].name = $("e_name").value; markChanged(); refreshList(); };
   $("e_kind").onchange = () => { const o = S.obs[S.sel]; o.kind = $("e_kind").value;
-    if (o.kind === "sphere") o.path.forEach(p => p.z = p.z ?? 140); refreshList(); draw(); };
+    if (o.kind === "sphere") o.path.forEach(p => p.z = p.z ?? 140); markChanged(); refreshList(); draw(); };
   num("e_margin", "margin"); num("e_radius", "radius"); num("e_hx", "half_x"); num("e_hy", "half_y");
   num("e_zmin", "z_min"); num("e_zmax", "z_max"); num("e_t0", "t_start", true); num("e_t1", "t_end", true);
 }
@@ -253,23 +275,24 @@ function hit(px, py) {
 cv.addEventListener("mousedown", e => {
   const [px, py] = evPos(e), [x, y] = toM(px, py);
   if (S.mode && S.mode.startsWith("add:")) {
-    S.obs.push(newObstacle(S.mode.slice(4), x, y)); S.sel = S.obs.length - 1; setMode(null); refreshList(); draw(); return;
+    S.obs.push(newObstacle(S.mode.slice(4), x, y)); S.sel = S.obs.length - 1; setMode(null); markChanged(); refreshList(); draw(); return;
   }
   if (S.mode === "addpt") {
     const o = S.obs[S.sel]; const last = o.path[o.path.length - 1];
     const d = Math.hypot(x - last.x, y - last.y);
     o.path.push({ x, y, t: Math.round(last.t + Math.max(10, d / 20)), z: last.z });   // 기본 20 m/s
     if (o.t_end != null && o.t_end < o.path[o.path.length - 1].t) o.t_end = null;
-    refreshList(); draw(); return;
+    markChanged(); refreshList(); draw(); return;
   }
   if (S.mode === "hub" || S.mode === "dst") { S[S.mode] = [x, y]; setMode(null); S.res = null; draw(); return; }
   const h = hit(px, py);
-  if (h) { S.sel = h.i; S.drag = h; refreshList(); draw(); }
+  if (h) { S.sel = h.i; S.drag = h; S.dragMoved = false; refreshList(); draw(); }
 });
 cv.addEventListener("mousemove", e => {
   if (!S.drag) return;
   const [px, py] = evPos(e), [x, y] = toM(px, py);
   const o = S.obs[S.drag.i];
+  if (!S.dragMoved) { S.dragMoved = true; markChanged(); }
   if (S.drag.k >= 0) { o.path[S.drag.k].x = x; o.path[S.drag.k].y = y; }
   else { const p0 = obsPos(o, S.t) || o.path[0]; const dx = x - p0.x, dy = y - p0.y; o.path.forEach(p => { p.x += dx; p.y += dy; }); }
   draw();
@@ -291,7 +314,8 @@ function updateTimeRange() {
   if (S.res) (S.res.legs || []).forEach(l => (l.samples || []).forEach(s => T = Math.max(T, s.t)));
   $("tslider").max = Math.ceil(T / 10) * 10;
 }
-function setT(t) { S.t = t; $("tslider").value = t; $("tlabel").textContent = `t = ${t.toFixed(0)} s (${fmtClock(t)})`; draw(); }
+function setT(t) { S.t = t; $("tslider").value = t; $("tlabel").textContent = `t = ${t.toFixed(0)} s (${fmtClock(t)})`;
+  $("rp_t").textContent = `t = ${t.toFixed(0)} s`; draw(); }
 function fmtClock(t) { const dep = Number($("dep").value) * 3600 + t; const h = Math.floor(dep / 3600), m = Math.floor(dep % 3600 / 60), s = Math.floor(dep % 60);
   return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`; }
 let lastTs = null;
@@ -325,11 +349,30 @@ async function doPlan() {
   const t0 = performance.now();
   try {
     const r = await api("/api/plan", request());
-    S.res = r; showErrors(r.errors); showResult(r);
+    S.res = r; S.dirty = false; S.ghosts = []; $("replanbar").style.display = "none";
+    showErrors(r.errors); showResult(r);
     $("status").textContent = `완료 (${((performance.now() - t0) / 1000).toFixed(1)} s, 위험구간 셀 ${r.table_cells.toLocaleString()}개)`;
     updateTimeRange(); setT(0);
   } catch (e) { showErrors([e.message]); $("status").textContent = "실패"; }
   $("plan").disabled = false;
+}
+async function doReplan() {
+  if (!S.res) return;
+  const lastRev = S.res.revisions ? S.res.revisions[S.res.revisions.length - 1].t : 0;
+  if (S.t < lastRev) { showErrors([`변경 시각(t=${S.t.toFixed(0)} s)은 직전 변경(t=${lastRev.toFixed(0)} s) 이후여야 합니다`]); return; }
+  $("status").textContent = `t=${S.t.toFixed(0)} s 변경 반영 중…`; $("replan").disabled = true;
+  const t0 = performance.now();
+  const prev = (S.res.legs || []).map(l => (l.samples || []).filter(s => s.t >= S.t));
+  try {
+    const r = await api("/api/replan", { obstacles: S.obs, t_now: S.t });
+    const ev = r.replans[r.replans.length - 1];
+    if (ev.replanned) S.ghosts = S.ghosts.concat(prev.filter(g => g.length > 1));
+    S.res = r; S.dirty = false; $("replanbar").style.display = "none";
+    showErrors(r.errors); showResult(r);
+    $("status").textContent = `${ev.reason} (검사 ${ev.check_ms.toFixed(0)} ms${ev.cpu ? `, 계산 ${ev.cpu.toFixed(1)} s` : ""}, 총 ${((performance.now() - t0) / 1000).toFixed(1)} s)`;
+    updateTimeRange(); setT(S.t);
+  } catch (e) { showErrors([e.message]); $("status").textContent = "실패"; }
+  $("replan").disabled = false;
 }
 function showResult(r) {
   $("rescard").style.display = "block";
@@ -341,6 +384,8 @@ function showResult(r) {
     : `<tr><td>${l.name === "out" ? "갈 때" : "올 때"}</td><td colspan="7" class="bad">${l.reason}</td></tr>`).join("");
   const nb = (r.baseline || []).reduce((a, b) => a + (b.conflicts.n_collision_samples ? 1 : 0), 0);
   const names = [...new Set((r.baseline || []).flatMap(b => (b.conflicts.collisions || []).map(c => c[0])))];
+  $("r_hist").innerHTML = (r.replans || []).length ? "<b>변경 이력</b><br>" + r.replans.map((e, k) =>
+    `• t=${e.t.toFixed(0)} s 발표: ${e.reason} <span style="color:#4C5A66">(검사 ${e.check_ms.toFixed(0)} ms${e.cpu ? `, 재계획 ${e.cpu.toFixed(1)} s` : ""})</span>`).join("<br>") : "";
   $("r_base").innerHTML = nb ? `<span class="bad">비교: 장애물을 무시한 경로는 ${names.join(", ")} 와(과) 충돌</span>`
                              : `<span class="ok">비교: 장애물을 무시한 경로도 충돌 없음</span>`;
 }
@@ -358,7 +403,7 @@ async function init() {
   $("addpt").onclick = () => setMode(S.mode === "addpt" ? null : "addpt");
   $("mvhub").onclick = () => setMode(S.mode === "hub" ? null : "hub");
   $("mvdst").onclick = () => setMode(S.mode === "dst" ? null : "dst");
-  $("delobs").onclick = () => { S.obs.splice(S.sel, 1); S.sel = -1; refreshList(); draw(); };
+  $("delobs").onclick = () => { S.obs.splice(S.sel, 1); S.sel = -1; markChanged(); refreshList(); draw(); };
   $("clear").onclick = () => { S.obs = []; S.sel = -1; S.res = null; refreshList(); draw(); };
   $("example").onclick = async () => { const j = await api("/api/example"); S.obs = j.obstacles; S.sel = 0; S.res = null; refreshList(); draw(); };
   $("export").onclick = () => { const blob = new Blob([JSON.stringify({ meta: request(), obstacles: S.obs }, null, 1)], { type: "application/json" });
@@ -366,6 +411,7 @@ async function init() {
   $("import").onchange = async e => { const f = e.target.files[0]; if (!f) return; const j = JSON.parse(await f.text());
     S.obs = j.obstacles || []; S.sel = S.obs.length ? 0 : -1; S.res = null; refreshList(); draw(); };
   $("validate").onclick = doValidate; $("plan").onclick = doPlan;
+  $("replan").onclick = doReplan; $("replanall").onclick = doPlan;
   $("tslider").oninput = () => setT(Number($("tslider").value));
   $("play").onclick = () => { S.playing = !S.playing; $("play").textContent = S.playing ? "❚❚ 정지" : "▶ 재생"; if (S.playing) requestAnimationFrame(loop); };
   bindEditor(); refreshList(); setT(0);

@@ -65,6 +65,7 @@
         <span><i class="sw" style="background:#3A3A3A"></i>장애물 무시 경로(비교, 점선)</span>
         <span><i class="sw" style="background:#D7263D"></i>충돌 지점</span>
         <span><i class="sw" style="background:#9B5DE5"></i>장애물(현재 시각)</span>
+        <span><i class="sw" style="background:#E46C0A"></i>재계획 지점 ★ / 변경 전 계획(점선)</span>
         <span class="hint">지도 클릭: 선택 · 드래그: 위치/경로점 이동</span>
       </div>
     </div>
@@ -112,11 +113,19 @@
       <div class="row"><button id="validate">검증</button><button id="plan" class="primary">경로 계획 실행</button><span id="status"></span></div>
       <div id="errors"></div>
     </div>
+    <div class="card" id="replanbar" style="display:none;border:2px solid #E46C0A">
+      <h2 style="color:#E46C0A">장애물 변경 감지</h2>
+      <div style="font-size:12px">계획 이후 장애물이 바뀌었습니다. 현재 재생 시각 <b id="rp_t">t = 0 s</b>에 변경이 발표된 것으로 보고,
+        남은 경로를 검사해 <b>충돌할 때만</b> 그 시점부터 다시 계획합니다 (재계획 지연 3 s 반영).</div>
+      <div class="row" style="margin-top:6px"><button id="replan" class="primary" style="background:#E46C0A;border-color:#E46C0A">변경 반영 (현재 시각에서 재계획)</button>
+        <button id="replanall">처음부터 다시 계획</button></div>
+    </div>
     <div class="card" id="rescard" style="display:none">
       <h2>결과</h2>
       <div class="row"><span>도착 SOC</span><span class="big" id="r_soc"></span><span id="r_feas"></span></div>
       <table class="res"><thead><tr><th>구간</th><th>에너지</th><th>SOC</th><th>시간</th><th>대기</th><th>거리</th><th>최소 이격</th><th>계산</th></tr></thead><tbody id="r_legs"></tbody></table>
       <div style="margin-top:6px;font-size:12px" id="r_base"></div>
+      <div style="margin-top:6px;font-size:12px" id="r_hist"></div>
     </div>
   </aside>
 </main>

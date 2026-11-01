@@ -161,3 +161,39 @@ def test_st_planner_waits_for_crossing_wall():
     assert r["t_arrive"] > 120            # 벽이 사라진 뒤 통과
     r2 = sp.plan((0, 15, 2), (0, 15, 37), t_start=0.0, mass=3.1, max_wait=0.0, heading_heuristic=False)
     assert r2 is None                     # 대기 금지 + 우회 불가 → 허용 범위 내 해 없음
+
+
+def _toy_full_site():
+    s = _ToySite(nz=2, ny=30, nx=40)
+    s.ground = np.zeros((s.ny, s.nx))
+    s.wind_at = lambda t, k, j, i: (0.0, 0.0)
+    s.lowest_free_k = lambda x, y: (0, int(y // s.dx), int(x // s.dx))
+    return s
+
+
+def test_timeline_truth_clips_revisions():
+    from dpo.obstacles import DynObstacle
+    from dpo.st_rolling import ObstacleTimeline
+    a = DynObstacle(name="A", kind="cylinder", radius=50, path=[dict(x=100, y=100, t=0)])
+    b = DynObstacle(name="A", kind="cylinder", radius=50, path=[dict(x=900, y=100, t=0)])
+    tl = ObstacleTimeline([(0.0, [a]), (40.0, [b])])
+    tr = tl.truth()
+    assert len(tr) == 2
+    assert tr[0].window() == (0.0, 40.0) and tr[1].window()[0] == 40.0
+    assert tl.known_at(10.0)[0].path[0]["x"] == 100 and tl.known_at(41.0)[0].path[0]["x"] == 900
+
+
+def test_event_replanning_avoids_announced_obstacle():
+    from dpo.obstacles import DynObstacle
+    from dpo.st_rolling import ObstacleTimeline, run_obstacle_replanning
+    s = _toy_full_site()
+    # 출발 10 s 후 경로 중앙(약 x=500~600 m)을 덮는 정지 원기둥이 '발표'되고 10~300 s 존재
+    blk = DynObstacle(name="돌발", kind="cylinder", radius=120, z_min=0, z_max=1000, margin=0,
+                      path=[dict(x=560, y=387.5, t=0)], t_start=10.0, t_end=300.0)
+    tl = ObstacleTimeline([(0.0, []), (10.0, [blk])])
+    a, b = (62.5, 387.5), (937.5, 387.5)
+    once = run_obstacle_replanning(s, s, DR, a, b, 0.0, 3.1, tl, policy="once", latency=1.0, weight=1.0)
+    ev = run_obstacle_replanning(s, s, DR, a, b, 0.0, 3.1, tl, policy="event", latency=1.0, weight=1.0)
+    assert once["conflicts"]["n_collision_samples"] > 0
+    assert ev["conflicts"]["n_collision_samples"] == 0
+    assert ev["n_replans"] == 1

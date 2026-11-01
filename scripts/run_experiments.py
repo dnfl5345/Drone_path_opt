@@ -476,8 +476,81 @@ def E8():
     put_summary("E8_dynamic", res)
 
 
+# ------------------------------------------------------------------ E9 장애물 변경 → 이벤트 기반 롤링 재계획
+def e9_timeline(fc, dr):
+    """E8 장애물을 출발 전 정보로 두고, 비행 중 두 번 변경 발표 (헬기 항로 변경 / 행사 제한 확대·연장)."""
+    import copy as _copy
+    from dpo.obstacles import load_scenario
+    from dpo.st_planner import STPlanner
+    from dpo.st_rolling import ObstacleTimeline
+    obs0, _ = load_scenario(C.ROOT / "scenarios" / "e8_dynamic.json")
+    m = dr.m_empty + PAYLOAD
+    SP = STPlanner(fc, dr)
+    SP.set_obstacles(obs0, T_MAIN)
+    st, gl = fc.lowest_free_k(*HUB), fc.lowest_free_k(*DST)
+    r = SP.plan(st, gl, t_start=T_MAIN, mass=m, weight=1.2)
+    sim = simulate(fc, dr, r["path"], r["wait_before"], T_MAIN, m)
+    at = lambda t: [float(v[int(np.searchsorted(sim["t"] - T_MAIN, t))]) for v in (sim["x"], sim["y"])]
+    # 변경 1 (t=30 s): 헬기가 항로를 꺾어 현재 계획 경로의 t≈85 s 지점을 지나도록 변경
+    heli = next(o for o in obs0 if "헬기" in o.name)
+    hx, hy, _ = heli.position(30.0)
+    px, py = at(85.0)
+    vx, vy = (px - hx) / 55.0, (py - hy) / 55.0
+    heli2 = _copy.deepcopy(heli)
+    heli2.path = [dict(x=hx, y=hy, t=30.0), dict(x=px, y=py, t=85.0), dict(x=px + vx * 40, y=py + vy * 40, t=125.0)]
+    heli2.t_start, heli2.t_end = 30.0, 125.0
+    rev1 = [heli2 if o is heli else o for o in obs0]
+    # 변경 2 (t=60 s): 행사 임시 비행제한 확대(1.6배) + 종료 150→260 s
+    box = next(o for o in rev1 if o.kind == "box")
+    box2 = _copy.deepcopy(box)
+    box2.half_x, box2.half_y, box2.t_end = box.half_x * 1.6, box.half_y * 1.6, 260.0
+    rev2 = [box2 if o is box else o for o in rev1]
+    for o in rev1:
+        if "헬기" in o.name:
+            o.name = "응급 헬기 (항로 변경)"
+    tl = ObstacleTimeline([(0.0, obs0), (30.0, rev1), (60.0, rev2)])
+    return tl
+
+
+def E9():
+    from dpo.st_rolling import run_obstacle_replanning
+    from dpo.obstacles import save_scenario
+    g, fc, tr = sites()
+    dr = drone_calibrated()
+    m = dr.m_empty + PAYLOAD
+    tl = e9_timeline(fc, dr)
+    import json as _json
+    (C.ROOT / "scenarios" / "e9_timeline.json").write_text(_json.dumps(
+        dict(note="E9: 출발 기준 t_announce 에 발표되는 장애물 판(revision)",
+             revisions=[dict(t_announce=ta, obstacles=[o.to_dict() for o in obs]) for ta, obs in tl.sorted()]),
+        ensure_ascii=False, indent=1), encoding="utf-8")
+    usable = dr.battery_wh * 3600 * 0.8
+    rows, store = [], {}
+    for pol, kw, label in (("once", {}, "1회 계획 (재계획 없음)"),
+                           ("event", {}, "이벤트 기반 (변경 시 재계획)"),
+                           ("periodic", dict(period=30.0), "주기 재계획 (30 s마다)"),
+                           ("periodic60", dict(period=60.0), "주기 재계획 (60 s마다)"),
+                           ("oracle", {}, "오라클 (실제 미래 궤적을 미리 앎)")):
+        t = time.time()
+        res = run_obstacle_replanning(fc, tr, dr, HUB, DST, T_MAIN, m, tl, policy=pol.rstrip("0123456789"),
+                                      budget=usable, **kw)
+        cf = res["conflicts"]
+        rows.append(dict(policy=pol, label=label, E_kJ=res["E"] / 1000, soc_leg=res["soc"], T=res["T"],
+                         n_replans=res["n_replans"], cpu_total=res["cpu_total"], min_clear=cf["min_clearance"],
+                         n_conf=cf["n_collision_samples"], conflicts=sorted({c[0] for c in cf["collisions"]}),
+                         n_checks=sum(1 for e in res["events"] if e["kind"] != "initial"),
+                         check_ms=float(np.mean([e.get("check_ms", 0) for e in res["events"] if e["kind"] != "initial"] or [0]))))
+        store[pol] = dict(trace=res["trace"], plans=res["plans"], events=res["events"])
+        print(rows[-1], f"{time.time() - t:.1f}s")
+        for e in res["events"]:
+            print("   ", {k: (round(v, 2) if isinstance(v, float) else v) for k, v in e.items()})
+    out = dict(rows=rows, timeline=[dict(t=ta, obstacles=[o.to_dict() for o in obs]) for ta, obs in tl.sorted()])
+    save("E9", dict(**out, store=store))
+    put_summary("E9_replan", dict(rows=rows))
+
+
 if __name__ == "__main__":
-    todo = sys.argv[1:] or ["E0", "E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8"]
+    todo = sys.argv[1:] or ["E0", "E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "E9"]
     for name in todo:
         t = time.time()
         print(f"===== {name}")
