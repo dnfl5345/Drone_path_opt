@@ -40,6 +40,11 @@ MARGIN = 15.0
 SEG = 150.0               # 침입기 실측 구간 길이 [s]
 KN = [0.0, 5.0, 10.0, 15.0, 20.0]
 METHODS = [("N", None), ("G", 0.05), ("B", 0.05), ("Q", 0.05), ("G", 0.01), ("B", 0.01), ("Q", 0.01)]
+T_REACT = 10.0            # 반응 시간 = 감시 주기 5 s + 지연 3 s + 재계획 ~2 s
+if os.environ.get("E11_METHODS"):          # 예: "QF0.05,QF0.01" – 같은 조우로 방법만 추가 실행
+    METHODS = [(m.rstrip("0123456789."), float(m[len(m.rstrip("0123456789.")):]) if m[-1].isdigit() else None)
+               for m in os.environ["E11_METHODS"].split(",")]
+OUT = os.environ.get("E11_OUT", "E11")
 
 G_ = {}
 
@@ -71,7 +76,11 @@ def tube_knots(model, kind, eps, V):
         return [[0.0, V * k * model["s0"]], [H, V * k * (model["s0"] + model["s1"] * H)]]
     if kind == "B":
         return [[0.0, V * k * (model["s0"] + model["s1"] * H)]]
-    return [[t, V * r] for t, r in zip(KN, model["q"][eps])]
+    q = model["q"][eps]
+    if kind == "QF":   # 반응 시간 하한: 다음 관측·재계획 전까지 쌓이는 오차만큼은 항상 확보
+        floor = float(np.interp(T_REACT, KN, q))
+        return [[t, V * max(r, floor)] for t, r in zip(KN, q)]
+    return [[t, V * r] for t, r in zip(KN, q)]
 
 
 # ------------------------------------------------------------------ 침입기 (실측 항적 변환)
@@ -247,9 +256,9 @@ def main():
                 rows.append(r)
                 if n % 10 == 0 or n == len(jobs) - 1:
                     s = " ".join(f"{k}:{np.mean([x[k]['nmac'] for x in rows if x.get(k, {}).get('feasible')]):.3f}"
-                                 for k in ("N", "G0.05", "B0.05", "Q0.05", "G0.01", "B0.01", "Q0.01"))
+                                 for k in [kd if e is None else f"{kd}{e}" for kd, e in METHODS])
                     print(f"[E11] {n + 1}/{len(jobs)} nmac {s} ({time.time() - t0:.0f}s)", flush=True)
-                    save("E11_partial", dict(rows=rows))
+                    save(OUT + "_partial", dict(rows=rows))
     else:
         for n, j in enumerate(jobs):
             rows.append(run_job(j))
@@ -258,7 +267,7 @@ def main():
                                                                           for k, v in rows[-1].items()
                                                                           if isinstance(v, dict) and "feasible" in v},
                   flush=True)
-    save("E11", dict(rows=rows, models=models, params=dict(n_scen=n_scen, K=K, H=H, PERIOD=PERIOD, LATENCY=LATENCY,
+    save(OUT, dict(rows=rows, models=models, params=dict(n_scen=n_scen, K=K, H=H, PERIOD=PERIOD, LATENCY=LATENCY,
                                                            R_NMAC=R_NMAC, MARGIN=MARGIN, SEG=SEG, KN=KN,
                                                            METHODS=METHODS)))
     print(f"[E11] done {time.time() - t0:.0f}s", flush=True)

@@ -18,10 +18,15 @@ sys.path.insert(0, "scripts")
 from dpo import config as C  # noqa: E402
 from dpo.robust_eval import wilson  # noqa: E402
 
-KEYS = ["N", "G0.05", "B0.05", "Q0.05", "G0.01", "B0.01", "Q0.01"]
+KEYS = ["N", "G0.05", "B0.05", "Q0.05", "QF0.05", "G0.01", "B0.01", "Q0.01", "QF0.01"]
 LAB = {"N": "공칭 (팽창 없음)", "G0.05": "가우시안 튜브 ε=0.05", "B0.05": "고정 버퍼 ε=0.05", "Q0.05": "데이터 튜브 ε=0.05",
-       "G0.01": "가우시안 튜브 ε=0.01", "B0.01": "고정 버퍼 ε=0.01", "Q0.01": "데이터 튜브 ε=0.01"}
-COL = {"N": "#9E9E9E", "G": "#1B6CA8", "B": "#E07B39", "Q": "#2CA58D"}
+       "G0.01": "가우시안 튜브 ε=0.01", "B0.01": "고정 버퍼 ε=0.01", "Q0.01": "데이터 튜브 ε=0.01",
+       "QF0.05": "데이터 튜브+반응 하한 ε=0.05", "QF0.01": "데이터 튜브+반응 하한 ε=0.01"}
+COL = {"N": "#9E9E9E", "G": "#1B6CA8", "B": "#E07B39", "Q": "#2CA58D", "QF": "#7A3E9D"}
+
+
+def _col(k):
+    return COL["QF"] if k.startswith("QF") else COL[k[0]]
 rng = np.random.default_rng(7)
 
 
@@ -44,6 +49,14 @@ def mcnemar(a, b):
 def main(name="E11"):
     with open(C.RES / f"{name}.pkl", "rb") as f:
         D = pickle.load(f)
+    extra = C.RES / f"{name}b.pkl"
+    if extra.exists():                                    # 같은 조우로 추가 실행한 방법(E11b) 병합
+        with open(extra, "rb") as f:
+            Db = pickle.load(f)
+        idx = {(r["job"]["scen"], r["job"]["sample"]): r for r in Db["rows"]}
+        for r in D["rows"]:
+            r.update({k: v for k, v in idx.get((r["job"]["scen"], r["job"]["sample"]), {}).items()
+                      if k not in ("job", "V0")})
     rows = [r for r in D["rows"] if all(r.get(k, {}).get("feasible") for k in KEYS)]
     out = dict(params={k: v for k, v in D.get("params", {}).items() if k != "METHODS"}, n_jobs=len(D["rows"]),
                n_used=len(rows), V0=boot([r["V0"] for r in rows]))
@@ -71,11 +84,18 @@ def main(name="E11"):
     nm = {k: np.array([r[k]["nmac"] for r in rows]) for k in KEYS}
     out["paired"] = {f"{a}_vs_{b}": mcnemar(nm[a], nm[b]) for a, b in
                      [("N", "G0.05"), ("N", "Q0.05"), ("N", "B0.05"), ("G0.05", "Q0.05"), ("B0.05", "Q0.05"),
-                      ("G0.01", "Q0.01"), ("B0.01", "Q0.01"), ("N", "Q0.01")]}
+                      ("G0.01", "Q0.01"), ("B0.01", "Q0.01"), ("N", "Q0.01"), ("N", "QF0.05"), ("G0.05", "QF0.05"),
+                      ("Q0.05", "QF0.05"), ("N", "QF0.01")]}
     E = {k: np.array([r[k]["E"] for r in rows]) for k in KEYS}
     out["energy_paired"] = {f"{a}_vs_{b}": dict(diff_pct=boot((E[a] / E[b] - 1) * 100),
                                                 p=float(stats.wilcoxon(E[a], E[b]).pvalue) if np.any(E[a] != E[b]) else 1.0)
-                            for a, b in [("Q0.05", "B0.05"), ("Q0.05", "G0.05"), ("Q0.01", "B0.01"), ("Q0.01", "G0.01")]}
+                            for a, b in [("Q0.05", "B0.05"), ("Q0.05", "G0.05"), ("Q0.01", "B0.01"), ("Q0.01", "G0.01"),
+                                         ("QF0.05", "G0.05"), ("QF0.05", "B0.05"), ("QF0.05", "Q0.05"),
+                                         ("QF0.01", "G0.01"), ("QF0.01", "B0.01")]}
+    ms = {k: np.array([r[k]["min_sep"] for r in rows]) for k in KEYS}
+    out["sep_paired"] = {f"{a}_vs_{b}": dict(median_diff=float(np.median(ms[a] - ms[b])),
+                                             p=float(stats.wilcoxon(ms[a], ms[b]).pvalue))
+                         for a, b in [("QF0.05", "G0.05"), ("QF0.05", "Q0.05"), ("G0.05", "Q0.05"), ("QF0.05", "B0.05")]}
     (C.RES / "e11_stats.json").write_text(json.dumps(out, indent=1, ensure_ascii=False))
     for k in KEYS:
         m = M[k]
@@ -104,10 +124,11 @@ def figure(out, rows):
     xs = np.arange(len(KEYS))
     for i, k in enumerate(KEYS):
         m = M[k]
-        ax.bar(i, m["p"] * 100, color=COL[k[0]], alpha=0.9 if "0.01" not in k else 0.6,
+        ax.bar(i, m["p"] * 100, color=_col(k), alpha=0.9 if "0.01" not in k else 0.6,
                yerr=[[max(m["p"] - m["lo"], 0) * 100], [max(m["hi"] - m["p"], 0) * 100]], capsize=3)
         ax.text(i, m["hi"] * 100 + 0.8, f"{m['nmac']}/{m['n']}", ha="center", fontsize=7.5)
-    ax.set_xticks(xs); ax.set_xticklabels([LAB[k].replace(" ε", "\nε") for k in KEYS], fontsize=7.5)
+    ax.set_xticks(xs); ax.set_xticklabels([LAB[k].replace("데이터 튜브+반응 하한", "데이터+반응").replace(" ε", "\nε") for k in KEYS],
+                       fontsize=6.8)
     ax.set_ylabel("충돌 확률 [%] (Wilson 95% CI)")
     ax.set_title("(a) 충돌 확률 (반경 R 이내)", loc="left", fontsize=10.5)
     ax.grid(alpha=0.25, axis="y")
@@ -117,14 +138,14 @@ def figure(out, rows):
         ax.errorbar(m["energy_vs_N"][0], m["p"] * 100, xerr=[[m["energy_vs_N"][0] - m["energy_vs_N"][1]],
                                                               [m["energy_vs_N"][2] - m["energy_vs_N"][0]]],
                     yerr=[[max(m["p"] - m["lo"], 0) * 100], [max(m["hi"] - m["p"], 0) * 100]], fmt="o" if "0.01" not in k
-                    else "s", color=COL[k[0]], ms=7, capsize=2, label=LAB[k])
+                    else "s", color=_col(k), ms=7, capsize=2, label=LAB[k])
     ax.set_xlabel("같은 조우의 공칭 대비 에너지 [%]"); ax.set_ylabel("충돌 확률 [%]")
     ax.set_title("(b) 위험–에너지 (왼쪽 아래가 좋음)", loc="left", fontsize=10.5)
     ax.legend(frameon=False, fontsize=7.5); ax.grid(alpha=0.25)
     ax = axs[2]
-    for k in ("N", "G0.05", "B0.05", "Q0.05"):
+    for k in ("N", "G0.05", "B0.05", "Q0.05", "QF0.05"):
         ms = np.sort([r[k]["min_sep"] for r in rows])
-        ax.plot(ms, np.arange(1, len(ms) + 1) / len(ms) * 100, color=COL[k[0]], lw=2, label=LAB[k])
+        ax.plot(ms, np.arange(1, len(ms) + 1) / len(ms) * 100, color=_col(k), lw=2, label=LAB[k])
     ax.axvline(0, color="#D7263D", lw=1, ls="--"); ax.text(8, 3, "충돌", color="#D7263D", fontsize=8)
     ax.set_xlim(-150, 800)
     ax.set_xlabel("실제 궤적과의 최소 이격 (반경 R 제외) [m]"); ax.set_ylabel("누적 비율 [%]")
