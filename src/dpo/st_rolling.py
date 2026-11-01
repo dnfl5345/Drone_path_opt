@@ -107,8 +107,12 @@ def _snap(site, table, x, y, z, t):
 def run_obstacle_replanning(site_plan, site_truth, drone, a, b, t_dep, mass, timeline: ObstacleTimeline,
                             policy="event", period=30.0, latency=3.0, budget=np.inf, max_wait=180.0, weight=1.2,
                             opportunistic=False, opp_gain=0.02, max_replans=40, eps=None, inflate_const=None,
-                            observe=None, initial_plan=None, replan_weight=None):
+                            observe=None, initial_plan=None, replan_weight=None, fallbacks=()):
     """한 구간(a→b)을 비행하며 정책에 따라 재계획. 장애물 시각은 출발(t_dep) 기준.
+
+    fallbacks: 재관측 모드에서 현재 위치가 이미 팽창 영역 안이거나 대안이 없을 때 차례로 시도할
+               덜 보수적인 장애물 함수 목록 (t_rel → 장애물 목록). 예: [ε 를 키운 튜브, 팽창 없음].
+               그대로 진행해 충돌하는 대신 위험 한도를 단계적으로 완화해 회피 경로를 찾는다.
 
     반환 dict(trace(실제 비행 궤적), events(재계획/검사 기록), E, soc, conflicts(실제 궤적 vs 실제 장애물), cpu_total)
     """
@@ -178,20 +182,30 @@ def run_obstacle_replanning(site_plan, site_truth, drone, a, b, t_dep, mass, tim
         q = int(np.searchsorted(sim["t"], t_sw))
         x, y, z = sim["x"][q], sim["y"][q], sim["z"][q]
         t_sw = float(sim["t"][q])
-        SP.table = table
-        cur = _snap(site_plan, table, x, y, z, t_sw)
-        if cur is None:
-            ev["reason"] = "현재 위치가 위험구간 – 재계획 불가"
-            events.append(ev); continue
-        t0 = _time.perf_counter()
         used = sim["e"][q] + e_acc
-        r2 = SP.plan(cur, gl, t_start=t_sw, mass=mass, budget=budget - used, max_wait=max_wait,
-                     weight=replan_weight or weight)
+        t0 = _time.perf_counter()
+        r2, level = None, 0
+        tables = [table] + [None] * len(fallbacks)
+        for level in range(len(tables)):
+            if tables[level] is None:
+                tables[level] = build_interval_table(site_plan, fallbacks[level - 1](td - t_dep), t_offset=t_dep,
+                                                     eps=eps, inflate_const=inflate_const)
+            SP.table = tables[level]
+            cur = _snap(site_plan, tables[level], x, y, z, t_sw)
+            if cur is None:
+                continue
+            r2 = SP.plan(cur, gl, t_start=t_sw, mass=mass, budget=budget - used, max_wait=max_wait,
+                         weight=replan_weight or weight)
+            if r2 is not None:
+                break
+        SP.table = table
         rc = _time.perf_counter() - t0
         cpu_total += rc
         ev["cpu"] = rc
+        ev["fallback"] = level if r2 is not None else None
         if r2 is None:
-            ev["reason"] = "허용 범위 내 대안 없음 – 기존 경로 유지"
+            ev["reason"] = ("현재 위치가 위험구간 – 재계획 불가" if cur is None else "허용 범위 내 대안 없음") + \
+                " – 기존 경로 유지"
             events.append(ev); continue
         sim2 = simulate(site_truth, drone, r2["path"], r2["wait_before"], t_sw + r2.get("ground_delay", 0.0), mass,
                         U=site_truth.U, V=site_truth.V,

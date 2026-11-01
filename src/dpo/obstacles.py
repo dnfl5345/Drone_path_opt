@@ -44,6 +44,30 @@ class DynObstacle:
     sigma_v: float = 0.0      # 예측 시간에 따른 위치 오차 증가율 [m/s] (속도 추정 오차)
     sigma_t: float = 0.0      # 도달 시각 오차 [s]
     t_obs: float = 0.0        # 마지막 관측(발표) 시각 [s, 출발 기준]
+    # 데이터 기반 팽창 모양 (선택): [[τ_k, r_k], …]  τ=예측 시간[s], r=추가 팽창 반경[m] (구간별 선형, 끝은 마지막 기울기로 연장)
+    # 지정하면 κ_ε·σ(t) 대신 사용 (예: 실측 항적 오차의 1−ε 분위수 곡선)
+    tube: list | None = None
+
+    def inflation(self, t, kap=0.0):
+        """시각 t 의 추가 팽창 반경과 그 시점 이후의 증가율 (r, dr/dt)."""
+        tau = t - self.t_obs
+        if self.tube:
+            k = np.asarray(self.tube, float)
+            tk, rk = k[:, 0], k[:, 1]
+            if len(tk) == 1 or tau < tk[0]:
+                return float(rk[0]), 0.0
+            q = int(np.clip(np.searchsorted(tk, tau, side="right") - 1, 0, len(tk) - 2))
+            sl = _slope(tk, rk, q)
+            return float(rk[q] + sl * (tau - tk[q])), float(sl)
+        if kap <= 0:
+            return 0.0, 0.0
+        return kap * (self.sigma0 + self.sigma_v * max(tau, 0.0)), (kap * self.sigma_v if tau >= 0 else 0.0)
+
+    def breakpoints(self):
+        """팽창 증가율이 바뀌는 시각들 (관측 시각 + 꺾임점)."""
+        if self.tube:
+            return [self.t_obs + float(k[0]) for k in self.tube]
+        return [self.t_obs]
 
     # -------------------------------------------------------------- 위치
     def times(self):
@@ -78,6 +102,10 @@ class DynObstacle:
     def from_dict(d):
         keys = DynObstacle.__dataclass_fields__
         return DynObstacle(**{k: v for k, v in d.items() if k in keys})
+
+
+def _slope(tk, rk, q):
+    return (rk[q + 1] - rk[q]) / max(tk[q + 1] - tk[q], 1e-9)
 
 
 # ------------------------------------------------------------------ 유효성 검사 ("가능한 범위에서만 허용")
@@ -122,6 +150,14 @@ def validate(obs: list, site, t_horizon=LIMITS["t_max"]):
                 e.append(f"고도 범위 {o.z_min:.0f}~{o.z_max:.0f} m 가 비행 레이어({zlo:.0f}~{zhi:.0f} m)와 겹치지 않음 (영향 없음)")
         if not (LIMITS["margin"][0] <= o.margin <= LIMITS["margin"][1]):
             e.append("안전 이격은 0~200 m")
+        if o.tube:
+            try:
+                k = np.asarray(o.tube, float)
+                if k.ndim != 2 or k.shape[1] != 2 or np.any(np.diff(k[:, 0]) <= 0) or k[0, 0] < 0 \
+                        or np.any(k[:, 1] < 0) or np.any(k[:, 1] > 5000):
+                    e.append("팽창 모양(tube)은 τ 오름차순 [[τ, r], …], 0 ≤ r ≤ 5000 m")
+            except (TypeError, ValueError):
+                e.append("팽창 모양(tube) 형식 오류")
         for f, unit in (("sigma0", "m"), ("sigma_v", "m/s"), ("sigma_t", "s")):
             lo_, hi_ = LIMITS[f]
             if not (lo_ <= getattr(o, f) <= hi_):
@@ -228,21 +264,24 @@ def build_interval_table(site, obstacles, t_offset=0.0, extra=None, eps=None, ho
                 segs.insert(0, (pts[0], pts[0], t0w, ts[0]))
             if t1w > ts[-1]:
                 segs.append((pts[-1], pts[-1], ts[-1], t1w))
-        sv = kap * o.sigma_v if eps else 0.0
-        dil = kt * o.sigma_t if eps else 0.0
+        use = bool(o.tube) or bool(eps)
+        kap_o = kap if eps else 0.0
+        dil = kt * o.sigma_t if (eps and not o.tube) else 0.0
         const = (inflate_const or 0.0)
-        # 관측 시각에서 구간을 나눠 σ(t) 를 구간별 선형으로 만든다
+        # 팽창 증가율이 바뀌는 시각(관측 시각·꺾임점)에서 구간을 나눠 팽창 반경을 구간별 선형으로 만든다
+        bps = sorted(o.breakpoints()) if use else []
         segs2 = []
         for pa, pb, ta0, tb0 in segs:
-            if sv > 0 and ta0 < o.t_obs < tb0:
-                segs2 += [(pa, pb, ta0, tb0, ta0, o.t_obs), (pa, pb, ta0, tb0, o.t_obs, tb0)]
-            else:
-                segs2.append((pa, pb, ta0, tb0, ta0, tb0))
+            cuts = [ta0] + [b for b in bps if ta0 < b < tb0] + [tb0]
+            for ca, cb in zip(cuts[:-1], cuts[1:]):
+                segs2.append((pa, pb, ta0, tb0, ca, cb))
         for pa, pb, ta0, tb0, ca, cb in segs2:
             ta, tb = max(ca, t0w), min(cb, t1w)
             if tb <= ta and not (ta == tb == 0):
                 continue
-            if sv > 0 and not math.isfinite(tb):
+            infl_a, g1 = o.inflation(ta + 1e-9, kap_o) if use else (0.0, 0.0)
+            infl_a = o.inflation(ta, kap_o)[0] if use else 0.0
+            if g1 > 0 and not math.isfinite(tb):
                 tb = ta + horizon                         # 불확실성이 계속 커지는 경우 예측 지평 제한
             dt0 = tb0 - ta0
             if math.isfinite(dt0) and dt0 > 1e-9:
@@ -254,10 +293,8 @@ def build_interval_table(site, obstacles, t_offset=0.0, extra=None, eps=None, ho
                 x1, y1 = pa["x"] + ux * (tb - ta0), pa["y"] + uy * (tb - ta0)
             else:
                 x1, y1 = x0, y0
-            sig_a = o.sigma0 + o.sigma_v * max(ta - o.t_obs, 0.0) if eps else 0.0
-            g1 = sv if ta >= o.t_obs - 1e-9 else 0.0       # 팽창 증가율 [m/s]
             T = tb - ta
-            base = (o.radius if o.kind != "box" else 0.0) + o.margin + c_cell + const + kap * sig_a
+            base = (o.radius if o.kind != "box" else 0.0) + o.margin + c_cell + const + infl_a
             grow_max = g1 * (T if math.isfinite(T) else 0.0)
             reach = (base if o.kind != "box" else math.hypot(o.half_x, o.half_y) + base) + grow_max
             i0 = max(int((min(x0, x1) - reach) // dx), 0); i1 = min(int((max(x0, x1) + reach) // dx) + 1, nx)
@@ -270,7 +307,7 @@ def build_interval_table(site, obstacles, t_offset=0.0, extra=None, eps=None, ho
                 lx, hx_ = _lin_box(rx, ux, o.half_x + base, g1, T)
                 ly, hy_ = _lin_box(ry, uy, o.half_y + base, g1, T)
                 ivs = [(np.maximum(lx, ly), np.minimum(hx_, hy_))]
-                zpad = o.margin + const + kap * sig_a + grow_max
+                zpad = o.margin + const + infl_a + grow_max
                 zr = (o.z_min - zpad, o.z_max + zpad)
             else:
                 rho0 = base
@@ -282,7 +319,7 @@ def build_interval_table(site, obstacles, t_offset=0.0, extra=None, eps=None, ho
                     zc0, zc1 = pa.get("z", 0.5 * (o.z_min + o.z_max)), pb.get("z", 0.5 * (o.z_min + o.z_max))
                     zr = (min(zc0, zc1) - rho0 - grow_max, max(zc0, zc1) + rho0 + grow_max)
                 else:
-                    zpad = o.margin + const + kap * sig_a + grow_max
+                    zpad = o.margin + const + infl_a + grow_max
                     zr = (o.z_min - zpad, o.z_max + zpad)
             ks = np.where((site.z >= zr[0] - site.dz / 2) & (site.z <= zr[1] + site.dz / 2))[0]
             if len(ks) == 0:

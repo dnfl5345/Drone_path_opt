@@ -239,3 +239,34 @@ def test_quad_le0_brute_force_including_split_intervals():
                 inside |= (tau >= lo[0] - 1e-9) & (tau <= hi[0] + 1e-9)
         truth = a * tau ** 2 + b * tau + c <= 1e-9
         assert (inside == truth).mean() > 0.9995, (a, b, c)
+
+
+def test_piecewise_tube_matches_brute_force():
+    """데이터 기반 구간별 선형 팽창 모양: 셀별 위험구간이 시각 전수 검사와 일치 (꺾임점·관측시각 분할 포함)."""
+    from dpo.obstacles import DynObstacle, build_interval_table
+    s = _ToySite()
+    knots = [[0.0, 10.0], [30.0, 40.0], [60.0, 160.0], [120.0, 200.0]]   # 30–60 s 구간은 장애물보다 빨리 커짐
+    o = DynObstacle(kind="cylinder", radius=30, z_min=0, z_max=500, margin=0, t_obs=10.0, tube=knots,
+                    path=[dict(x=100, y=375, t=0), dict(x=900, y=375, t=200)])
+    T = build_interval_table(s, [o], t_offset=0.0)
+    c = 0.71 * s.dx
+    ts = np.arange(0.0, 200.0001, 0.02)
+    cx = 100 + 4.0 * ts
+    infl = np.array([o.inflation(t)[0] for t in ts])
+    bad = mism = 0
+    for j in (3, 10, 15, 22):
+        for i in range(0, s.nx, 3):
+            n = (0 * s.ny + j) * s.nx + i
+            qx, qy = (i + 0.5) * s.dx, (j + 0.5) * s.dx
+            truth = np.hypot(qx - cx, qy - 375) <= 30 + c + infl
+            got = np.zeros_like(truth)
+            q = T["off"][n]
+            if q >= 0:
+                for k in range(T["cnt"][n]):
+                    got |= (ts >= T["lo"][q + k] - 1e-6) & (ts <= T["hi"][q + k] + 1e-6)
+            mism += np.sum(truth != got); bad += truth.size
+    # 구간 병합(1 s 이내 간격) 외에는 일치
+    assert mism / bad < 2e-3
+    # 팽창 반경 함수: 관측 전 일정, 꺾임점 사이 선형, 마지막 기울기로 연장
+    assert o.inflation(5.0)[0] == 10.0 and abs(o.inflation(25.0)[0] - 25.0) < 1e-9
+    assert abs(o.inflation(10.0 + 150.0)[0] - (200 + 40 / 60 * 30)) < 1e-9
