@@ -6,3 +6,4 @@ data/raw/*.tif
 data/raw/overture_buildings.json
 data/raw/cmu_m100_flight_level.csv
 *.pdf
+results/*_partial.pkl

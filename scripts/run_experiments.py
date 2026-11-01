@@ -15,7 +15,7 @@ import numpy as np
 from dpo import config as C
 from dpo.energy import Drone, load_cmu, calibrate, predict_flight_energy, metrics, soc_drop
 from dpo.wind_field import Site3D
-from dpo.planner import Planner, simulate, path_length
+from dpo.planner import Planner, simulate, path_length, vertical_energy
 from dpo.mission import Mission, run_round_trip, run_rolling, _leg
 
 T0 = np.datetime64("2026-10-27T00:00")   # 00 UTC = 09:00 KST
@@ -434,7 +434,8 @@ def E8():
         r = SP.plan(st, gl, t_start=T_MAIN, mass=m, budget=usable, **cfg["kw"])
         if r is None:
             rows.append(dict(key=key, label=cfg["label"], feasible=False)); continue
-        sim = simulate(tr, dr, r["path"], r["wait_before"], T_MAIN, m, U=tr.U, V=tr.V, tax=tr.t_axis)
+        sim = simulate(tr, dr, r["path"], r["wait_before"], T_MAIN + r.get("ground_delay", 0.0), m, U=tr.U, V=tr.V,
+                       tax=tr.t_axis)
         cf = check_path_conflicts(fc, sim, obs, T_MAIN)
         rows.append(dict(key=key, label=cfg["label"], feasible=True, E_kJ=sim["e"][-1] / 1000,
                          soc_leg=soc_drop(sim["e"][-1], dr), T=sim["t"][-1] - T_MAIN, wait=float(r["wait_before"].sum()),
@@ -459,7 +460,8 @@ def E8():
         r = SP.plan(st, gl, t_start=T_MAIN, mass=m, budget=usable, **kw)
         if r is None:
             rows.append(dict(key=key, label=label, feasible=False)); print(key, "infeasible"); continue
-        sim = simulate(tr, dr, r["path"], r["wait_before"], T_MAIN, m, U=tr.U, V=tr.V, tax=tr.t_axis)
+        sim = simulate(tr, dr, r["path"], r["wait_before"], T_MAIN + r.get("ground_delay", 0.0), m, U=tr.U, V=tr.V,
+                       tax=tr.t_axis)
         cf = check_path_conflicts(fc, sim, band, T_MAIN)
         rows.append(dict(key=key, label=label, feasible=True, E_kJ=sim["e"][-1] / 1000, soc_leg=soc_drop(sim["e"][-1], dr),
                          T=sim["t"][-1] - T_MAIN, wait=float(r["wait_before"].sum()), L=path_length(fc, r["path"]),
@@ -547,6 +549,166 @@ def E9():
     out = dict(rows=rows, timeline=[dict(t=ta, obstacles=[o.to_dict() for o in obs]) for ta, obs in tl.sorted()])
     save("E9", dict(**out, store=store))
     put_summary("E9_replan", dict(rows=rows))
+
+
+# ------------------------------------------------------------------ E10 궤적 불확실성 하 강건 계획 (몬테카를로)
+E10_HOURS = (15, 16, 17, 18)
+
+
+def E10(n_scen=30, K=1000, n_closed=15, K_closed=25, obs_period=20.0):
+    from dpo.st_planner import STPlanner
+    from dpo.st_rolling import ObstacleTimeline, run_obstacle_replanning
+    from dpo.robust_eval import (make_scenario, sample_truth, sample_truth_t, mc_collisions, fixed_buffer, with_sigma,
+                                 observe_fn, wilson)
+    g, fc, tr = sites()
+    dr = drone_calibrated()
+    m = dr.m_empty + PAYLOAD
+    usable = dr.battery_wh * 3600 * 0.8
+    SP = STPlanner(fc, dr)
+    st, gl = fc.lowest_free_k(*HUB), fc.lowest_free_k(*DST)
+    noms = {}
+    for h in E10_HOURS:
+        t_dep = (h - KST) * 3600.0
+        r0 = SP.plan(st, gl, t_start=t_dep, mass=m, ignore_obstacles=True, weight=1.0)
+        noms[h] = simulate(fc, dr, r0["path"], r0["wait_before"], t_dep, m)
+    rng = np.random.default_rng(2026)
+    scen = []
+    for q in range(n_scen):
+        h = int(rng.choice(E10_HOURS))
+        t_dep = (h - KST) * 3600.0
+        obs = make_scenario(rng, noms[h], t_dep)
+        scen.append(dict(id=q, hour=h, t_dep=t_dep, obs=obs, T_nom=float(noms[h]["t"][-1] - t_dep)))
+
+    def plan_eval(sc, obs_plan, eps=None, label="", sig=None, K_=K):
+        SP.set_obstacles(obs_plan, sc["t_dep"], eps=eps)
+        t0 = time.time()
+        r = SP.plan(st, gl, t_start=sc["t_dep"], mass=m, weight=1.0, budget=usable)
+        cpu = time.time() - t0
+        if r is None:
+            return dict(label=label, feasible=False, cpu=cpu)
+        truth_obs = sc["obs"] if sig is None else with_sigma(sc["obs"], sigma_v=sig)
+        smp = sample_truth(np.random.default_rng(10_000 + sc["id"] + (0 if sig is None else int(sig * 1000))), truth_obs, K_)
+        out = dict(label=label, feasible=True, cpu=cpu, cells=SP.table["n_cells"])
+        smp_t = sample_truth_t(np.random.default_rng(30_000 + sc["id"] + (0 if sig is None else int(sig * 1000))),
+                               truth_obs, K_)
+        for wname, site, S_ in (("plan", fc, smp), ("truth", tr, smp), ("t3", fc, smp_t)):
+            sim = simulate(site, dr, r["path"], r["wait_before"], sc["t_dep"] + r["ground_delay"], m, U=site.U, V=site.V,
+                           tax=site.t_axis)
+            hit, cl = mc_collisions(sim, sc["t_dep"], truth_obs, S_)
+            out[wname] = dict(E=float(sim["e"][-1]), T=float(sim["t"][-1] - sc["t_dep"]), n_hit=int(hit.sum()), K=K_,
+                              clear_p5=float(np.percentile(cl, 5)))
+        out.update(path=r["path"], wait=r["wait_before"], ground_delay=float(r["ground_delay"]),
+                   wait_total=float(r["wait_before"].sum()))
+        return out
+
+    rows = []
+    t_all = time.time()
+    for sc in scen:
+        obs = sc["obs"]
+        Th = 1.3 * sc["T_nom"]
+        res = dict(id=sc["id"], hour=sc["hour"], T_nom=sc["T_nom"])
+        res["N"] = plan_eval(sc, obs, None, "N")
+        res["B"] = plan_eval(sc, fixed_buffer(obs, Th), 0.05, "B(0.05)")
+        for e in (0.2, 0.1, 0.05, 0.01):
+            res[f"R{e}"] = plan_eval(sc, obs, e, f"R({e})")
+        for sv in (0.25, 1.0):        # 민감도: 불확실성 증가율
+            o2 = with_sigma(obs, sigma_v=sv)
+            res[f"N_sv{sv}"] = plan_eval(sc, o2, None, "N", sig=sv)
+            res[f"B_sv{sv}"] = plan_eval(sc, fixed_buffer(o2, Th), 0.05, "B", sig=sv)
+            res[f"R0.05_sv{sv}"] = plan_eval(sc, o2, 0.05, "R", sig=sv)
+        rows.append(res)
+        print(f"[E10] scen {sc['id']:2d} h={sc['hour']} " + " ".join(
+            f"{k}:{(v['plan']['n_hit'] / v['plan']['K']):.3f}/{v['plan']['E'] / 1000:.1f}" if v.get("feasible") else f"{k}:X"
+            for k, v in res.items() if isinstance(v, dict) and k in ("N", "B", "R0.1", "R0.05", "R0.01")),
+            f"({time.time() - t_all:.0f}s)", flush=True)
+        save("E10_open_partial", dict(rows=rows))
+    # ---------------- 폐루프: 주기적 재관측(불확실성 재설정) + 충돌 시에만 재계획
+    closed = []
+    for sc in scen[:n_closed]:
+        obs = sc["obs"]
+        smp = sample_truth(np.random.default_rng(20_000 + sc["id"]), obs, K_closed)
+        tl = ObstacleTimeline([(0.0, obs)])
+        rec = dict(id=sc["id"])
+        for key, eps in (("N+O", None), ("R0.05+O", 0.05)):
+            hits, Es, nrep, cpus = [], [], [], []
+            for k in range(K_closed):
+                res = run_obstacle_replanning(fc, fc, dr, HUB, DST, sc["t_dep"], m, tl, policy="observe",
+                                              period=obs_period, latency=3.0, budget=usable, weight=1.0, eps=eps,
+                                              observe=lambda t_rel, k=k: observe_fn(obs, smp, k, t_rel))
+                if not res.get("feasible", True):
+                    hits.append(np.nan); continue
+                trc = res["trace"]
+                one = [{kk: v[k:k + 1] for kk, v in s_.items()} for s_ in smp]
+                h_, _ = mc_collisions(trc, sc["t_dep"], obs, one)
+                hits.append(bool(h_[0])); Es.append(res["E"]); nrep.append(res["n_replans"]); cpus.append(res["cpu_total"])
+            rec[key] = dict(n_hit=int(np.nansum(hits)), K=int(np.sum(~np.isnan(np.array(hits, float)))),
+                            E_mean=float(np.mean(Es)) if Es else np.nan, replans=float(np.mean(nrep)) if nrep else np.nan,
+                            cpu=float(np.mean(cpus)) if cpus else np.nan)
+        closed.append(rec)
+        print(f"[E10-closed] scen {sc['id']:2d}", {k: (v["n_hit"], round(v["E_mean"] / 1000, 1), round(v["replans"], 2))
+                                                  for k, v in rec.items() if isinstance(v, dict)},
+              f"({time.time() - t_all:.0f}s)", flush=True)
+        save("E10_closed_partial", dict(closed=closed))
+    save("E10", dict(rows=rows, closed=closed, scen=[dict(id=s_["id"], hour=s_["hour"], T_nom=s_["T_nom"],
+                                                            obs=[o.to_dict() for o in s_["obs"]]) for s_ in scen],
+                     params=dict(n_scen=n_scen, K=K, n_closed=n_closed, K_closed=K_closed, obs_period=obs_period,
+                                 sigma0=10.0, sigma_v=0.5, sigma_t=2.0, hours=E10_HOURS, weight=1.0)))
+    print("[E10] done", f"{time.time() - t_all:.0f}s")
+
+
+def E10b(n_closed=12, K_closed=15, obs_period=20.0, replan_weight=1.2):
+    """E10 폐루프: 주기적 재관측(실제 상태로 예측 갱신·불확실성 재설정) + 충돌 예상 시에만 재계획."""
+    from dpo.st_planner import STPlanner
+    from dpo.st_rolling import ObstacleTimeline, run_obstacle_replanning
+    from dpo.robust_eval import sample_truth, mc_collisions, observe_fn, make_scenario
+    g, fc, tr = sites()
+    dr = drone_calibrated()
+    m = dr.m_empty + PAYLOAD
+    usable = dr.battery_wh * 3600 * 0.8
+    SP = STPlanner(fc, dr)
+    st, gl = fc.lowest_free_k(*HUB), fc.lowest_free_k(*DST)
+    noms = {}
+    for h in E10_HOURS:                                  # E10 과 동일한 시나리오 재생성 (같은 난수열)
+        t_dep = (h - KST) * 3600.0
+        r0 = SP.plan(st, gl, t_start=t_dep, mass=m, ignore_obstacles=True, weight=1.0)
+        noms[h] = simulate(fc, dr, r0["path"], r0["wait_before"], t_dep, m)
+    rng = np.random.default_rng(2026)
+    scen = []
+    for q in range(30):
+        h = int(rng.choice(E10_HOURS)); t_dep = (h - KST) * 3600.0
+        scen.append(dict(id=q, hour=h, t_dep=t_dep, obs=make_scenario(rng, noms[h], t_dep)))
+    closed = []
+    t_all = time.time()
+    for sc in scen[:n_closed]:
+        obs = sc["obs"]
+        smp = sample_truth(np.random.default_rng(20_000 + sc["id"]), obs, K_closed)
+        tl = ObstacleTimeline([(0.0, obs)])
+        rec = dict(id=sc["id"], hour=sc["hour"])
+        for key, eps in (("N+O", None), ("R0.05+O", 0.05)):
+            SP.set_obstacles(obs, sc["t_dep"], eps=eps)
+            _, t_to = vertical_energy(fc, dr, HUB[0], HUB[1], st[0], sc["t_dep"], m, up=True)
+            r_init = SP.plan(st, gl, t_start=sc["t_dep"] + t_to, mass=m, weight=1.0, budget=usable)   # 샘플 공통 초기 계획
+            hits, Es, nrep, cpus = [], [], [], []
+            for k in range(K_closed):
+                res = run_obstacle_replanning(fc, fc, dr, HUB, DST, sc["t_dep"], m, tl, policy="observe",
+                                              period=obs_period, latency=3.0, budget=usable, weight=1.0, eps=eps,
+                                              observe=lambda t_rel, k=k: observe_fn(obs, smp, k, t_rel),
+                                              initial_plan=r_init, replan_weight=replan_weight)
+                if not res.get("feasible", True):
+                    continue
+                one = [{kk: v[k:k + 1] for kk, v in s_.items()} for s_ in smp]
+                h_, _ = mc_collisions(res["trace"], sc["t_dep"], obs, one)
+                hits.append(bool(h_[0])); Es.append(res["E"]); nrep.append(res["n_replans"]); cpus.append(res["cpu_total"])
+            rec[key] = dict(n_hit=int(np.sum(hits)), K=len(hits), E_mean=float(np.mean(Es)) if Es else np.nan,
+                            E_list=Es, replans=float(np.mean(nrep)) if nrep else np.nan,
+                            cpu=float(np.mean(cpus)) if cpus else np.nan)
+        closed.append(rec)
+        print(f"[E10b] scen {sc['id']:2d}", {k: (v["n_hit"], v["K"], round(v["E_mean"] / 1000, 1), round(v["replans"], 2))
+                                            for k, v in rec.items() if isinstance(v, dict)},
+              f"({time.time() - t_all:.0f}s)", flush=True)
+        save("E10b_partial", dict(closed=closed))
+    save("E10b", dict(closed=closed, params=dict(n_closed=n_closed, K_closed=K_closed, obs_period=obs_period,
+                                                  replan_weight=replan_weight, latency=3.0)))
 
 
 if __name__ == "__main__":

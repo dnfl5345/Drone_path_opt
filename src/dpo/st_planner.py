@@ -271,11 +271,13 @@ class STPlanner:
         self.rho = site.rho_layers()
         self.table = None
 
-    def set_obstacles(self, obstacles, t_offset, include_tnfz=True):
+    def set_obstacles(self, obstacles, t_offset, include_tnfz=True, eps=None, inflate_const=None):
+        """eps: 기회 제약 위험 한도(불확실성 튜브), inflate_const: 고정 버퍼(비교용)."""
         from .obstacles import build_interval_table
         t0 = _time.perf_counter()
         self.table = build_interval_table(self.site, obstacles, t_offset=t_offset,
-                                          extra=True if include_tnfz else None)
+                                          extra=True if include_tnfz else None, eps=eps,
+                                          inflate_const=inflate_const)
         self.table_time = _time.perf_counter() - t0
         return self.table
 

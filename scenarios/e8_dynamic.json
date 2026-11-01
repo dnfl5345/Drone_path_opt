@@ -32,7 +32,11 @@
    "z_max": 160.0,
    "t_start": null,
    "t_end": null,
-   "margin": 15
+   "margin": 15,
+   "sigma0": 0.0,
+   "sigma_v": 0.0,
+   "sigma_t": 0.0,
+   "t_obs": 0.0
   },
   {
    "name": "응급 헬기 (전 고도)",
@@ -61,7 +65,11 @@
    "z_max": 1000,
    "t_start": null,
    "t_end": null,
-   "margin": 30
+   "margin": 30,
+   "sigma0": 0.0,
+   "sigma_v": 0.0,
+   "sigma_t": 0.0,
+   "t_obs": 0.0
   },
   {
    "name": "행사 임시 비행제한 (정지)",
@@ -80,7 +88,11 @@
    "z_max": 1000,
    "t_start": 0.0,
    "t_end": 150.0,
-   "margin": 10
+   "margin": 10,
+   "sigma0": 0.0,
+   "sigma_v": 0.0,
+   "sigma_t": 0.0,
+   "t_obs": 0.0
   }
  ]
 }

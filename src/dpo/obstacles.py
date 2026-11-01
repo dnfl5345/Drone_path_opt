@@ -22,7 +22,8 @@ from dataclasses import dataclass, field, asdict
 import numpy as np
 
 KINDS = ("cylinder", "sphere", "box")
-LIMITS = dict(radius=(5.0, 1500.0), half=(5.0, 1500.0), speed_max=80.0, t_max=7200.0, n_max=30, margin=(0.0, 200.0))
+LIMITS = dict(radius=(5.0, 1500.0), half=(5.0, 1500.0), speed_max=80.0, t_max=7200.0, n_max=30, margin=(0.0, 200.0),
+              sigma0=(0.0, 500.0), sigma_v=(0.0, 20.0), sigma_t=(0.0, 120.0))
 
 
 @dataclass
@@ -38,6 +39,11 @@ class DynObstacle:
     t_start: float | None = None
     t_end: float | None = None
     margin: float = 15.0
+    # 궤적 불확실성 (축별 표준편차 σ(t) = sigma0 + sigma_v·(t − t_obs)⁺, 시각 오차 표준편차 sigma_t)
+    sigma0: float = 0.0       # 관측 시점 위치 오차 [m]
+    sigma_v: float = 0.0      # 예측 시간에 따른 위치 오차 증가율 [m/s] (속도 추정 오차)
+    sigma_t: float = 0.0      # 도달 시각 오차 [s]
+    t_obs: float = 0.0        # 마지막 관측(발표) 시각 [s, 출발 기준]
 
     # -------------------------------------------------------------- 위치
     def times(self):
@@ -116,6 +122,10 @@ def validate(obs: list, site, t_horizon=LIMITS["t_max"]):
                 e.append(f"고도 범위 {o.z_min:.0f}~{o.z_max:.0f} m 가 비행 레이어({zlo:.0f}~{zhi:.0f} m)와 겹치지 않음 (영향 없음)")
         if not (LIMITS["margin"][0] <= o.margin <= LIMITS["margin"][1]):
             e.append("안전 이격은 0~200 m")
+        for f, unit in (("sigma0", "m"), ("sigma_v", "m/s"), ("sigma_t", "s")):
+            lo_, hi_ = LIMITS[f]
+            if not (lo_ <= getattr(o, f) <= hi_):
+                e.append(f"불확실성 {f} 는 {lo_:g}~{hi_:g} {unit}")
         if e:
             errs += [f"[{o.name}] {m}" for m in e]
         else:
@@ -124,25 +134,74 @@ def validate(obs: list, site, t_horizon=LIMITS["t_max"]):
 
 
 # ------------------------------------------------------------------ 위험 시간구간 계산
-def _quad_interval(a, b, c, t0, t1):
-    """a t² + b t + c ≤ 0 인 t ∈ [t0, t1] 구간 (배열 연산). 반환 lo, hi (없으면 lo > hi)."""
-    lo = np.full(np.shape(c), np.inf); hi = np.full(np.shape(c), -np.inf)
-    if a < 1e-12:  # 정지(속도 0): c ≤ 0 이면 전 구간
-        m = c <= 0
-        lo[m], hi[m] = t0, t1
-        return lo, hi
+def risk_kappa(eps):
+    """기회 제약 팽창 계수: 2차원 등방 가우시안 위치오차(축별 σ)의 반경 꼬리
+    P(‖e‖ > κσ) = exp(−κ²/2) = ε  →  κ = √(2 ln(1/ε))."""
+    return math.sqrt(2.0 * math.log(1.0 / eps))
+
+
+def timing_kappa(eps):
+    """시각 오차(가우시안 σ_t)의 양측 1−ε 분위수 z_{1−ε/2}."""
+    from statistics import NormalDist
+    return NormalDist().inv_cdf(1.0 - eps / 2.0)
+
+
+def _quad_le0(a, b, c, T):
+    """a τ² + b τ + c ≤ 0 를 만족하는 τ ∈ [0, T] (a 스칼라, b·c 배열). 반환 [(lo, hi), …] (최대 2개, 빈 구간 lo>hi).
+    a<0 (불확실성 반경 증가율 > 상대속도) 이면 두 근 바깥쪽(두 구간)이 해가 된다."""
+    shp = np.shape(c)
+    b = np.broadcast_to(b, shp).astype(float); c = np.asarray(c, float)
+    E = lambda: (np.full(shp, np.inf), np.full(shp, -np.inf))
+    if abs(a) < 1e-12:
+        lo, hi = E()
+        m0 = np.abs(b) < 1e-12
+        lo[m0 & (c <= 0)], hi[m0 & (c <= 0)] = 0.0, T
+        mp = b > 1e-12
+        r = np.where(mp, -c / np.where(mp, b, 1), 0)
+        lo[mp], hi[mp] = 0.0, np.minimum(r[mp], T)
+        mn = b < -1e-12
+        r = np.where(mn, -c / np.where(mn, b, 1), 0)
+        lo[mn], hi[mn] = np.maximum(r[mn], 0.0), T
+        return [(lo, hi)]
     disc = b * b - 4 * a * c
-    m = disc >= 0
-    sq = np.sqrt(np.where(m, disc, 0))
+    ok = disc >= 0
+    sq = np.sqrt(np.where(ok, disc, 0))
     r1 = (-b - sq) / (2 * a); r2 = (-b + sq) / (2 * a)
-    lo[m] = np.maximum(r1[m], t0); hi[m] = np.minimum(r2[m], t1)
+    ra, rb = np.minimum(r1, r2), np.maximum(r1, r2)
+    if a > 0:
+        lo, hi = E()
+        lo[ok], hi[ok] = np.maximum(ra[ok], 0.0), np.minimum(rb[ok], T)
+        return [(lo, hi)]
+    lo1, hi1 = E(); lo2, hi2 = E()
+    lo1[~ok], hi1[~ok] = 0.0, T                         # 근 없음 → 항상 ≤ 0
+    lo1[ok], hi1[ok] = 0.0, np.minimum(ra[ok], T)
+    lo2[ok], hi2[ok] = np.maximum(rb[ok], 0.0), T
+    return [(lo1, hi1), (lo2, hi2)]
+
+
+def _lin_box(r, v, h0, h1, T):
+    """|r − vτ| ≤ h0 + h1 τ , τ∈[0,T] (배열 r) → 단일 구간 (lo, hi)."""
+    lo = np.zeros(np.shape(r)); hi = np.full(np.shape(r), T, dtype=float)
+    for alpha, beta in ((-v - h1, h0 - r), (v - h1, h0 + r)):   # α τ ≤ β
+        if abs(alpha) < 1e-12:
+            bad = beta < 0
+            lo[bad], hi[bad] = np.inf, -np.inf
+        elif alpha > 0:
+            hi = np.minimum(hi, beta / alpha)
+        else:
+            lo = np.maximum(lo, beta / alpha)
     return lo, hi
 
 
-def build_interval_table(site, obstacles, t_offset=0.0, extra=None):
+def build_interval_table(site, obstacles, t_offset=0.0, extra=None, eps=None, horizon=1800.0,
+                         inflate_const=None):
     """셀별 위험 시간구간 테이블 (site 시각 기준 = t_offset + 장애물 시각).
 
-    extra: 기존 시간제 금지구역 (site.tnfz_id / tnfz_win) 도 통합.
+    eps          : 기회 제약 위험 한도 ε. 주어지면 불확실성 튜브 적용
+                   반경 ρ(t) = R + margin + c_cell + κ_ε·σ(t),  σ(t) = σ0 + σ_v (t − t_obs)⁺  (예측 시간에 따라 증가)
+                   위험구간 양끝을 z_{1−ε/2}·σ_t 만큼 확장 (도달 시각 오차)
+    inflate_const: (고정 버퍼 비교용) 시간과 무관한 일정 팽창량 [m]
+    extra        : 기존 시간제 금지구역 (site.tnfz_id / tnfz_win) 도 통합.
     반환 dict(off[N] int64(-1=없음), cnt[N] int32, lo[M], hi[M], maxi)
     """
     nz, ny, nx = site.free.shape
@@ -151,6 +210,8 @@ def build_interval_table(site, obstacles, t_offset=0.0, extra=None):
     X = (np.arange(nx) + 0.5) * dx
     Y = (np.arange(ny) + 0.5) * dx
     per = {}
+    kap = risk_kappa(eps) if eps else 0.0
+    kt = timing_kappa(eps) if eps else 0.0
 
     def add(ids, lo, hi):
         for n, a, b in zip(ids, lo, hi):
@@ -167,12 +228,22 @@ def build_interval_table(site, obstacles, t_offset=0.0, extra=None):
                 segs.insert(0, (pts[0], pts[0], t0w, ts[0]))
             if t1w > ts[-1]:
                 segs.append((pts[-1], pts[-1], ts[-1], t1w))
-        reach = (o.radius if o.kind != "box" else math.hypot(o.half_x, o.half_y)) + o.margin + c_cell
+        sv = kap * o.sigma_v if eps else 0.0
+        dil = kt * o.sigma_t if eps else 0.0
+        const = (inflate_const or 0.0)
+        # 관측 시각에서 구간을 나눠 σ(t) 를 구간별 선형으로 만든다
+        segs2 = []
         for pa, pb, ta0, tb0 in segs:
-            ta, tb = max(ta0, t0w), min(tb0, t1w)
+            if sv > 0 and ta0 < o.t_obs < tb0:
+                segs2 += [(pa, pb, ta0, tb0, ta0, o.t_obs), (pa, pb, ta0, tb0, o.t_obs, tb0)]
+            else:
+                segs2.append((pa, pb, ta0, tb0, ta0, tb0))
+        for pa, pb, ta0, tb0, ca, cb in segs2:
+            ta, tb = max(ca, t0w), min(cb, t1w)
             if tb <= ta and not (ta == tb == 0):
                 continue
-            # 존재 시간창으로 잘린 구간: 원래 구간의 속도를 유지하고 시작/끝점을 잘린 시각으로 이동
+            if sv > 0 and not math.isfinite(tb):
+                tb = ta + horizon                         # 불확실성이 계속 커지는 경우 예측 지평 제한
             dt0 = tb0 - ta0
             if math.isfinite(dt0) and dt0 > 1e-9:
                 ux, uy = (pb["x"] - pa["x"]) / dt0, (pb["y"] - pa["y"]) / dt0
@@ -183,46 +254,43 @@ def build_interval_table(site, obstacles, t_offset=0.0, extra=None):
                 x1, y1 = pa["x"] + ux * (tb - ta0), pa["y"] + uy * (tb - ta0)
             else:
                 x1, y1 = x0, y0
+            sig_a = o.sigma0 + o.sigma_v * max(ta - o.t_obs, 0.0) if eps else 0.0
+            g1 = sv if ta >= o.t_obs - 1e-9 else 0.0       # 팽창 증가율 [m/s]
+            T = tb - ta
+            base = (o.radius if o.kind != "box" else 0.0) + o.margin + c_cell + const + kap * sig_a
+            grow_max = g1 * (T if math.isfinite(T) else 0.0)
+            reach = (base if o.kind != "box" else math.hypot(o.half_x, o.half_y) + base) + grow_max
             i0 = max(int((min(x0, x1) - reach) // dx), 0); i1 = min(int((max(x0, x1) + reach) // dx) + 1, nx)
             j0 = max(int((min(y0, y1) - reach) // dx), 0); j1 = min(int((max(y0, y1) + reach) // dx) + 1, ny)
             if i0 >= i1 or j0 >= j1:
                 continue
             QX, QY = np.meshgrid(X[i0:i1], Y[j0:j1])
-            dt = max(tb - ta, 1e-9)
-            vx, vy = (x1 - x0) / dt, (y1 - y0) / dt
-            # 상대위치 r(t) = q − p_a − v (t − ta) ;  τ = t − ta
-            rx, ry = QX - x0, QY - y0
+            rx, ry = QX - x0, QY - y0                          # r(τ) = q − p(ta) − v τ
             if o.kind == "box":
-                hx, hy = o.half_x + o.margin + c_cell, o.half_y + o.margin + c_cell
-                lo = np.full(QX.shape, ta); hi = np.full(QX.shape, tb)
-                for r, v, h in ((rx, vx, hx), (ry, vy, hy)):
-                    if abs(v) < 1e-9:
-                        bad = np.abs(r) > h
-                        lo[bad], hi[bad] = np.inf, -np.inf
-                    else:
-                        a1, a2 = (r - h) / v, (r + h) / v
-                        lo = np.maximum(lo, ta + np.minimum(a1, a2)); hi = np.minimum(hi, ta + np.maximum(a1, a2))
-                zr = [(o.z_min - o.margin, o.z_max + o.margin)]
-                lo_l, hi_l = [lo], [hi]
+                lx, hx_ = _lin_box(rx, ux, o.half_x + base, g1, T)
+                ly, hy_ = _lin_box(ry, uy, o.half_y + base, g1, T)
+                ivs = [(np.maximum(lx, ly), np.minimum(hx_, hy_))]
+                zpad = o.margin + const + kap * sig_a + grow_max
+                zr = (o.z_min - zpad, o.z_max + zpad)
             else:
-                rho = o.radius + o.margin + c_cell
-                a = vx * vx + vy * vy
-                b = -2 * (rx * vx + ry * vy)
-                cc = rx * rx + ry * ry - rho * rho
-                lo, hi = _quad_interval(a, b, cc, 0.0, tb - ta)
-                lo, hi = lo + ta, hi + ta
+                rho0 = base
+                a = ux * ux + uy * uy - g1 * g1
+                b = -2 * (rx * ux + ry * uy) - 2 * rho0 * g1
+                cc = rx * rx + ry * ry - rho0 * rho0
+                ivs = _quad_le0(a, b, cc, T)
                 if o.kind == "sphere":
                     zc0, zc1 = pa.get("z", 0.5 * (o.z_min + o.z_max)), pb.get("z", 0.5 * (o.z_min + o.z_max))
-                    zr = [(min(zc0, zc1) - rho, max(zc0, zc1) + rho)]
+                    zr = (min(zc0, zc1) - rho0 - grow_max, max(zc0, zc1) + rho0 + grow_max)
                 else:
-                    zr = [(o.z_min - o.margin, o.z_max + o.margin)]
-                lo_l, hi_l = [lo], [hi]
-            for (za, zb), lo, hi in zip(zr, lo_l, hi_l):
-                ks = np.where((site.z >= za - site.dz / 2) & (site.z <= zb + site.dz / 2))[0]
-                if o.kind == "sphere":
-                    pass  # 구: 수평 반경으로 보수적 처리(고도 범위 내 전 레이어)
+                    zpad = o.margin + const + kap * sig_a + grow_max
+                    zr = (o.z_min - zpad, o.z_max + zpad)
+            ks = np.where((site.z >= zr[0] - site.dz / 2) & (site.z <= zr[1] + site.dz / 2))[0]
+            if len(ks) == 0:
+                continue
+            for lo, hi in ivs:
+                lo = lo + ta - dil; hi = hi + ta + dil
                 m = lo <= hi
-                if not m.any() or len(ks) == 0:
+                if not m.any():
                     continue
                 jj, ii = np.nonzero(m)
                 for k in ks:

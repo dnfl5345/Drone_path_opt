@@ -140,6 +140,10 @@ class App:
         weight = float(req.get("weight", 1.2))
         if not (1.0 <= weight <= 2.0):
             raise ValueError("탐색 가중치는 1.0~2.0")
+        eps = req.get("eps")
+        eps = float(eps) if eps not in (None, "", 0, "0") else None
+        if eps is not None and not (1e-4 <= eps <= 0.5):
+            raise ValueError("위험 한도 ε 는 0.0001~0.5")
         d = self.drone
         m0 = d.m_empty
         m_out, m_back = (m0 + payload, m0) if kind == "delivery" else (m0, m0 + payload)
@@ -150,7 +154,7 @@ class App:
             self.planners[wind] = STPlanner(site, d)
         return dict(site=site, wind=wind, d=d, t_dep=(dep_hour - KST) * 3600.0, dep_hour=dep_hour, legs_req=legs_req,
                     E_usable=d.battery_wh * 3600 * (1 - reserve / 100.0), reserve=reserve, max_wait=max_wait,
-                    weight=weight, SP=self.planners[wind])
+                    weight=weight, eps=eps, SP=self.planners[wind])
 
     def _fly_legs(self, cx, legs_req, t, e_used, first=None, reuse=None):
         """legs_req 를 순서대로 계획·시뮬레이션. first=(시작노드, 시작시각, 실행된 앞부분 sim, 이륙에너지, 이륙시간)
@@ -183,7 +187,7 @@ class App:
                 leg["feasible"] = False
                 legs.append(leg)
                 break
-            sim = simulate(site, d, r["path"], r["wait_before"], t0, m)
+            sim = simulate(site, d, r["path"], r["wait_before"], t0 + r.get("ground_delay", 0.0), m)
             if prefix is not None and len(prefix["t"]):
                 sim = {k: np.concatenate([prefix[k], sim[k] + (e_pre if k == "e" else 0.0)]) for k in sim}
             e_ld, t_ld = vertical_energy(site, d, b[0], b[1], gl[0], sim["t"][-1], m, up=False)
@@ -247,7 +251,7 @@ class App:
             t_all = time.time()
             obs, errs = self._parse(req)
             cx = self._ctx(req)
-            cx["SP"].set_obstacles(obs, cx["t_dep"])
+            cx["SP"].set_obstacles(obs, cx["t_dep"], eps=cx["eps"])
             legs = self._fly_legs(cx, cx["legs_req"], cx["t_dep"], 0.0)
             out = self._render(cx, legs, obs, errs, dict(revisions=[dict(t=0.0, obstacles=[o.to_dict() for o in obs])],
                                                          replans=[]))
@@ -272,6 +276,8 @@ class App:
             if t_now < ss["revisions"][-1][0]:
                 raise ValueError(f"변경 시각은 직전 변경(t={ss['revisions'][-1][0]:.0f} s) 이후여야 합니다")
             obs, errs = self._parse(req)
+            for o in obs:                       # 발표 시점에 새로 관측 → 불확실성은 이 시각부터 증가
+                o.t_obs = max(o.t_obs, t_now)
             ta = t_dep + t_now
             legs = ss["legs"]
             # 활성 구간 찾기
@@ -286,7 +292,7 @@ class App:
                 else:
                     raise ValueError("해당 시각에는 비행 중인 구간이 없습니다 (이미 도착)")
             tc = time.perf_counter()
-            table = build_interval_table(site, obs, t_offset=t_dep)
+            table = build_interval_table(site, obs, t_offset=t_dep, eps=cx["eps"])
             hits = []
             for L in legs[act:]:
                 if L.get("feasible"):
@@ -297,7 +303,7 @@ class App:
             ev = dict(t=t_now, check_ms=check_ms, conflict_at=hits[0][1] if hits else None,
                       conflict_leg=hits[0][0] if hits else None, replanned=False)
             ss["revisions"].append((t_now, obs))
-            cx["SP"].set_obstacles(obs, t_dep)
+            cx["SP"].set_obstacles(obs, t_dep, eps=cx["eps"])
             if not hits:
                 ev["reason"] = "남은 경로와 충돌 없음 → 기존 경로 유지"
             else:

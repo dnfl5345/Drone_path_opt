@@ -52,15 +52,30 @@ function newObstacle(kind, x, y) {
   const n = S.obs.length + 1;
   const zmid = 140;
   const o = { name: `${KIND_KO[kind]} ${n}`, kind, path: [{ x, y, t: 0 }], radius: 120, half_x: 150, half_y: 80,
-              z_min: 0, z_max: 1000, t_start: 0, t_end: null, margin: 15 };
+              z_min: 0, z_max: 1000, t_start: 0, t_end: null, margin: 15,
+              sigma0: 10, sigma_v: 0.5, sigma_t: 2, t_obs: 0 };
   if (kind === "sphere") { o.radius = 80; o.path[0].z = zmid; o.z_min = zmid - 80; o.z_max = zmid + 80; }
   return o;
 }
 
 // ------------------------------------------------------------ 그리기
+function tubeExtra(o, t) {
+  // 기회 제약 튜브의 추가 반경 κ_ε·σ(t) (서버 obstacles.risk_kappa 와 같은 식)
+  const e = Number($("eps").value);
+  if (!e) return 0;
+  const sig = (o.sigma0 || 0) + (o.sigma_v || 0) * Math.max(t - (o.t_obs || 0), 0);
+  return Math.sqrt(2 * Math.log(1 / e)) * sig;
+}
 function drawShape(o, p, color, alpha) {
   const [px, py] = toPx(p.x, p.y);
   const sc = mScale();
+  const ex = tubeExtra(o, S.t);
+  if (ex > 0) {
+    ctx.save(); ctx.globalAlpha = 0.13; ctx.fillStyle = color; ctx.beginPath();
+    if (o.kind === "box") { const w = o.half_x + o.margin + ex, h = o.half_y + o.margin + ex; ctx.fillRect(px - w * sc, py - h * sc, 2 * w * sc, 2 * h * sc); }
+    else { ctx.arc(px, py, (o.radius + o.margin + ex) * sc, 0, 2 * Math.PI); ctx.fill(); }
+    ctx.restore();
+  }
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.fillStyle = color; ctx.strokeStyle = color; ctx.lineWidth = 2;
@@ -227,6 +242,7 @@ function refreshEditor() {
   $("e_radius").value = o.radius; $("e_hx").value = o.half_x; $("e_hy").value = o.half_y;
   $("e_zmin").value = o.z_min; $("e_zmax").value = o.z_max;
   $("e_t0").value = o.t_start ?? ""; $("e_t1").value = o.t_end ?? "";
+  $("e_s0").value = o.sigma0 ?? 0; $("e_sv").value = o.sigma_v ?? 0; $("e_st").value = o.sigma_t ?? 0;
   $("r_radius").style.display = o.kind === "box" ? "none" : "flex";
   $("r_box").style.display = o.kind === "box" ? "flex" : "none";
   $("r_z").style.display = o.kind === "sphere" ? "none" : "flex";
@@ -255,6 +271,7 @@ function bindEditor() {
     if (o.kind === "sphere") o.path.forEach(p => p.z = p.z ?? 140); markChanged(); refreshList(); draw(); };
   num("e_margin", "margin"); num("e_radius", "radius"); num("e_hx", "half_x"); num("e_hy", "half_y");
   num("e_zmin", "z_min"); num("e_zmax", "z_max"); num("e_t0", "t_start", true); num("e_t1", "t_end", true);
+  num("e_s0", "sigma0"); num("e_sv", "sigma_v"); num("e_st", "sigma_t");
 }
 
 // ------------------------------------------------------------ 지도 상호작용
@@ -336,7 +353,7 @@ function request() {
   return { obstacles: S.obs, hub: S.hub, dst: S.dst, dep_hour: Number($("dep").value), payload: Number($("payload").value),
            kind: $("kind").value, round_trip: $("round").checked, allow_wait: $("allowwait").checked,
            max_wait: Number($("maxwait").value), wind: $("wind").value, reserve: Number($("reserve").value),
-           weight: Number($("weight").value) };
+           weight: Number($("weight").value), eps: $("eps").value === "" ? null : Number($("eps").value) };
 }
 function showErrors(errs) { $("errors").innerHTML = (errs || []).map(e => `• ${e}`).join("<br>"); }
 async function doValidate() {
@@ -406,6 +423,7 @@ async function init() {
   $("delobs").onclick = () => { S.obs.splice(S.sel, 1); S.sel = -1; markChanged(); refreshList(); draw(); };
   $("clear").onclick = () => { S.obs = []; S.sel = -1; S.res = null; refreshList(); draw(); };
   $("example").onclick = async () => { const j = await api("/api/example"); S.obs = j.obstacles; S.sel = 0; S.res = null; refreshList(); draw(); };
+  $("eps").onchange = () => draw();
   $("export").onclick = () => { const blob = new Blob([JSON.stringify({ meta: request(), obstacles: S.obs }, null, 1)], { type: "application/json" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "scenario.json"; a.click(); };
   $("import").onchange = async e => { const f = e.target.files[0]; if (!f) return; const j = JSON.parse(await f.text());

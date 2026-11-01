@@ -23,6 +23,8 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[1]
 FIG = ROOT / "results" / "figures"
 S = json.loads((ROOT / "results" / "summary.json").read_text())
+_RS = ROOT / "results" / "robust_stats.json"
+RS = json.loads(_RS.read_text()) if _RS.exists() else None
 
 TEAL, NAVY, TITLE = RGBColor(0x1B, 0x6E, 0x8C), RGBColor(0x00, 0x4E, 0x8F), RGBColor(0x37, 0x60, 0x92)
 INK, GRAY, LIGHT = RGBColor(0x16, 0x20, 0x2A), RGBColor(0x4C, 0x5A, 0x66), RGBColor(0xE3, 0xEE, 0xF3)
@@ -643,6 +645,62 @@ def build(template, out):
                     {"size": 11})]], anchor=MSO_ANCHOR.TOP)
     notes(s, "상세: docs/spatiotemporal_dynamic_obstacles.md §7, src/dpo/st_rolling.py, 실험 E9, 플랫폼 /api/replan.")
 
+    # 15-6. 결과 ⑪ 궤적 불확실성 → 위험 한도 강건 계획 ------------------------------
+    if RS is not None:
+        RED = RGBColor(0xD7, 0x26, 0x3D)
+        op, ov, pr = RS["open_plan"], RS["overhead_plan"], RS["R005_vs_B"]
+        s = D.content("결과 ⑪ 장애물 궤적 불확실성 → 위험 한도(ε) 강건 계획")
+        picture(s, FIG / "F18_robust_example.png", 0.5, 1.0, 8.4, 4.2)
+        textbox(s, 0.5, 5.3, 8.4, 1.6, [
+            [("시간 증가 불확실성 튜브: ρ(t) = R + 이격 + 셀 + κ_ε·σ(t),  σ(t) = σ0 + σ_v·(t − t_obs)", {"size": 13, "color": INK})],
+            [("κ_ε = √(2 ln(1/ε)) → 2D 가우시안에서 P(충돌) ≤ ε (시점별 기회 제약)", {"size": 12})],
+            [("셀마다 |p(t) − c| ≤ ρ(t) 를 2차식으로 풀어 위험구간을 해석해로 계산 → SIPP 안전구간에 그대로 사용",
+              {"size": 12})],
+            [("σ_v 가 장애물 속도보다 크면 위험구간이 둘로 갈라짐(앞뒤로 튜브가 지나감)", {"size": 12})]],
+            size=12, space_after=3)
+        sp = box(s, 9.1, 1.05, 3.65, 5.85, fill=LIGHT, shadow=False)
+        box_text(sp, [[("왜 필요한가", {"color": TITLE, "size": 14})],
+                      [("예측 궤적을 그대로 믿으면(공칭) 실제 궤적과 어긋날 때 충돌. 고정 버퍼는 안전하지만 "
+                        "먼 미래 기준의 큰 반경을 지금도 적용해 에너지 낭비", {"size": 11})],
+                      [("", {"size": 5})],
+                      [("비교 (30 시나리오 × 1,000 샘플)", {"color": TITLE, "size": 14})],
+                      [(f"· 공칭: 충돌 {op['N']['p_coll'] * 100:.1f}%", {"size": 11, "color": RED})],
+                      [(f"· 고정 버퍼: 충돌 0/30,000, 에너지 +{ov['B'][0]:.1f}%", {"size": 11})],
+                      [(f"· 튜브 ε=0.05: 충돌 0/30,000, 에너지 +{ov['R0.05'][0]:.1f}%", {"size": 11, "color": ORANGE})],
+                      [(f"→ 같은 안전성에서 {-pr['mean_diff_pct'][0]:.1f}% 절감 ({pr['wins']}승 {pr['losses']}패, "
+                        f"p = {pr['wilcoxon_p']:.1e})", {"size": 11, "color": ORANGE})],
+                      [("", {"size": 5})],
+                      [("강건 계획의 행동", {"color": TITLE, "size": 14})],
+                      [("이륙 지연·호버 대기로 '튜브가 지나간 뒤' 통과 → 우회 거리 감소", {"size": 11})]],
+                 anchor=MSO_ANCHOR.TOP)
+        notes(s, "기회 제약 계획: Blackmore et al. (T-RO 2011), Du Toit & Burdick (T-RO 2012), Zhu & Alonso-Mora (RA-L 2019). "
+                 "상세: docs/robust_uncertainty.md, docs/paper/manuscript_en.md.")
+
+        # 15-7. 결과 ⑫ 몬테카를로 검증 ---------------------------------------------
+        cl, sv = RS["closed"], RS["sensitivity_sigma_v"]
+        s = D.content("결과 ⑫ 몬테카를로 검증 – 위험·에너지 절충과 재관측 폐루프")
+        picture(s, FIG / "F16_robust_mc.png", 0.4, 1.0, 12.5, 3.75)
+        rows = [["방법", "충돌률 (95% CI)", "에너지 증가", "비고"],
+                ["공칭 N", f"{op['N']['p_coll'] * 100:.1f}% ({op['N']['p_lo'] * 100:.1f}–{op['N']['p_hi'] * 100:.1f})", "–",
+                 "예측을 그대로 신뢰"],
+                ["고정 버퍼 B", f"0/30,000 (≤{op['B']['p_hi'] * 100:.3f}%)", f"+{ov['B'][0]:.1f}%", "σ(1.3 T) 고정"],
+                ["튜브 ε=0.1", f"{op['R0.1']['p_coll'] * 100:.3f}%", f"+{ov['R0.1'][0]:.1f}%", ""],
+                ["튜브 ε=0.05", f"0/30,000 (≤{op['R0.05']['p_hi'] * 100:.3f}%)", f"+{ov['R0.05'][0]:.1f}%",
+                 f"B 대비 {pr['mean_diff_pct'][0]:.1f}%"]]
+        table(s, 0.5, 4.85, 7.6, rows, [1.6, 2.6, 1.3, 2.1], row_h=0.36, head_size=12, body_size=11, highlight=(4,))
+        sp = box(s, 8.35, 4.85, 4.4, 2.05, fill=LIGHT, shadow=False)
+        a, b = cl["N+O"], cl["R0.05+O"]
+        box_text(sp, [[("σ_v 민감도", {"color": TITLE, "size": 13})],
+                      [("불확실성이 빨리 커질수록 튜브의 이득 증가 (σ_v 0.25 / 0.5 / 1.0 m/s)", {"size": 10})],
+                      [("재관측 폐루프 (20 s마다 관측)", {"color": TITLE, "size": 13})],
+                      [(f"충돌 {a['n_hit']}/{a['n']} vs {b['n_hit']}/{b['n']} (유의차 없음), 재계획 "
+                        f"{a['replans']:.2f} → {b['replans']:.2f}회/비행", {"size": 10})],
+                      [("→ 폐루프에서는 계획 안정성이 주된 이득", {"size": 10, "color": ORANGE})]],
+                 anchor=MSO_ANCHOR.TOP)
+        notes(s, "실측 충돌률은 ε보다 훨씬 작음(시점별 상계·σ 합 상계로 보수적). ε를 임무 위험으로 직접 읽지 말 것. "
+                 "통계: Wilson 95% CI, 부트스트랩 CI, Wilcoxon 부호순위. 재현: scripts/run_experiments.py E10/E10b, "
+                 "scripts/analyze_robust.py.")
+
     # 16. 결론 ---------------------------------------------------------------
     s = D.content("결론 및 추후 개발할 내용")
     textbox(s, 0.8, 1.1, 7.4, 3.1, [
@@ -654,21 +712,22 @@ def build(template, out):
          (", 회수 ", {}), (f"{pA['soc_used']:.1f} → {pD['soc_used']:.1f}%p", {"color": ORANGE})],
         [(" ○ 시간가변: 출발시각별 경로, 호버링/우회 판단, 비행 중 재계획", {})],
         [(" ○ 최신 연구 대비: 속도 최적화·에너지 지름길·고도 선택이 핵심 기여", {})],
-        [(" ○ 3D 시공간: 동적 장애물 회피, 변경 시 이벤트 기반 재계획, 편집 플랫폼", {})]], size=14,
+        [(" ○ 3D 시공간: 동적 장애물 회피, 변경 시 이벤트 기반 재계획, 편집 플랫폼", {})],
+        [(" ○ 궤적 불확실성: 위험 한도 튜브로 고정 버퍼 대비 같은 안전성·에너지 절감", {})]], size=14,
         space_after=8)
     textbox(s, 0.8, 3.95, 7.4, 2.6, [
         [("□ 향후 계획", {"size": 18, "color": INK})],
         [(" ○ 기상청 LDAPS(1.5 km)·윈드프로파일러 연동, 도심 CFD 바람장", {})],
         [(" ○ WA-LPA*[5]식 증분 재계획 결합으로 재계획 시간 단축", {})],
         [(" ○ 보유 기체 비행 로그로 계수 재보정, 계획 vs 실측 SOC 비교", {})],
-        [(" ○ 배터리 전압·온도 모델, 돌풍 불확실성(강건) 계획", {})],
+        [(" ○ 실제 항적 데이터로 불확실성 추정, 소규모 실비행 검증 → 논문 투고", {})],
         [(" ○ 다중 배송지(VRP) 결합, UTM 비행승인·관제권 반영", {})]], size=14,
         space_after=8)
     picture(s, FIG / "F10_3d_paths.png", 8.4, 1.15, 4.3, 3.2)
     textbox(s, 8.4, 4.35, 4.3, 0.35, [[("3D 경로 (지형·건물 위)", {"size": 12, "color": GRAY})]], align=PP_ALIGN.CENTER)
     sp = box(s, 8.4, 4.8, 4.3, 1.35, fill=LIGHT, shadow=False)
     box_text(sp, [[("코드·재현", {"color": TITLE, "size": 14})],
-                  [("src/dpo: 데이터·에너지·바람장·탐색기\nscripts/run_experiments.py → make_figures.py\ntests/: 단위 테스트 13종 · 플랫폼: python -m dpo.webapp\ndocs/: 정식화 비교 · 8방향 확장 · 시공간 확장",
+                  [("src/dpo: 데이터·에너지·바람장·탐색기\nscripts/run_experiments.py → make_figures.py\ntests/: 단위 테스트 16종 · 플랫폼: python -m dpo.webapp\ndocs/: 정식화 비교 · 8방향 확장 · 시공간 확장",
                     {"size": 11, "color": INK})]], anchor=MSO_ANCHOR.TOP)
     notes(s, "실제 운용 시 판교 일대는 서울공항 관제권으로 비행승인 필요. 비행금지구역 원은 예시(가상).")
 
@@ -691,10 +750,18 @@ def build(template, out):
         "package delivery,\" Scientific Data, 8, 155, 2021. DOI: 10.1038/s41597-021-00930-x",
         "[9] J. G. Leishman, Principles of Helicopter Aerodynamics, 2nd ed., Cambridge University Press, 2006.",
         "[10] S. Koenig, M. Likhachev, D. Furcy, \"Lifelong Planning A*,\" Artificial Intelligence, 155, 2004.",
+        "[11] L. Blackmore, M. Ono, B. C. Williams, \"Chance-Constrained Optimal Path Planning With Obstacles,\" IEEE Trans. "
+        "Robotics, 27(6), 1080–1094, 2011. DOI: 10.1109/TRO.2011.2161160",
+        "[12] N. E. Du Toit, J. W. Burdick, \"Robot Motion Planning in Dynamic, Uncertain Environments,\" IEEE Trans. "
+        "Robotics, 28(1), 101–115, 2012. DOI: 10.1109/TRO.2011.2166435",
+        "[13] H. Zhu, J. Alonso-Mora, \"Chance-Constrained Collision Avoidance for MAVs in Dynamic Environments,\" IEEE "
+        "Robot. Autom. Lett., 4(2), 776–783, 2019. DOI: 10.1109/LRA.2019.2893494",
+        "[14] K. Yakovlev, A. Andreychuk, \"Any-Angle Pathfinding for Multiple Agents Based on SIPP Algorithm,\" Proc. ICAPS, "
+        "2017. DOI: 10.1609/icaps.v27i1.13856",
         "데이터: Copernicus GLO-30 DSM (ESA/AWS Open Data) · Overture Maps buildings 2026-10-21 (ODbL) · "
         "NOAA GFS 0.25° (AWS Open Data)",
     ]
-    textbox(s, 0.6, 1.1, 12.1, 5.8, [[(r, {"size": 12, "bold": False, "color": INK})] for r in refs], space_after=7)
+    textbox(s, 0.6, 1.1, 12.1, 5.8, [[(r, {"size": 10.5, "bold": False, "color": INK})] for r in refs], space_after=4)
 
     normalize_partnames(D.prs)
     D.prs.save(out)

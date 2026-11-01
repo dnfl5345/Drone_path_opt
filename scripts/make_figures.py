@@ -24,7 +24,7 @@ for f in ("/root/.fonts/NanumGothic-Regular.ttf", "/root/.fonts/NanumGothic-Bold
         fm.fontManager.addfont(f)
     except Exception:
         pass
-plt.rcParams.update({"font.family": "NanumGothic", "axes.unicode_minus": False, "font.size": 12,
+plt.rcParams.update({"font.family": ["NanumGothic", "DejaVu Sans"], "axes.unicode_minus": False, "font.size": 12,
                      "axes.titlesize": 14, "axes.titleweight": "bold", "axes.spines.top": False,
                      "axes.spines.right": False, "savefig.dpi": 200, "savefig.bbox": "tight"})
 
@@ -912,16 +912,89 @@ def gif_replan(g, fc, n_frames=48):
                     duration=[1.5] + [0.25] * (len(frames) - 1) + [1.5], loop=0)
 
 
+
+# ================================================================== F18 불확실성 튜브 예시 (논문 Fig.)
+def fig_robust_example(g, fc):
+    from dpo.obstacles import DynObstacle, risk_kappa
+    from dpo.robust_eval import sample_truth, true_positions, mc_collisions
+    from dpo.planner import simulate as _sim
+    E10 = L("E10")
+    dr = drone_calibrated()
+    m = dr.m_empty + PAYLOAD
+    sc_meta = {s_["id"]: s_ for s_ in E10.get("scen", [])}
+    rows = E10["rows"]
+    r = max(rows, key=lambda q: q["N"]["plan"]["n_hit"])
+    sid = r["id"]
+    if sid in sc_meta:
+        obs = [DynObstacle.from_dict(o) for o in sc_meta[sid]["obs"]]
+    else:
+        return
+    t_dep = (r["hour"] - KST) * 3600.0
+    sims = {}
+    for k in ("N", "B", "R0.05"):
+        v = r[k]
+        sims[k] = _sim(fc, dr, v["path"], v.get("wait", np.zeros(len(v["path"]))), t_dep + v.get("ground_delay", 0.0), m)
+    smp = sample_truth(np.random.default_rng(10_000 + sid), obs, 300)
+    hitN, _ = mc_collisions(sims["N"], t_dep, obs, smp)
+    fig, axs = plt.subplots(1, 2, figsize=(15, 6.4), gridspec_kw=dict(width_ratios=[1.05, 1]))
+    ax = axs[0]
+    basemap(ax, g, fc)
+    cols = ["#9B5DE5", "#E07B39", "#2CA58D"]
+    kap = risk_kappa(0.05)
+    # 공칭 경로가 장애물에 가장 가까워지는 시각에서 튜브와 실궤적 샘플
+    for o, c, sm in zip(obs, cols, smp):
+        xs = [p["x"] / 1000 for p in o.path]; ys = [p["y"] / 1000 for p in o.path]
+        ax.annotate("", (xs[-1], ys[-1]), (xs[0], ys[0]), arrowprops=dict(arrowstyle="->", color=c, lw=1.4, ls="--"))
+        tt = sims["N"]["t"] - t_dep
+        pos = np.array([o.position(t) or (np.nan, np.nan, np.nan) for t in tt])
+        d = np.hypot(sims["N"]["x"] - pos[:, 0], sims["N"]["y"] - pos[:, 1])
+        q = int(np.nanargmin(d))
+        tq = tt[q]
+        p = o.position(tq)
+        sig = o.sigma0 + o.sigma_v * max(tq - o.t_obs, 0)
+        ax.add_patch(Circle((p[0] / 1000, p[1] / 1000), o.radius / 1000, fc=c, alpha=0.35, ec=c))
+        ax.add_patch(Circle((p[0] / 1000, p[1] / 1000), (o.radius + o.margin + kap * sig) / 1000, fc="none", ec=c,
+                            ls=":", lw=2))
+        X, Y, act = true_positions(o, sm, np.array([tq]))
+        ax.plot(X[:, 0] / 1000, Y[:, 0] / 1000, ".", color=c, ms=2, alpha=0.5)
+        ax.text(p[0] / 1000 + 0.06, p[1] / 1000 + 0.06, f"{o.name} t={tq:.0f}s\nσ={sig:.0f} m", fontsize=8.5, color=INK)
+    for k, col, ls, lab in (("N", "#555555", "--", f"공칭 계획 (충돌 {r['N']['plan']['n_hit'] / 10:.1f}%)"),
+                            ("B", "#E07B39", "-", "고정 버퍼"), ("R0.05", "#1B6CA8", "-", "시간 증가 튜브 ε=0.05")):
+        ax.plot(sims[k]["x"] / 1000, sims[k]["y"] / 1000, ls, color=col, lw=2.8 if k == "R0.05" else 2, label=lab)
+    ax.plot([], [], ":", color="#555", lw=2, label="튜브 경계 R+margin+κσ(t)")
+    ax.plot([], [], ".", color="#555", label="실제 궤적 샘플 (해당 시각)")
+    ax.set_xlim(2.3, 5.0); ax.set_ylim(1.2, 3.4)
+    ax.legend(fontsize=8.5, loc="lower left", framealpha=0.92)
+    ax.set_title(f"불확실성 튜브 예시 (시나리오 {sid}, {r['hour']}시 출발)", fontsize=12)
+    # (b) 튜브 반경 vs 예측시간
+    ax = axs[1]
+    tau = np.linspace(0, 200, 100)
+    for sv, c in ((0.25, "#8FB8DE"), (0.5, "#1B6CA8"), (1.0, "#0B3954")):
+        ax.plot(tau, kap * (10 + sv * tau), color=c, lw=2, label=f"튜브 κσ(τ), σ_v={sv} m/s")
+        ax.plot(tau, kap * np.sqrt(100 + (sv * tau) ** 2), ":", color=c, lw=1.5)
+    Th = 1.3 * r["T_nom"]
+    ax.axhline(kap * (10 + 0.5 * Th), color="#E07B39", lw=2, ls="--", label=f"고정 버퍼 κσ(1.3T)={kap * (10 + 0.5 * Th):.0f} m")
+    ax.axvline(r["T_nom"], color="#999", lw=1); ax.text(r["T_nom"] + 2, 10, "공칭 임무시간", fontsize=9, color="#666")
+    ax.set_xlabel("예측 시간 τ [s]"); ax.set_ylabel("팽창 반경 [m] (ε=0.05, κ=2.45)")
+    ax.set_title("시간 증가 튜브 vs 고정 버퍼 (점선: 실제 오차 표준편차 기준)", fontsize=12)
+    ax.legend(fontsize=9, frameon=False)
+    fig.tight_layout()
+    fig.savefig(C.FIG / "F18_robust_example.png")
+    plt.close(fig)
+
+
 if __name__ == "__main__":
     g, fc, tr = sites()
     todo = sys.argv[1:] or ["site", "wind", "energy", "paths", "soc", "departure", "hover", "rolling", "payload", "3d",
-                            "ablation", "formulation", "layered", "dynamic", "gifdyn", "replan", "gifreplan"]
+                            "ablation", "formulation", "layered", "dynamic", "gifdyn", "replan", "gifreplan",
+                            "robust"]
     fns = dict(site=lambda: fig_site(g, fc), wind=lambda: fig_wind_profile(g, fc, tr), energy=fig_energy,
                paths=lambda: fig_paths(g, fc), soc=lambda: fig_soc(fc), departure=lambda: fig_departure(g, fc),
                hover=lambda: fig_hover(g, fc), rolling=lambda: fig_rolling(g, fc), payload=fig_payload,
                ablation=fig_ablation, formulation=fig_formulation, layered=lambda: fig_layered(g, fc),
                dynamic=lambda: fig_dynamic(g, fc), gifdyn=lambda: gif_dynamic(g, fc),
                replan=lambda: fig_replan(g, fc), gifreplan=lambda: gif_replan(g, fc),
+               robust=lambda: fig_robust_example(g, fc),
                **{"3d": lambda: fig_3d(g, fc)})
     for t in todo:
         if t == "gif":

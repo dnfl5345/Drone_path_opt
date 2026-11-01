@@ -86,6 +86,7 @@
       <div class="row"><label>바람 모델</label><select id="wind"><option value="full">3D 바람장 (정확)</option><option value="linear">고도별 선형 (빠름)</option></select>
         <label class="inl">예비 SOC</label><input type="number" id="reserve" style="width:56px" value="20" min="0" max="50" step="5"> %</div>
       <div class="row"><label>탐색 정밀도</label><select id="weight"><option value="1.0">정밀 (가중치 1.0, 느림)</option><option value="1.2" selected>균형 (1.2)</option><option value="1.5">빠름 (1.5)</option></select></div>
+      <div class="row"><label>궤적 불확실성</label><select id="eps"><option value="">무시 (예측 궤적 그대로)</option><option value="0.2">위험 한도 ε = 0.2</option><option value="0.1">ε = 0.1</option><option value="0.05" selected>ε = 0.05 (권장)</option><option value="0.01">ε = 0.01 (보수적)</option></select></div>
       <div class="row"><button id="mvhub">거점 위치 지정</button><button id="mvdst">목적지 위치 지정</button></div>
     </div>
     <div class="card">
@@ -103,10 +104,11 @@
         <div class="row" id="r_radius"><label>반경</label><input type="number" id="e_radius" min="5" max="1500" step="5"> m</div>
         <div class="row" id="r_box"><label>반폭 X / Y</label><input type="number" id="e_hx" min="5" max="1500" step="10"><input type="number" id="e_hy" min="5" max="1500" step="10"> m</div>
         <div class="row" id="r_z"><label>고도 범위</label><input type="number" id="e_zmin" step="10"> ~ <input type="number" id="e_zmax" step="10"> m 해발</div>
+        <div class="row" title="축별 위치 오차 σ(t) = σ0 + σv·(t − 관측시각), 도달 시각 오차 σt"><label>불확실성</label>σ0<input type="number" id="e_s0" min="0" max="500" step="1" style="width:46px">m σv<input type="number" id="e_sv" min="0" max="20" step="0.1" style="width:46px">m/s σt<input type="number" id="e_st" min="0" max="120" step="1" style="width:40px">s</div>
         <div class="row"><label>존재 시간</label><input type="number" id="e_t0" step="5" placeholder="자동"> ~ <input type="number" id="e_t1" step="5" placeholder="자동"> s</div>
         <div class="row"><b style="font-size:12px">이동 경로</b><button id="addpt">+ 경로점(지도 클릭)</button><button id="delobs" class="warn">장애물 삭제</button></div>
         <table class="pts"><thead><tr><th>#</th><th>x [m]</th><th>y [m]</th><th id="th_z">z [m]</th><th>t [s]</th><th>속도</th><th></th></tr></thead><tbody id="pts"></tbody></table>
-        <div class="hint">경로점 1개 = 정지 장애물, 2개 이상 = 구간별 등속 이동 (t는 출발 기준 초)</div>
+        <div class="hint">점선 원 = 안전 이격, 바깥 옅은 원 = 불확실성 튜브 (ε 선택 시, 시간에 따라 커짐)<br>경로점 1개 = 정지 장애물, 2개 이상 = 구간별 등속 이동 (t는 출발 기준 초)</div>
       </div>
     </div>
     <div class="card">

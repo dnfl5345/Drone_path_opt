@@ -197,3 +197,45 @@ def test_event_replanning_avoids_announced_obstacle():
     assert once["conflicts"]["n_collision_samples"] > 0
     assert ev["conflicts"]["n_collision_samples"] == 0
     assert ev["n_replans"] == 1
+
+
+def test_risk_kappa_matches_gaussian_tail():
+    from dpo.obstacles import risk_kappa
+    rng = np.random.default_rng(0)
+    e = rng.normal(size=(200000, 2))
+    for eps in (0.1, 0.05, 0.01):
+        frac = np.mean(np.hypot(e[:, 0], e[:, 1]) > risk_kappa(eps))
+        assert abs(frac - eps) < 0.15 * eps + 1e-3
+
+
+def test_uncertainty_tube_grows_with_prediction_time():
+    from dpo.obstacles import DynObstacle, build_interval_table, risk_kappa
+    s = _ToySite()
+    o = DynObstacle(kind="cylinder", radius=20, z_min=0, z_max=500, margin=0, sigma0=0.0, sigma_v=2.0,
+                    path=[dict(x=500, y=387.5, t=0)], t_start=0, t_end=300)
+    T0 = build_interval_table(s, [o], t_offset=0.0)              # 공칭 (ε 없음)
+    T1 = build_interval_table(s, [o], t_offset=0.0, eps=0.05)    # 불확실성 튜브
+    n = (0 * s.ny + 15) * s.nx + 28                              # 중심에서 x 방향 ≈ 212.5 m 떨어진 셀
+    assert T0["off"][n] < 0                                      # 공칭에서는 안전
+    q = T1["off"][n]
+    assert q >= 0
+    d = abs((28 + 0.5) * 25 - 500)
+    t_expect = (d - 20 - 0.71 * 25) / (risk_kappa(0.05) * 2.0)   # 반경이 셀에 닿는 시각
+    assert abs(T1["lo"][q] - t_expect) < 2.0 and T1["hi"][q] >= 299.0
+
+
+def test_quad_le0_brute_force_including_split_intervals():
+    """해석적 위험구간이 τ 격자 전수 검사와 일치 (a<0 → 두 구간으로 갈라지는 경우 포함)."""
+    from dpo.obstacles import _quad_le0
+    T = 100.0
+    tau = np.linspace(0, T, 20001)
+    for a, b, c in [(1.0, -40.0, 300.0), (-0.5, 10.0, 20.0), (-0.2, 0.0, 30.0), (0.0, 2.0, -50.0), (0.0, -2.0, 50.0),
+                    (-1.0, 30.0, -100.0)]:
+        cc = np.array([c])
+        ivs = _quad_le0(a, np.array([b]), cc, T)
+        inside = np.zeros_like(tau, bool)
+        for lo, hi in ivs:
+            if lo[0] <= hi[0]:
+                inside |= (tau >= lo[0] - 1e-9) & (tau <= hi[0] + 1e-9)
+        truth = a * tau ** 2 + b * tau + c <= 1e-9
+        assert (inside == truth).mean() > 0.9995, (a, b, c)

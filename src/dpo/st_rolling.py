@@ -106,7 +106,8 @@ def _snap(site, table, x, y, z, t):
 # ------------------------------------------------------------------ 실행기
 def run_obstacle_replanning(site_plan, site_truth, drone, a, b, t_dep, mass, timeline: ObstacleTimeline,
                             policy="event", period=30.0, latency=3.0, budget=np.inf, max_wait=180.0, weight=1.2,
-                            opportunistic=False, opp_gain=0.02, max_replans=40):
+                            opportunistic=False, opp_gain=0.02, max_replans=40, eps=None, inflate_const=None,
+                            observe=None, initial_plan=None, replan_weight=None):
     """한 구간(a→b)을 비행하며 정책에 따라 재계획. 장애물 시각은 출발(t_dep) 기준.
 
     반환 dict(trace(실제 비행 궤적), events(재계획/검사 기록), E, soc, conflicts(실제 궤적 vs 실제 장애물), cpu_total)
@@ -117,14 +118,18 @@ def run_obstacle_replanning(site_plan, site_truth, drone, a, b, t_dep, mass, tim
     e_to, t_to = vertical_energy(site_truth, drone, a[0], a[1], st[0], t_dep, mass, up=True)
     t = t_dep + t_to
     known = truth if policy == "oracle" else timeline.known_at(0.0)
-    SP.set_obstacles(known, t_dep)
+    SP.set_obstacles(known, t_dep, eps=eps, inflate_const=inflate_const)
     t0 = _time.perf_counter()
-    r = SP.plan(st, gl, t_start=t, mass=mass, budget=budget, max_wait=max_wait, weight=weight)
+    if initial_plan is not None:            # 같은 사전 정보로 만든 초기 계획 재사용 (몬테카를로용)
+        r = initial_plan
+    else:
+        r = SP.plan(st, gl, t_start=t, mass=mass, budget=budget, max_wait=max_wait, weight=weight)
     cpu = _time.perf_counter() - t0
     events = [dict(t=0.0, kind="initial", replanned=True, cpu=cpu, reason="출발 전 계획")]
     if r is None:
         return dict(feasible=False, events=events)
     plans = [dict(t=t - t_dep, path=r["path"])]
+    t += r.get("ground_delay", 0.0)          # 출발 노드가 위험구간이면 계획기가 지상 대기 후 이륙
     sim = simulate(site_truth, drone, r["path"], r["wait_before"], t, mass, U=site_truth.U, V=site_truth.V,
                    tax=site_truth.t_axis)
     pieces = []
@@ -133,6 +138,8 @@ def run_obstacle_replanning(site_plan, site_truth, drone, a, b, t_dep, mass, tim
     # 결정 시각 목록
     if policy == "event":
         decisions = [t_dep + ta for ta in timeline.announcements()]
+    elif policy == "observe":   # 주기적 재관측 → 검사 → 충돌 시에만 재계획 (이벤트 트리거)
+        decisions = list(t + period * np.arange(1, 400))
     elif policy == "periodic":
         decisions = list(t + period * np.arange(1, 400))
     else:
@@ -152,11 +159,14 @@ def run_obstacle_replanning(site_plan, site_truth, drone, a, b, t_dep, mass, tim
         changed = (policy != "event") or (new_known is not known)
         known = new_known
         tc = _time.perf_counter()
-        table = build_interval_table(site_plan, known, t_offset=t_dep)
+        if observe is not None:                      # 재관측: 실제 상태로 예측을 갱신하고 불확실성 재설정
+            known = observe(td - t_dep)
+        table = build_interval_table(site_plan, known, t_offset=t_dep, eps=eps, inflate_const=inflate_const)
         hit = remaining_conflict(site_plan, table, sim, td)
         check_cpu = _time.perf_counter() - tc
         need = policy == "periodic" or hit is not None
-        ev = dict(t=td - t_dep, kind="announce" if policy == "event" else "periodic", conflict_at=None if hit is None
+        ev = dict(t=td - t_dep, kind={"event": "announce", "observe": "observe"}.get(policy, "periodic"),
+                  conflict_at=None if hit is None
                   else hit - t_dep, check_ms=check_cpu * 1000, replanned=False, changed=changed)
         if not need and not opportunistic:
             events.append(ev)
@@ -175,14 +185,16 @@ def run_obstacle_replanning(site_plan, site_truth, drone, a, b, t_dep, mass, tim
             events.append(ev); continue
         t0 = _time.perf_counter()
         used = sim["e"][q] + e_acc
-        r2 = SP.plan(cur, gl, t_start=t_sw, mass=mass, budget=budget - used, max_wait=max_wait, weight=weight)
+        r2 = SP.plan(cur, gl, t_start=t_sw, mass=mass, budget=budget - used, max_wait=max_wait,
+                     weight=replan_weight or weight)
         rc = _time.perf_counter() - t0
         cpu_total += rc
         ev["cpu"] = rc
         if r2 is None:
             ev["reason"] = "허용 범위 내 대안 없음 – 기존 경로 유지"
             events.append(ev); continue
-        sim2 = simulate(site_truth, drone, r2["path"], r2["wait_before"], t_sw, mass, U=site_truth.U, V=site_truth.V,
+        sim2 = simulate(site_truth, drone, r2["path"], r2["wait_before"], t_sw + r2.get("ground_delay", 0.0), mass,
+                        U=site_truth.U, V=site_truth.V,
                         tax=site_truth.t_axis)
         if not need:  # 기회적 재계획: 충분히 싸질 때만 교체
             if sim2["e"][-1] >= (sim["e"][-1] - sim["e"][q]) * (1 - opp_gain):
