@@ -80,6 +80,102 @@ def paired(E10, k1, k2, wind="plan"):
                 wilcoxon_p=float(w.pvalue) if w is not None else np.nan)
 
 
+TUBE_EPS = ["0.2", "0.1", "0.05", "0.01", "0.002", "0.001", "0.0001"]
+BUF_EPS = ["0.2", "0.1", "0.05", "0.01"]
+
+
+def _unified(E10):
+    """E10 + E10c → 시나리오별 {방법: (E, 가우시안 충돌수, Student-t 충돌수, K)}."""
+    try:
+        E10c = L("E10c")
+    except FileNotFoundError:
+        return None
+    c = {r["id"]: r for r in E10c["rows"]}
+    U = []
+    for r in E10["rows"]:
+        d = {}
+        for k, v in list(r.items()) + list(c.get(r["id"], {}).items()):
+            if not isinstance(v, dict) or not v.get("feasible") or "_sv" in k:
+                continue
+            key = "B0.05" if k == "B" else k
+            E = v["plan"]["E"] if "E" in v["plan"] else v["E"]
+            d[key] = (E, v["plan"]["n_hit"], v["t3"]["n_hit"], v["plan"]["K"])
+        U.append(d)
+    return U
+
+
+def frontier(E10):
+    """위험–에너지 곡선: 튜브(ε 7종) vs 고정 버퍼(ε 4종), 가우시안(모델 일치)·Student-t(불일치) 실측 충돌률."""
+    U = _unified(E10)
+    if U is None:
+        return None
+    keys = ["N"] + [f"R{e}" for e in TUBE_EPS] + [f"B{e}" for e in BUF_EPS]
+    common = [d for d in U if all(k in d for k in keys)]          # 모든 방법이 실행 가능한 시나리오만
+    out = dict(n_scen=len(common), methods={})
+    for k in keys:
+        E = np.array([d[k][0] for d in common]); EN = np.array([d["N"][0] for d in common])
+        hg = sum(d[k][1] for d in common); ht = sum(d[k][2] for d in common); n = sum(d[k][3] for d in common)
+        out["methods"][k] = dict(overhead=boot_ci((E / EN - 1) * 100), gauss=wilson(hg, n), t3=wilson(ht, n),
+                                 n_hit_gauss=hg, n_hit_t3=ht, n=n)
+    # 같은 에너지에서의 비교: 고정 버퍼 B(0.05) 보다 에너지가 적게 드는 튜브 중 Student-t 위험이 가장 작은 것
+    eB = out["methods"]["B0.05"]["overhead"][0]
+    cand = [k for k in keys if k.startswith("R") and out["methods"][k]["overhead"][0] <= eB]
+    if cand:
+        best = min(cand, key=lambda k: out["methods"][k]["t3"][0])
+        x = np.array([d[best][0] for d in common]); y = np.array([d["B0.05"][0] for d in common])
+        out["energy_matched"] = dict(tube=best, B="B0.05", t3_tube=out["methods"][best]["t3"],
+                                     t3_B=out["methods"]["B0.05"]["t3"],
+                                     energy_diff_pct=boot_ci((x / y - 1) * 100),
+                                     wilcoxon_p=float(stats.wilcoxon(x, y).pvalue), wins=int(np.sum(x < y)))
+    # 위험이 같은 수준에서의 비교: Student-t 위험이 B(0.05) 이하인 튜브 중 에너지 최소
+    tB = out["methods"]["B0.05"]["t3"][0]
+    cand = [k for k in keys if k.startswith("R") and out["methods"][k]["t3"][0] <= tB]
+    if cand:
+        best = min(cand, key=lambda k: out["methods"][k]["overhead"][0])
+        x = np.array([d[best][0] for d in common]); y = np.array([d["B0.05"][0] for d in common])
+        out["risk_matched"] = dict(tube=best, t3_tube=out["methods"][best]["t3"], t3_B=out["methods"]["B0.05"]["t3"],
+                                   energy_diff_pct=boot_ci((x / y - 1) * 100),
+                                   wilcoxon_p=float(stats.wilcoxon(x, y).pvalue), wins=int(np.sum(x < y)))
+    return out
+
+
+def fig_frontier(F):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    plt.rcParams.update({"font.family": ["NanumGothic", "DejaVu Sans"], "axes.unicode_minus": False, "font.size": 10,
+                         "axes.spines.top": False, "axes.spines.right": False, "savefig.dpi": 200,
+                         "savefig.bbox": "tight", "axes.titleweight": "bold"})
+    M = F["methods"]
+    fig, axs = plt.subplots(1, 2, figsize=(11, 4.3), sharey=False)
+    for ax, kind, title in ((axs[0], "gauss", "(a) 가우시안 오차 (계획 가정과 일치)"),
+                            (axs[1], "t3", "(b) Student-t 오차, 자유도 3 (꼬리가 두꺼움)")):
+        for pre, eps_list, col, lab, mk in (("R", TUBE_EPS, "#1B6CA8", "시간 증가 튜브", "o"),
+                                             ("B", BUF_EPS, "#E07B39", "고정 버퍼 σ(1.3T)", "s")):
+            xs = [M[f"{pre}{e}"]["overhead"][0] for e in eps_list]
+            ps = [M[f"{pre}{e}"][kind] for e in eps_list]
+            ys = [p[0] * 100 for p in ps]
+            lo = [max(p[0] - p[1], 0) * 100 for p in ps]; hi = [max(p[2] - p[0], 0) * 100 for p in ps]
+            ax.errorbar(xs, ys, yerr=[lo, hi], color=col, marker=mk, ms=6, lw=1.8, capsize=3, label=lab)
+            for x, y, e in zip(xs, ys, eps_list):
+                ax.annotate(f"ε={float(e):g}", (x, y), textcoords="offset points", xytext=(4, 5), fontsize=7.5, color=col)
+        ax.set_yscale("symlog", linthresh=0.01)
+        ax.set_yticks([0, 0.01, 0.1, 1]); ax.set_yticklabels(["0", "0.01", "0.1", "1"])
+        ax.set_ylim(-0.002, 3)
+        ax.set_xlabel("공칭 대비 에너지 증가 [%] (30 시나리오 평균)")
+        ax.set_ylabel("실측 충돌률 [%] (Wilson 95% CI)")
+        ax.set_title(title, fontsize=10.5, loc="left")
+        ax.grid(alpha=0.25)
+    axs[0].legend(frameon=False, loc="upper right")
+    axs[1].text(0.98, 0.97, f"공칭: {M['N']['t3'][0] * 100:.1f}%", transform=axs[1].transAxes, ha="right", va="top",
+                fontsize=9, color="#555")
+    axs[0].text(0.98, 0.80, f"공칭: {M['N']['gauss'][0] * 100:.1f}%", transform=axs[0].transAxes, ha="right", va="top",
+                fontsize=9, color="#555")
+    fig.suptitle("위험–에너지 곡선: 오차 분포가 가정과 다를 때 (모델 불일치)", fontweight="bold", y=1.02)
+    fig.savefig(C.FIG / "F19_frontier_mismatch.png")
+    plt.close(fig)
+
+
 def main():
     E10 = L("E10")
     out = dict(params=E10["params"])
@@ -124,10 +220,13 @@ def main():
                             wait=boot_ci([r[k].get("wait_total", 0) for r in E10["rows"] if r[k].get("feasible")]),
                             T=boot_ci([r[k]["plan"]["T"] for r in E10["rows"] if r[k].get("feasible")]))
                     for k in keys}
+    out["frontier"] = frontier(E10)
     (C.RES / "robust_stats.json").write_text(json.dumps(out, indent=1, ensure_ascii=False, default=float))
     print(json.dumps({k: out[k] for k in ("open_plan", "overhead_plan", "R005_vs_B", "closed")}, indent=1,
                      ensure_ascii=False, default=float)[:4000])
     figures(E10, E10b, out)
+    if out["frontier"]:
+        fig_frontier(out["frontier"])
 
 
 def figures(E10, E10b, st):

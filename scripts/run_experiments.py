@@ -711,6 +711,58 @@ def E10b(n_closed=12, K_closed=15, obs_period=20.0, replan_weight=1.2):
                                                   replan_weight=replan_weight, latency=3.0)))
 
 
+def E10c(n_scen=30, K=1000):
+    """E10 보강: 모델 불일치(Student-t, df=3)에서 위험–에너지 곡선 비교.
+    같은 시나리오(시드 2026)에서 튜브 ε ∈ {0.002, 0.001, 1e-4} 와 고정 버퍼 B(ε ∈ {0.2, 0.1, 0.01}) 를 추가 계획."""
+    from dpo.st_planner import STPlanner
+    from dpo.robust_eval import make_scenario, sample_truth, sample_truth_t, mc_collisions, fixed_buffer
+    g, fc, tr = sites()
+    dr = drone_calibrated()
+    m = dr.m_empty + PAYLOAD
+    usable = dr.battery_wh * 3600 * 0.8
+    SP = STPlanner(fc, dr)
+    st, gl = fc.lowest_free_k(*HUB), fc.lowest_free_k(*DST)
+    noms = {}
+    for h in E10_HOURS:
+        t_dep = (h - KST) * 3600.0
+        r0 = SP.plan(st, gl, t_start=t_dep, mass=m, ignore_obstacles=True, weight=1.0)
+        noms[h] = simulate(fc, dr, r0["path"], r0["wait_before"], t_dep, m)
+    rng = np.random.default_rng(2026)               # E10 과 같은 시나리오 재생성
+    scen = []
+    for q in range(n_scen):
+        h = int(rng.choice(E10_HOURS))
+        t_dep = (h - KST) * 3600.0
+        obs = make_scenario(rng, noms[h], t_dep)
+        scen.append(dict(id=q, hour=h, t_dep=t_dep, obs=obs, T_nom=float(noms[h]["t"][-1] - t_dep)))
+    rows = []
+    t_all = time.time()
+    for sc in scen:
+        smp = sample_truth(np.random.default_rng(10_000 + sc["id"]), sc["obs"], K)
+        smp_t = sample_truth_t(np.random.default_rng(30_000 + sc["id"]), sc["obs"], K)
+        res = dict(id=sc["id"], hour=sc["hour"])
+        Th = 1.3 * sc["T_nom"]
+        cfg = [(f"R{e}", sc["obs"], e) for e in (0.002, 0.001, 0.0001)] + \
+              [(f"B{e}", fixed_buffer(sc["obs"], Th), e) for e in (0.2, 0.1, 0.01)]
+        for key, obs_plan, eps in cfg:
+            SP.set_obstacles(obs_plan, sc["t_dep"], eps=eps)
+            r = SP.plan(st, gl, t_start=sc["t_dep"], mass=m, weight=1.0, budget=usable)
+            if r is None:
+                res[key] = dict(feasible=False)
+                continue
+            sim = simulate(fc, dr, r["path"], r["wait_before"], sc["t_dep"] + r["ground_delay"], m)
+            out = dict(feasible=True, E=float(sim["e"][-1]))
+            for wname, S_ in (("plan", smp), ("t3", smp_t)):
+                hit, _ = mc_collisions(sim, sc["t_dep"], sc["obs"], S_)
+                out[wname] = dict(n_hit=int(hit.sum()), K=K)
+            res[key] = out
+        rows.append(res)
+        print(f"[E10c] scen {sc['id']:2d} " + " ".join(
+            f"{k}:{v['plan']['n_hit']}/{v['t3']['n_hit']}/{v['E'] / 1000:.1f}" if v.get("feasible") else f"{k}:X"
+            for k, v in res.items() if isinstance(v, dict)), f"({time.time() - t_all:.0f}s)", flush=True)
+    save("E10c", dict(rows=rows, params=dict(n_scen=n_scen, K=K)))
+    print("[E10c] done")
+
+
 if __name__ == "__main__":
     todo = sys.argv[1:] or ["E0", "E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "E9"]
     for name in todo:
