@@ -53,7 +53,7 @@ def main(name="E11"):
         E = np.array([r[k]["E"] for r in rows]); EN = np.array([r["N"]["E"] for r in rows])
         p, lo, hi = wilson(int(nm.sum()), len(nm))
         M[k] = dict(nmac=int(nm.sum()), n=len(nm), p=p, lo=lo, hi=hi, min_sep_median=float(np.median(ms)),
-                    p_sep_lt_300=float(np.mean(ms < 300)), energy_vs_N=boot((E / EN - 1) * 100),
+                    p_sep_lt_100=float(np.mean(ms < 100)), energy_vs_N=boot((E / EN - 1) * 100),
                     E_kJ=boot(E / 1000), replans=float(np.mean([r[k]["replans"] for r in rows])),
                     degraded_frac=float(np.mean([r[k].get("degraded", 0) > 0 for r in rows])),
                     stuck_frac=float(np.mean([r[k].get("stuck", 0) > 0 for r in rows])))
@@ -70,7 +70,7 @@ def main(name="E11"):
     for k in KEYS:
         m = M[k]
         print(f"{k:6s} NMAC {m['nmac']:3d}/{m['n']} = {m['p'] * 100:5.1f}% [{m['lo'] * 100:.1f},{m['hi'] * 100:.1f}] "
-              f"minsep med {m['min_sep_median']:5.0f} P(<300) {m['p_sep_lt_300']:.2f} E vs N {m['energy_vs_N'][0]:+5.1f}% "
+              f"minsep med {m['min_sep_median']:5.0f} P(<100) {m['p_sep_lt_100']:.2f} E vs N {m['energy_vs_N'][0]:+5.1f}% "
               f"replans {m['replans']:.1f} degraded {m['degraded_frac']:.2f} stuck {m['stuck_frac']:.2f}")
     print(json.dumps(out["paired"], indent=0)); print(json.dumps(out["energy_paired"], indent=0))
     figure(out, rows)
@@ -97,8 +97,8 @@ def figure(out, rows):
                yerr=[[max(m["p"] - m["lo"], 0) * 100], [max(m["hi"] - m["p"], 0) * 100]], capsize=3)
         ax.text(i, m["hi"] * 100 + 0.8, f"{m['nmac']}/{m['n']}", ha="center", fontsize=7.5)
     ax.set_xticks(xs); ax.set_xticklabels([LAB[k].replace(" ε", "\nε") for k in KEYS], fontsize=7.5)
-    ax.set_ylabel("NMAC 확률 [%] (Wilson 95% CI)")
-    ax.set_title("(a) 근접 공중 충돌 (수평 152 m 이내)", loc="left", fontsize=10.5)
+    ax.set_ylabel("충돌 확률 [%] (Wilson 95% CI)")
+    ax.set_title("(a) 충돌 확률 (반경 R 이내)", loc="left", fontsize=10.5)
     ax.grid(alpha=0.25, axis="y")
     ax = axs[1]
     for k in KEYS:
@@ -107,20 +107,20 @@ def figure(out, rows):
                                                               [m["energy_vs_N"][2] - m["energy_vs_N"][0]]],
                     yerr=[[max(m["p"] - m["lo"], 0) * 100], [max(m["hi"] - m["p"], 0) * 100]], fmt="o" if "0.01" not in k
                     else "s", color=COL[k[0]], ms=7, capsize=2, label=LAB[k])
-    ax.set_xlabel("같은 조우의 공칭 대비 에너지 [%]"); ax.set_ylabel("NMAC 확률 [%]")
+    ax.set_xlabel("같은 조우의 공칭 대비 에너지 [%]"); ax.set_ylabel("충돌 확률 [%]")
     ax.set_title("(b) 위험–에너지 (왼쪽 아래가 좋음)", loc="left", fontsize=10.5)
     ax.legend(frameon=False, fontsize=7.5); ax.grid(alpha=0.25)
     ax = axs[2]
     for k in ("N", "G0.05", "B0.05", "Q0.05"):
         ms = np.sort([r[k]["min_sep"] for r in rows])
         ax.plot(ms, np.arange(1, len(ms) + 1) / len(ms) * 100, color=COL[k[0]], lw=2, label=LAB[k])
-    ax.axvline(152.4, color="#D7263D", lw=1, ls="--"); ax.text(160, 3, "NMAC 152 m", color="#D7263D", fontsize=8)
-    ax.set_xlim(0, 1500)
-    ax.set_xlabel("실제 궤적과의 최소 이격 [m]"); ax.set_ylabel("누적 비율 [%]")
+    ax.axvline(0, color="#D7263D", lw=1, ls="--"); ax.text(8, 3, "충돌", color="#D7263D", fontsize=8)
+    ax.set_xlim(-150, 800)
+    ax.set_xlabel("실제 궤적과의 최소 이격 (반경 R 제외) [m]"); ax.set_ylabel("누적 비율 [%]")
     ax.set_title("(c) 최소 이격 분포", loc="left", fontsize=10.5)
     ax.legend(frameon=False, fontsize=8, loc="lower right"); ax.grid(alpha=0.25)
     p = out["params"]
-    fig.suptitle(f"실측 ADS-B 침입기 폐루프 시험 – 조우 {out['n_used']}회, 감시 {p.get('PERIOD', 5):g} s 주기, "
+    fig.suptitle(f"실측 항적(속도 축소) 침입기 폐루프 시험 – 조우 {out['n_used']}회, 감시 {p.get('PERIOD', 5):g} s 주기, "
                  f"튜브 지평 {p.get('H', 20):g} s (교차 적합)", fontweight="bold", y=1.03)
     fig.savefig(C.FIG / "F21_adsb_closed_loop.png")
     plt.close(fig)

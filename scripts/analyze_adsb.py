@@ -204,6 +204,9 @@ def figure(out, err):
     tt_ = stats.t.rvs(max(df, 2.05), size=(400000, 2), random_state=np.random.default_rng(0))
     tt_ = tt_ / np.sqrt(np.mean(tt_ ** 2)); ut = np.sort(np.hypot(tt_[:, 0], tt_[:, 1]))
     ax.set_ylim(1e-4, 1.3); ax.set_xlim(0.05, 12)
+    ax.set_yticks([1, 1e-1, 1e-2, 1e-3, 1e-4]); ax.set_yticklabels(["1", "0.1", "0.01", "0.001", "0.0001"])
+    ax.set_xticks([0.1, 1, 10]); ax.set_xticklabels(["0.1", "1", "10"])
+    ax.minorticks_off()
     ax.set_xlabel("표준화 오차 반경 ‖e‖ / σ_RMS(τ)"); ax.set_ylabel("초과 확률")
     q = out["tail"]["quantiles"]
     ax.set_title(f"(b) 꼬리: 99.9% 분위수 {q['0.999']['data']:.1f}σ (가우시안 {q['0.999']['gaussian']:.1f}σ)",

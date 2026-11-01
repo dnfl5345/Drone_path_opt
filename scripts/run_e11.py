@@ -2,8 +2,11 @@
 
 설정
 - 드론: E10 과 같은 판교 배송 임무(15–18시 GFS 바람), 처음에는 침입기를 모름 → 장애물 없는 계획으로 출발
-- 침입기: 시험 폴드의 실측 1 Hz 항적 구간(응급 헬기·일반 항공). 처음 탐지 시각 t_pop 에서 L 초 뒤
-  등속 예측 위치가 드론의 공칭 위치와 겹치도록 회전·평행이동(충돌 코스, 스트레스 시험). 이후 궤적은 실측 그대로.
+- 침입기: 시험 폴드의 실측 1 Hz 항적 구간(응급 헬기·일반 항공). 시간·선회 이력은 그대로 두고 공간만
+  s = U/V0 배 축소해 속도 U ∈ [8, 30] m/s 의 저속 침입기(다른 드론·경량 헬기, E10 과 같은 범위)로 만든다
+  (가정: 속도 정규화 오차 ‖e‖/V 의 분포가 속도와 무관 – 선회율이 같으면 위치 오차는 속도에 비례).
+  처음 탐지 시각 t_pop 에서 L 초 뒤 등속 예측 위치가 드론의 공칭 위치와 겹치도록 회전·평행이동(충돌 코스).
+  반경 R ∈ [40, 150] m (E10 과 같음), 충돌 = R + 0.5 m 이내.
 - 감시: PERIOD 초마다 침입기 상태(위치·ADS-B 보고 속도)를 관측 → 등속 예측 + 팽창 튜브(예측 지평 H 초)
   → 남은 경로와 충돌이 예상되면 현재 위치에서 재계획(지연 3 s)
 - 방법: N(팽창 없음), G(ε) 가우시안 튜브, B(ε) 가우시안 고정 버퍼, Q(ε) 데이터 분위수 튜브
@@ -32,7 +35,7 @@ from dpo import config as C  # noqa: E402
 H = 20.0                  # 튜브 예측 지평 [s] (재관측 주기 + 여유)
 PERIOD = 5.0              # 감시 갱신 주기 [s]
 LATENCY = 3.0
-R_NMAC = 152.4            # 근접 공중 충돌(NMAC) 수평 기준 500 ft
+R_NMAC = 152.4            # (원래 속도 그대로 쓰는 민감도 실험용) 근접 공중 충돌 수평 기준 500 ft
 MARGIN = 15.0
 SEG = 150.0               # 침입기 실측 구간 길이 [s]
 KN = [0.0, 5.0, 10.0, 15.0, 20.0]
@@ -73,18 +76,19 @@ def tube_knots(model, kind, eps, V):
 
 # ------------------------------------------------------------------ 침입기 (실측 항적 변환)
 class Intruder:
-    def __init__(self, tr, i0, t_pop, L, heading, D):
-        self.tr, self.i0, self.t_pop = tr, i0, t_pop
+    def __init__(self, tr, i0, t_pop, L, heading, D, U=None, R=R_NMAC):
+        self.tr, self.i0, self.t_pop, self.R = tr, i0, t_pop, R
         v0 = velocity(tr, i0)
         h0 = math.atan2(v0[0], v0[1])
         d = heading - h0
-        self.c, self.s = math.cos(d), math.sin(d)
+        self.k = 1.0 if U is None else U / math.hypot(*v0)        # 공간 축소 배율
+        self.c, self.s = math.cos(d) * self.k, math.sin(d) * self.k
         rv = self.rot(*v0)
         self.P0 = (D[0] - L * rv[0], D[1] - L * rv[1])
         self.s0 = tr["t"][i0]
         self.s_end = min(tr["t"][-1], self.s0 + SEG)
 
-    def rot(self, x, y):           # 방위각(북 기준 시계방향)을 d 만큼 회전
+    def rot(self, x, y):           # 방위각(북 기준 시계방향)을 d 만큼 회전 + 배율 k
         return (x * self.c + y * self.s, -x * self.s + y * self.c)
 
     def pos(self, t_rel):
@@ -112,7 +116,7 @@ class Intruder:
         x, y, _ = self.pos(np.array([t_rel]))
         x, y = float(x[0]), float(y[0])
         t_end = min(t_rel + H, self.t_pop + (self.s_end - self.s0))
-        return [DynObstacle(name="intruder", kind="cylinder", radius=R_NMAC, margin=MARGIN, z_min=0.0, z_max=5000.0,
+        return [DynObstacle(name="intruder", kind="cylinder", radius=self.R, margin=MARGIN, z_min=0.0, z_max=5000.0,
                             path=[dict(x=x, y=y, t=t_rel), dict(x=x + vx * (t_end - t_rel), y=y + vy * (t_end - t_rel),
                                                                    t=t_end)],
                             t_start=t_rel, t_end=t_end, t_obs=t_rel, tube=tube_knots(model, kind, eps, V))]
@@ -149,7 +153,7 @@ def run_job(job):
     r0, nom = G_["noms"][h]
     tn = nom["t"] - t_dep
     D = (float(np.interp(t_pop + L, tn, nom["x"])), float(np.interp(t_pop + L, tn, nom["y"])))
-    intr = Intruder(G_["tracks"][k], i0, t_pop, L, heading, D)
+    intr = Intruder(G_["tracks"][k], i0, t_pop, L, heading, D, U=job["U"], R=job["R"])
     out = dict(job={kk: v for kk, v in job.items() if kk != "model"}, V0=float(math.hypot(*velocity(G_["tracks"][k], i0))))
     for kind, eps in METHODS:
         key = kind if eps is None else f"{kind}{eps}"
@@ -169,7 +173,7 @@ def run_job(job):
         d = np.where(act, np.hypot(tr_["x"] - x, tr_["y"] - y), np.inf)
         stuck = sum(1 for e in res["events"] if "기존 경로 유지" in e.get("reason", ""))
         degr = sum(1 for e in res["events"] if (e.get("fallback") or 0) > 0)
-        out[key] = dict(feasible=True, min_sep=float(d.min()), nmac=bool(d.min() <= R_NMAC + 0.5), E=res["E"],
+        out[key] = dict(feasible=True, min_sep=float(d.min() - job["R"]), nmac=bool(d.min() <= job["R"] + 0.5), E=res["E"],
                         T=res["T"], replans=res["n_replans"], stuck=stuck, degraded=degr,
                         cpu=time.perf_counter() - t0)
     return out
@@ -222,7 +226,8 @@ def make_jobs(n_scen, K, seed=2027):
         for kk in range(K):
             k, i0 = pool[fold][int(rng.integers(len(pool[fold])))]
             jobs.append(dict(scen=q, sample=kk, hour=h, fold=fold, t_pop=t_pop, L=L,
-                             heading=float(rng.uniform(0, 2 * np.pi)), k=k, i0=i0, model=models[fold]))
+                             heading=float(rng.uniform(0, 2 * np.pi)), k=k, i0=i0, model=models[fold],
+                             U=float(rng.uniform(8.0, 30.0)), R=float(rng.uniform(40.0, 150.0))))
     return jobs, models, [len(p) for p in pool]
 
 
