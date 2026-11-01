@@ -514,14 +514,106 @@ def fig_formulation():
     plt.close(fig)
 
 
+
+# ================================================================== F13 확장: 8방향 + 고도별 균일 선형 바람
+def fig_layered(g, fc):
+    E7 = L("E7")
+    from scipy.spatial import ConvexHull
+    fig = plt.figure(figsize=(16, 9.6))
+    gs = fig.add_gridspec(2, 3, width_ratios=[1, 1, 1.25], hspace=0.38, wspace=0.32)
+    # (a) 선형 시어 적합
+    ax = fig.add_subplot(gs[0, 0])
+    prof, n6 = E7["prof"], E7["n6"]
+    zs, us, vs = prof["levels"][n6], prof["u"][n6], prof["v"][n6]
+    zz = np.linspace(10, 320, 50)
+    for comp, val, a, b, col in (("U(동서)", us, prof["a_u"][n6], prof["b_u"][n6], "#1B6CA8"),
+                                 ("V(남북)", vs, prof["a_v"][n6], prof["b_v"][n6], "#E07B39")):
+        ax.plot(val, zs, "o", color=col, label=f"GFS {comp}")
+        ax.plot(a + b * zz, zz, "-", color=col, lw=2, label=f"선형 적합 {comp}: {b * 100:+.1f} m/s/100 m")
+    ax.axhspan(30, 150, color="#1B6CA8", alpha=0.07)
+    ax.set_xlabel("바람 성분 [m/s]"); ax.set_ylabel("지상 고도 [m]")
+    ax.set_title(f"(a) 고도별 균일·선형 바람 적합 (15시, R² {prof['r2'][n6]:.2f})", fontsize=12)
+    ax.legend(fontsize=8, frameon=False, loc="upper left")
+    # (b) 단위구(비용 노름) 비볼록성
+    ax = fig.add_subplot(gs[0, 1])
+    E = E7["E"]
+    th = 2 * np.pi * np.arange(72) / 72
+    for k, col in ((2, "#8FB8DE"), (8, "#1B6CA8"), (14, "#0B3954")):
+        e = E[n6, k]
+        if not np.isfinite(e).all():
+            continue
+        r = 1000.0 / e                           # e: J/m → 1 kJ 로 갈 수 있는 거리 [m]
+        x, y = r * np.sin(th), r * np.cos(th)
+        ax.plot(np.r_[x, x[0]], np.r_[y, y[0]], color=col, lw=2, label=f"해발 {E7['z'][k]:.0f} m")
+        h = ConvexHull(np.c_[x, y])
+        hv = np.r_[h.vertices, h.vertices[0]]
+        ax.plot(x[hv], y[hv], "--", color=col, lw=1)
+    for d in range(8):
+        a = 2 * np.pi * d / 8
+        ax.plot([0, 60 * np.sin(a)], [0, 60 * np.cos(a)], color="#CCCCCC", lw=0.8, zorder=0)
+    ax.set_aspect("equal")
+    ax.set_xlabel("동 [m/kJ]"); ax.set_ylabel("북 [m/kJ]")
+    cv = E7["convexity"]
+    md = max(v["max_deficit"] for v in cv.values())
+    ax.set_title(f"(b) 1 kJ 도달거리 = 비용 노름 단위구\n실선이 점선(볼록 껍질) 안으로 최대 {md * 100:.0f}% 들어감 → 비볼록",
+                 fontsize=11)
+    ax.legend(fontsize=8, frameon=False, loc="lower left")
+    # (c) 손익분기 상승 거리
+    ax = fig.add_subplot(gs[0, 2])
+    be = E7["breakeven"]
+    dzs = [int(k[:-1]) for k in be]
+    tail = [be[k]["tail"] / 1000 for k in be]
+    ax.bar(np.arange(len(dzs)), tail, color="#1B6CA8")
+    for x, v in enumerate(tail):
+        ax.text(x, v + 3, f"{v:.0f} km", ha="center", fontsize=10)
+    ax.set_xticks(range(len(dzs))); ax.set_xticklabels([f"+{d} m" for d in dzs])
+    ax.set_ylabel("손익분기 수평거리 L* [km]")
+    ax.set_title("(c) 순풍을 더 받으려고 상승할 때의 손익분기 거리\n(역풍 방향은 상승할수록 손해 → L* = ∞)", fontsize=11)
+    ax.axhline(2.4, color="#D7263D", ls="--"); ax.text(-0.35, 14, "본 임무 편도 2.4 km (빨간 점선)", color="#D7263D", fontsize=9)
+    # (d) SOC·CPU 비교
+    ax = fig.add_subplot(gs[1, 0:2])
+    rows = E7["rows"]
+    keys = []
+    for r in rows:
+        if r["key"] not in keys:
+            keys.append(r["key"])
+    x = np.arange(len(keys))
+    for n, (kind, col) in enumerate((("delivery", "#1B6CA8"), ("pickup", "#E07B39"))):
+        v = [next(r for r in rows if r["kind"] == kind and r["key"] == k)["soc_used"] for k in keys]
+        ax.bar(x + (n - 0.5) * 0.38, v, 0.36, color=col, label="배송" if n == 0 else "회수")
+        for xi, vi in zip(x + (n - 0.5) * 0.38, v):
+            ax.text(xi, vi + 0.4, f"{vi:.1f}", ha="center", fontsize=9)
+    cpu = [np.mean([r["cpu"] for r in rows if r["key"] == k and r["kind"] == "pickup"]) for k in keys]
+    labs = [next(r for r in rows if r["key"] == k)["label"].replace(" + ", "\n+ ").replace(" (", "\n(") for k in keys]
+    ax.set_xticks(x); ax.set_xticklabels([f"{l}\n[{c:.2f} s]" for l, c in zip(labs, cpu)], fontsize=8.5)
+    ax.axhline(80, color="#D7263D", ls="--", lw=1)
+    ax.set_ylim(70, 90); ax.set_ylabel("왕복 SOC 소모 [%p] (실제 바람 평가)")
+    ax.set_title("(d) 탐색 구조별 SOC와 왕복 계산시간 [ ]  (선형 바람 가정 4종 vs 3D 바람장 기준)", fontsize=12)
+    ax.legend(frameon=False, fontsize=9, loc="upper right")
+    # (e) 경로
+    ax = fig.add_subplot(gs[1, 2])
+    basemap(ax, g, fc)
+    st = E7["store"]
+    for key, col, lab in (("L8_Astar", "#E07B39", "8방향+수직 A*"), ("L26_LT3D", "#2CA58D", "8방향 + 3D 지름길(LUT)"),
+                          ("WELT_full", "#1B6CA8", "WE-LT* (3D 바람장)")):
+        for leg, lsx in (("out", "-"), ("back", "--")):
+            xx, yy, _ = P2(fc, st[("delivery", key)][leg])
+            ax.plot(xx, yy, lsx, color=col, lw=2, label=lab if leg == "out" else None)
+    ax.set_xlim(2.3, 5.0); ax.set_ylim(1.2, 3.4)
+    ax.legend(fontsize=8, loc="lower left", framealpha=0.9)
+    ax.set_title("(e) 배송 경로 (실선 갈 때 / 점선 올 때)", fontsize=12)
+    fig.savefig(C.FIG / "F13_layered_8way.png")
+    plt.close(fig)
+
+
 if __name__ == "__main__":
     g, fc, tr = sites()
     todo = sys.argv[1:] or ["site", "wind", "energy", "paths", "soc", "departure", "hover", "rolling", "payload", "3d",
-                            "ablation", "formulation"]
+                            "ablation", "formulation", "layered"]
     fns = dict(site=lambda: fig_site(g, fc), wind=lambda: fig_wind_profile(g, fc, tr), energy=fig_energy,
                paths=lambda: fig_paths(g, fc), soc=lambda: fig_soc(fc), departure=lambda: fig_departure(g, fc),
                hover=lambda: fig_hover(g, fc), rolling=lambda: fig_rolling(g, fc), payload=fig_payload,
-               ablation=fig_ablation, formulation=fig_formulation,
+               ablation=fig_ablation, formulation=fig_formulation, layered=lambda: fig_layered(g, fc),
                **{"3d": lambda: fig_3d(g, fc)})
     for t in todo:
         if t == "gif":

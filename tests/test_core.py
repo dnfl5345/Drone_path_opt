@@ -92,3 +92,26 @@ def test_fixed_airspeed_never_beats_speed_optimization():
         e_opt, _ = edge_energy_per_m(25.0, 0, 0, wu, 2.0, 3.1, 1.225, PRM, DR.va_max, DR.vz_up, DR.vz_dn, SPD)
         e_fix, _ = edge_energy_per_m(25.0, 0, 0, wu, 2.0, 3.1, 1.225, prm_fix, DR.va_max, DR.vz_up, DR.vz_dn, SPD)
         assert e_opt <= e_fix * 1.001
+
+
+def test_layered_lut_planner_avoids_wall_and_3d_shortcut_helps():
+    from dpo.layered import build_lut, _search_layered, SLOPES
+    nz, ny, nx = 3, 30, 30
+    free = np.ones((nz, ny, nx), bool)
+    free[:, 5:25, 15] = False
+    lin_U = np.tile(np.array([[2.0, 3.0, 4.0]]), (2, 1))   # 고도별 균일·선형 바람
+    lin_V = np.zeros_like(lin_U)
+    E, G, EV, GV, ED, GD, ES, GS = build_lut(lin_U, lin_V, np.full(nz, 1.225), 3.1, DR, dz=20.0, dx_h=25.0)
+    e_lb = float(min(E[np.isfinite(E)].min(), ED[np.isfinite(ED)].min()))
+    tax = np.array([0.0, 3600.0])
+    gid = (0 * ny + 15) * nx + 27
+    res = {}
+    for aa in (False, True):
+        g, tt, par, n = _search_layered(np.array([0, 15, 2]), np.array([0, 15, 27]), 0.0, free, E, G, EV, GV, ED, GD,
+                                        ES, GS, SLOPES, tax, 25.0, 20.0, e_lb, aa, 400.0, True, True)
+        assert g[gid] < 1e29
+        p = _path(par, ny, nx, gid)
+        assert all(free.reshape(-1)[u] for u in p)
+        res[aa] = (g[gid], len(p))
+    assert res[True][1] < res[False][1]
+    assert res[True][0] <= res[False][0] * 1.02

@@ -331,8 +331,57 @@ def E6():
     put_summary("E6_ablation", rows)
 
 
+# ------------------------------------------------------------------ E7 확장: 8방향 + 고도별 균일 선형 바람
+def E7():
+    from dpo.layered import fit_linear_profile, linear_wind_site, LayeredPlanner, unit_ball_convexity, breakeven_climb
+    g, fc, tr = sites()
+    dr = drone_calibrated()
+    f0 = dict(np.load(C.RAW / "gfs_20261027_00z.npz", allow_pickle=True))
+    lat_c, lon_c = 0.5 * (C.LAT_MIN + C.LAT_MAX), 0.5 * (C.LON_MIN + C.LON_MAX)
+    prof = fit_linear_profile(f0, lat_c, lon_c, float(g["ground"].mean()))
+    sl = linear_wind_site(fc, prof)
+    LP = LayeredPlanner(sl, dr)
+    variants = {
+        "L8_Astar": (LP, dict(any_angle=False, diag_climb=False), "8방향+수직 A*"),
+        "L8_LazyTheta": (LP, dict(any_angle=True, diag_climb=False, aa3d=False), "8방향+수직 + 레이어 내 지름길"),
+        "L26_LazyTheta": (LP, dict(any_angle=True, diag_climb=True, aa3d=False), "8방향×상승/수평/하강 + 레이어 내 지름길"),
+        "L26_LT3D": (LP, dict(any_angle=True, diag_climb=True, aa3d=True), "8방향×상승/수평/하강 + 3D 지름길 (경사 LUT)"),
+        "WELT_linear": (Planner(sl, dr), {}, "WE-LT* 26방향 (선형 바람)"),
+        "WELT_full": (Planner(fc, dr), {}, "WE-LT* 26방향 (3D 바람장, 기준)"),
+    }
+    rows, store = [], {}
+    for kind in ("delivery", "pickup"):
+        for key, (P, kw, label) in variants.items():
+            ms = Mission(HUB, DST, PAYLOAD, kind, T_MAIN)
+            t = time.time()
+            rt = run_round_trip(P, ms, site_truth=tr, **kw)          # 실제 바람으로 평가
+            rp = run_round_trip(P, ms, site_truth=P.site, **kw)      # 계획 모델 자체의 예측
+            store[(kind, key)] = dict(out=rt["out"]["plan"]["path"], back=rt["back"]["plan"]["path"])
+            rows.append(dict(kind=kind, key=key, label=label, soc_used=rt["soc_used"], soc_pred=rp["soc_used"],
+                             feasible=bool(rt["feasible"]), L=rt["L"],
+                             wp=len(rt["out"]["plan"]["path"]) + len(rt["back"]["plan"]["path"]),
+                             cpu=rt["out"]["plan"]["cpu_s"] + rt["back"]["plan"]["cpu_s"],
+                             n_exp=rt["out"]["plan"]["n_expanded"] + rt["back"]["plan"]["n_expanded"]))
+            print(rows[-1], f"{time.time() - t:.0f}s")
+    # 단위구 볼록성 (15시, 갈 때 질량) / 상승 손익분기
+    m_out = dr.m_empty + PAYLOAD
+    E, Gs, EV, GV, ED, GD, ES, GS = LP.lut(m_out)
+    n6 = int(np.searchsorted(sl.t_axis, T_MAIN))
+    conv = {int(k): unit_ball_convexity(E[n6, k]) for k in range(sl.nz) if np.isfinite(E[n6, k]).all()}
+    wdir_to = (np.degrees(np.arctan2(sl.lin_U[n6, 4], sl.lin_V[n6, 4])) % 360)
+    h_tail = int(round(wdir_to / 5)) % 72
+    h_head = (h_tail + 36) % 72
+    be = {f"{dzk * 20}m": dict(tail=breakeven_climb(E, EV, n6, 2, 2 + dzk, h_tail, sl.dz),
+                               head=breakeven_climb(E, EV, n6, 2, 2 + dzk, h_head, sl.dz)) for dzk in (1, 2, 3, 4)}
+    res = dict(rows=rows, r2_profile=prof["r2"].tolist(), shear_u=prof["b_u"].tolist(), shear_v=prof["b_v"].tolist(),
+               lut_time=LP.lut_time, convexity=conv, breakeven=be, h_tail_deg=h_tail * 5, n_layers=sl.nz)
+    save("E7", dict(**res, prof=prof, store=store, E=E, EV=EV, n6=n6, z=sl.z))
+    put_summary("E7_layered", res)
+    print({k: v for k, v in res.items() if k != "rows"})
+
+
 if __name__ == "__main__":
-    todo = sys.argv[1:] or ["E0", "E1", "E2", "E3", "E4", "E5", "E6"]
+    todo = sys.argv[1:] or ["E0", "E1", "E2", "E3", "E4", "E5", "E6", "E7"]
     for name in todo:
         t = time.time()
         print(f"===== {name}")

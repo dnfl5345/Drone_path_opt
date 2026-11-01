@@ -553,6 +553,31 @@ def build(template, out):
         [("○ 시간가변 바람·leg별 질량은 1회 비행의 경로 형상에는 영향 작음(≤0.3%p) → ", {}),
          ("출발시각 선택(E2)·재계획(E5)·SOC 예측 정확도", {"color": TITLE}), ("에서 효과", {})]], size=13)
 
+    # 15-2. 결과 ⑧ 확장안 ------------------------------------------------------
+    s = D.content("결과 ⑧ 확장안 – 8방향 탐색 + 고도별 균일·선형 바람")
+    picture(s, FIG / "F13_layered_8way.png", 0.5, 1.0, 7.9, 5.95)
+    E7 = {(r["key"], r["kind"]): r for r in S["E7_layered"]["rows"]}
+    sp = box(s, 8.6, 1.05, 4.15, 5.85, fill=LIGHT, shadow=False)
+    box_text(sp, [[("가정", {"color": TITLE, "size": 14})],
+                  [("(A1) 같은 고도면 같은 바람  w(z, t)\n(A2) 고도에 선형  w = a(t) + b(t)(z − h̄)\n"
+                    "     GFS 적합 R² 0.78~0.88, 시어 ≈ 2 m/s/100 m", {"size": 11})],
+                  [("", {"size": 5})],
+                  [("결과", {"color": TITLE, "size": 14})],
+                  [("① 간선 비용이 위치와 무관 → (시각·고도·방위·경사) 조회표(LUT) 1회 조회", {"size": 11})],
+                  [(f"   계산 {E7[('WELT_linear', 'pickup')]['cpu']:.1f} s → {E7[('L26_LT3D', 'pickup')]['cpu']:.2f} s (약 20배)",
+                    {"size": 11, "color": ORANGE})],
+                  [("② 레이어 안 비용 노름이 비볼록(최대 9%) → 직결은 에너지 비교로 판정 유지", {"size": 11})],
+                  [("③ 상승 손익분기 L* = (E↑+E↓)/Δe* : 순풍 +20 m에 105 km → 상승 이득 없음, 역풍은 저고도", {"size": 11})],
+                  [("", {"size": 5})],
+                  [("SOC (배송, 실제 바람)", {"color": TITLE, "size": 14})],
+                  [(f"· 8방향+수직 A*: {E7[('L8_Astar', 'delivery')]['soc_used']:.1f}%p\n"
+                    f"· 8방향 + 3D 지름길(LUT): {E7[('L26_LT3D', 'delivery')]['soc_used']:.1f}%p\n"
+                    f"· WE-LT* (3D 바람장): {E7[('WELT_full', 'delivery')]['soc_used']:.1f}%p", {"size": 11})],
+                  [("→ 사전계획·출발시각 탐색엔 확장안, 최종·재계획엔 3D 바람장", {"size": 11, "color": ORANGE})]],
+             anchor=MSO_ANCHOR.TOP)
+    notes(s, "상세: docs/extension_8way_linear_wind.md, src/dpo/layered.py, 실험 E7. 수직 이동만 허용하면 제자리 상승(약 180 J/m) "
+             "때문에 +3.6~5.1%p 손해, 3D 지름길로 해소. 남은 1.4%p는 지형·도시 바람 효과 미반영 때문.")
+
     # 16. 결론 ---------------------------------------------------------------
     s = D.content("결론 및 추후 개발할 내용")
     textbox(s, 0.8, 1.1, 7.4, 3.1, [
@@ -577,7 +602,7 @@ def build(template, out):
     textbox(s, 8.4, 4.35, 4.3, 0.35, [[("3D 경로 (지형·건물 위)", {"size": 12, "color": GRAY})]], align=PP_ALIGN.CENTER)
     sp = box(s, 8.4, 4.8, 4.3, 1.35, fill=LIGHT, shadow=False)
     box_text(sp, [[("코드·재현", {"color": TITLE, "size": 14})],
-                  [("src/dpo: 데이터·에너지·바람장·탐색기\nscripts/run_experiments.py → make_figures.py\ntests/: 단위 테스트 8종\ndocs/algorithm_comparison.md: 정식화 비교",
+                  [("src/dpo: 데이터·에너지·바람장·탐색기\nscripts/run_experiments.py → make_figures.py\ntests/: 단위 테스트 9종\ndocs/: 정식화 비교 · 8방향 확장안",
                     {"size": 11, "color": INK})]], anchor=MSO_ANCHOR.TOP)
     notes(s, "실제 운용 시 판교 일대는 서울공항 관제권으로 비행승인 필요. 비행금지구역 원은 예시(가상).")
 

@@ -5,6 +5,7 @@
 
 - 회의 보고 자료: [`docs/drone_soc_path_planning_dev.pptx`](docs/drone_soc_path_planning_dev.pptx) (기존 회의자료와 같은 포맷, 21장)
 - 최신 연구 대비 정식화 비교: [`docs/algorithm_comparison.md`](docs/algorithm_comparison.md) (문제 (P) 정의, 문헌별 정식화, 가정 축소 실험)
+- 확장안 (8방향 탐색 + 고도별 균일·선형 바람, LUT): [`docs/extension_8way_linear_wind.md`](docs/extension_8way_linear_wind.md)
 - 결과 그림: `results/figures/` · 수치 요약: `results/summary.json`
 
 ## 개발 항목별 구현
@@ -14,7 +15,7 @@
 | 1. 최단 경로를 실제 지도에 적용 | 성남 판교·분당 6.2×5.5 km, Copernicus DSM 30 m 지형 + Overture 건물 7,109동 → 25 m 3D 점유격자, Lazy Theta* (mode 0) | `src/dpo/data_terrain.py`, `planner.py` |
 | 2. 최적 경로 수식 | ① t=d/Vg ② E=P·t ③ ΣE ④ ΔSOC=E/E_batt×100 ⑤ argmin ΔSOC + 회전익 전력모델 P(Va,Vz,m) | `src/dpo/energy.py`, `mission.py` |
 | 3. 바람 정보 + 바람 지도 | NOAA GFS 0.25° 고도별(10~100 m, 975/950 hPa)·시간별 예보 → 지형·도시 보정 다운스케일 3D 바람장. 기상청 어댑터 별도 | `src/dpo/data_wind.py`, `wind_field.py`, `kma_adapter.py` |
-| 4. 최적 경로를 실제 지도에 적용 | WE-LT*: 26방향 3D, 시간가변 바람 비용, 구간 속도 최적화, 에너지 비교형 Lazy Theta* 지름길, 호버링/우회 판단, 롤링 재계획 | `src/dpo/planner.py`, `mission.py` |
+| 4. 최적 경로를 실제 지도에 적용 | WE-LT* (확장안: `layered.py` 8방향 + 선형 바람 LUT): 26방향 3D, 시간가변 바람 비용, 구간 속도 최적화, 에너지 비교형 Lazy Theta* 지름길, 호버링/우회 판단, 롤링 재계획 | `src/dpo/planner.py`, `mission.py` |
 | 5. 드론 데이터와 비교 | CMU DJI Matrice 100 실측 198회(탑재 0~750 g)로 전력모델 보정·검증 (날짜 분리 검증 R² 0.77, MAPE 9.6%) | `energy.py`, `scripts/run_experiments.py: E0` |
 
 ## 주요 결과 (2026-10-27 강풍일, 15:00 KST, 거점↔배송지 2.4 km 왕복, 0.5 kg)
@@ -29,6 +30,7 @@
 - 출발시각(09~20시, 시간별 예보)에 따라 경로·SOC가 바뀌며, 예비 SOC 20 %를 지키는 경우는 기존 방식 0/24회, WE-LT* 23/24회입니다.
 - 장애물 시간표(띠 모양 임시 비행제한): 해제까지 30 s면 **28 s 호버링**(57.9 kJ)을, 300 s면 **우회**(70.9 kJ)를 고릅니다.
 - 비행 중 돌발 금지구역이 생기면 롤링 재계획(60 s 주기 + 이벤트 발생 시)으로 피해 갑니다. 재계획 1회에 평균 5.3 s가 걸립니다.
+- 확장안(E7): 바람을 "같은 고도면 같고, 고도에 따라 선형"으로 가정하면 간선 비용을 조회표(LUT)로 바꿀 수 있습니다. 이렇게 하면 계산이 8.9 s → 0.44 s로 **약 20배 빨라지고**, SOC는 같은 가정의 WE-LT*와 같습니다(78.2 vs 78.1 %p). 3D 바람장 대비로는 약 1.4 %p 손해입니다.
 - 가정 축소 실험(E6) 결과, 비교 축별 기여는 **구간 속도 최적화 +10.2~13.0 %p**(10 m/s 고정이면 비행 불가) > **에너지 비교형 any-angle +4.1 %p** > **3D 고도 선택 +2.8~3.1 %p** 순입니다.
 
 ## 실행
@@ -37,7 +39,7 @@
 pip install -r requirements.txt
 PYTHONPATH=src python -m dpo.data_terrain                  # DSM·건물 수집 → data/processed/site_grid.npz
 PYTHONPATH=src python -m dpo.data_wind                     # GFS 10월 강풍일 스캔
-PYTHONPATH=src python scripts/run_experiments.py           # E0~E6 (약 12분)
+PYTHONPATH=src python scripts/run_experiments.py           # E0~E7 (약 14분)
 PYTHONPATH=src python scripts/make_figures.py && PYTHONPATH=src python scripts/make_figures.py gif
 PYTHONPATH=src python scripts/build_ppt.py <회의자료 템플릿.pptx> docs/drone_soc_path_planning_dev.pptx
 PYTHONPATH=src python -m pytest -q tests
