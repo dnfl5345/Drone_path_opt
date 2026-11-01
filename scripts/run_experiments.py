@@ -1,0 +1,287 @@
+"""전체 실험 실행: 보정 → 실제 지도 최단/최적 경로 → 출발시각·탑재중량·금지구역·재계획.
+
+사용: PYTHONPATH=src python scripts/run_experiments.py [E0 E1 ...]
+결과: results/*.pkl, results/summary.json
+"""
+from __future__ import annotations
+
+import json
+import pickle
+import sys
+import time
+
+import numpy as np
+
+from dpo import config as C
+from dpo.energy import Drone, load_cmu, calibrate, predict_flight_energy, metrics, soc_drop
+from dpo.wind_field import Site3D
+from dpo.planner import Planner, simulate, path_length
+from dpo.mission import Mission, run_round_trip, run_rolling, _leg
+
+T0 = np.datetime64("2026-10-27T00:00")   # 00 UTC = 09:00 KST
+KST = 9
+HUB = (2700.0, 3000.0)                   # 물류 거점 (판교 테크노밸리 인근)
+DST = (4600.0, 1500.0)                   # 배송지 (분당 정자·수내 방면, 탄천 건너편)
+NFZ = (3650.0, 2250.0, 250.0)            # 예시 비행금지구역 (가상, 반경 250 m)
+T_MAIN = 6 * 3600.0                      # 15:00 KST 출발 (강풍 시간대)
+PAYLOAD = 0.5
+
+
+def save(name, obj):
+    with open(C.RES / f"{name}.pkl", "wb") as f:
+        pickle.dump(obj, f)
+
+
+def load_summary():
+    p = C.RES / "summary.json"
+    return json.loads(p.read_text()) if p.exists() else {}
+
+
+def put_summary(key, val):
+    s = load_summary()
+    s[key] = val
+    (C.RES / "summary.json").write_text(json.dumps(s, indent=1, ensure_ascii=False, default=float))
+
+
+def sites():
+    g = dict(np.load(C.PROC / "site_grid.npz"))
+    f0 = dict(np.load(C.RAW / "gfs_20261027_00z.npz", allow_pickle=True))
+    f6 = dict(np.load(C.RAW / "gfs_20261027_06z.npz", allow_pickle=True))
+    fc = Site3D(g, f0, T0)       # 계획용: 00Z 사이클 예보 (09~21 KST)
+    tr = Site3D(g, f6, T0)       # 검증용 '실제': 06Z 사이클 분석/단기예보 (15~21 KST)
+    for s in (fc, tr):
+        s.add_static_nfz_circle(*NFZ)
+    return g, fc, tr
+
+
+def drone_calibrated():
+    p = C.RES / "drone_params.json"
+    if p.exists():
+        return Drone(**{k: v for k, v in json.loads(p.read_text()).items() if k in Drone.__dataclass_fields__})
+    return E0()
+
+
+# ------------------------------------------------------------------ E0 에너지 모델 보정/검증
+def E0():
+    d = load_cmu()
+    d = d[d.route.str.match(r"^(R\d|H)$") & (d.total_energy_j > 10000)].sort_values("flight")
+    dates = sorted(d.date.unique())
+    test_dates = dates[1::3]
+    tr, te = d[~d.date.isin(test_dates)], d[d.date.isin(test_dates)]
+    dr = calibrate(tr)
+    yh_tr, yh_te = predict_flight_energy(tr, dr), predict_flight_energy(te, dr)
+    # 기준 모델: 거리 비례 / 시간 비례
+    A = np.c_[tr.dist_m, np.ones(len(tr))]
+    cd = np.linalg.lstsq(A, tr.total_energy_j, rcond=None)[0]
+    ct = np.linalg.lstsq(np.c_[tr.duration_s], tr.total_energy_j, rcond=None)[0]
+    # 온라인 보정(당일 첫 2회 비행으로 배율 추정)
+    te2 = te.assign(yh=yh_te)
+    ys, yhs, yha = [], [], []
+    for _, gg in te2.groupby("date"):
+        k = gg.total_energy_j.values[:2].sum() / gg.yh.values[:2].sum()
+        r = gg.iloc[2:]
+        ys += list(r.total_energy_j); yhs += list(r.yh); yha += list(r.yh * k)
+    res = dict(
+        n_train=len(tr), n_test=len(te), train_dates=len(dates) - len(test_dates), test_dates=len(test_dates),
+        params=dict(eta=dr.eta, p0=dr.p0, cda=dr.cda, p_av=dr.p_av, m_empty=dr.m_empty),
+        train=metrics(tr.total_energy_j.values, yh_tr), test=metrics(te.total_energy_j.values, yh_te),
+        base_dist=metrics(te.total_energy_j.values, np.c_[te.dist_m, np.ones(len(te))] @ cd),
+        base_time=metrics(te.total_energy_j.values, np.c_[te.duration_s] @ ct),
+        adaptive_static=metrics(np.array(ys), np.array(yhs)), adaptive=metrics(np.array(ys), np.array(yha)),
+    )
+    save("E0", dict(res=res, te=te.assign(yh=yh_te), tr=tr.assign(yh=yh_tr), drone=dr.to_dict()))
+    (C.RES / "drone_params.json").write_text(json.dumps(dr.to_dict(), indent=1, ensure_ascii=False))
+    put_summary("E0_calibration", res)
+    print(json.dumps(res, indent=1, default=float))
+    return dr
+
+
+# ------------------------------------------------------------------ E1 실제 지도: 최단 vs 최적
+METHODS = {
+    "A_shortest_v10": dict(mode=0, speed_policy="const", vconst=10.0, label="최단(Lazy Theta*)+정속 10 m/s"),
+    "B_shortest_vopt": dict(mode=0, speed_policy="opt", label="최단(Lazy Theta*)+속도최적화"),
+    "C_energy_Astar": dict(mode=1, speed_policy="opt", any_angle=False, label="에너지 A*(26방향)"),
+    "D_WE_LTstar": dict(mode=1, speed_policy="opt", label="제안 WE-LT*"),
+}
+
+
+def _strip(rt):
+    """pickle 용량 축소용."""
+    out = {}
+    for leg in ("out", "back"):
+        L = rt[leg]
+        out[leg] = dict(path=L["plan"]["path"], wait=L["plan"]["wait_before"], sim=L["sim"],
+                        e_total=L["e_total"], length=L["length"], cpu=L["plan"]["cpu_s"],
+                        n_exp=L["plan"]["n_expanded"], t_end=L["t_end"])
+    for k in ("E", "soc_used", "soc_end", "feasible", "t_total", "soc_out", "soc_back", "L"):
+        out[k] = rt[k]
+    return out
+
+
+def E1():
+    g, fc, tr = sites()
+    dr = drone_calibrated()
+    P = Planner(fc, dr)
+    rows, store = [], {}
+    for kind in ("delivery", "pickup"):
+        for key, cfg in METHODS.items():
+            cfg = dict(cfg)
+            label = cfg.pop("label")
+            t = time.time()
+            rt = run_round_trip(P, Mission(HUB, DST, PAYLOAD, kind, T_MAIN), site_truth=tr, **cfg)
+            # 계획 단계(예보) 예측 SOC
+            rp = run_round_trip(P, Mission(HUB, DST, PAYLOAD, kind, T_MAIN), site_truth=fc, **cfg)
+            store[(kind, key)] = _strip(rt)
+            nwp = len(rt["out"]["plan"]["path"]) + len(rt["back"]["plan"]["path"])
+            rows.append(dict(kind=kind, method=key, label=label, soc_used=rt["soc_used"], soc_pred=rp["soc_used"],
+                             soc_out=rt["soc_out"], soc_back=rt["soc_back"], L=rt["L"], t_total=rt["t_total"],
+                             feasible=bool(rt["feasible"]), waypoints=nwp,
+                             cpu=rt["out"]["plan"]["cpu_s"] + rt["back"]["plan"]["cpu_s"], wall=time.time() - t))
+            print(rows[-1])
+    save("E1", dict(rows=rows, store=store))
+    put_summary("E1_main", rows)
+
+
+# ------------------------------------------------------------------ E2 출발시각에 따른 경로/SOC
+def E2():
+    g, fc, tr = sites()
+    dr = drone_calibrated()
+    P = Planner(fc, dr)
+    rows, paths = [], {}
+    for h in range(0, 12):
+        for kind in ("delivery", "pickup"):
+            for key in ("A_shortest_v10", "D_WE_LTstar"):
+                cfg = dict(METHODS[key]); cfg.pop("label")
+                rt = run_round_trip(P, Mission(HUB, DST, PAYLOAD, kind, h * 3600.0), site_truth=fc, **cfg)
+                if rt is None:
+                    rows.append(dict(hour=h + KST, kind=kind, method=key, soc_used=np.nan, feasible=False))
+                    continue
+                k = int(np.searchsorted(fc.t_axis, h * 3600.0))
+                ws100 = float(np.hypot(fc.U[k], fc.V[k])[fc.free].mean())
+                rows.append(dict(hour=h + KST, kind=kind, method=key, soc_used=rt["soc_used"],
+                                 soc_out=rt["soc_out"], soc_back=rt["soc_back"], feasible=bool(rt["feasible"]),
+                                 L=rt["L"], t_total=rt["t_total"], ws_mean=ws100))
+                if key == "D_WE_LTstar":
+                    paths[(h + KST, kind)] = (rt["out"]["plan"]["path"], rt["back"]["plan"]["path"])
+                print(rows[-1])
+    save("E2", dict(rows=rows, paths=paths))
+    put_summary("E2_departure", rows)
+
+
+# ------------------------------------------------------------------ E3 탑재중량 민감도
+def E3():
+    g, fc, tr = sites()
+    dr = drone_calibrated()
+    P = Planner(fc, dr)
+    rows = []
+    for pl in (0.0, 0.25, 0.5, 0.75):
+        for kind in ("delivery", "pickup"):
+            for key in ("A_shortest_v10", "D_WE_LTstar"):
+                cfg = dict(METHODS[key]); cfg.pop("label")
+                rt = run_round_trip(P, Mission(HUB, DST, pl, kind, T_MAIN), site_truth=tr, **cfg)
+                rows.append(dict(payload=pl, kind=kind, method=key, soc_used=rt["soc_used"], soc_out=rt["soc_out"],
+                                 soc_back=rt["soc_back"], feasible=bool(rt["feasible"])))
+                print(rows[-1])
+    save("E3", dict(rows=rows))
+    put_summary("E3_payload", rows)
+
+
+# ------------------------------------------------------------------ E4 호버링 vs 우회 (장애물 시간표)
+def E4():
+    g, fc, tr = sites()
+    dr = drone_calibrated()
+    P = Planner(fc, dr)
+    m = dr.m_empty + PAYLOAD
+    st, gl = fc.lowest_free_k(*HUB), fc.lowest_free_k(*DST)
+    base = P.plan(st, gl, t_start=T_MAIN, mass=m, mode=1)
+    sim = simulate(fc, dr, base["path"], base["wait_before"], T_MAIN, m)
+    # 출발 후 ~80 s 지점을 가로지르는 띠형 임시 비행제한(폭 150 m × 길이 2.4 km) – 장애물 시간표
+    i = int(np.searchsorted(sim["t"] - T_MAIN, 80.0))
+    cx, cy = float(sim["x"][i]), float(sim["y"][i])
+    hx, hy = np.gradient(sim["x"])[i], np.gradient(sim["y"])[i]
+    nrm = np.hypot(hx, hy); ux, uy = hx / nrm, hy / nrm      # 진행방향
+    px, py = -uy, ux                                         # 수직방향
+    Lh, Wh = 1200.0, 75.0
+    band = [(cx + px * Lh + ux * Wh, cy + py * Lh + uy * Wh), (cx - px * Lh + ux * Wh, cy - py * Lh + uy * Wh),
+            (cx - px * Lh - ux * Wh, cy - py * Lh - uy * Wh), (cx + px * Lh - ux * Wh, cy + py * Lh - uy * Wh)]
+    from matplotlib.path import Path as MPath
+    inside = MPath(np.array(band)).contains_points(np.c_[sim["x"], sim["y"]])
+    t_enter = float(sim["t"][np.argmax(inside)] - T_MAIN)
+    out = dict(base=dict(path=base["path"], sim=sim, E=base["cost"]), band=band, t_enter=t_enter, cases={})
+    for name, extra in (("short", 30.0), ("long", 300.0)):
+        fc.clear_temporal_nfz()
+        fc.add_temporal_nfz_polygon(band, T_MAIN, T_MAIN + t_enter + extra)
+        res = {}
+        for allow in (True, False):
+            r = P.plan(st, gl, t_start=T_MAIN, mass=m, mode=1, allow_wait=allow)
+            s2 = simulate(fc, dr, r["path"], r["wait_before"], T_MAIN, m)
+            res["wait" if allow else "nowait"] = dict(path=r["path"], wait=r["wait_before"], sim=s2, E=r["cost"],
+                                                      total_wait=float(r["wait_before"].sum()),
+                                                      L=path_length(fc, r["path"]), T=float(s2["t"][-1] - T_MAIN))
+            print(name, allow, r["cost"], r["wait_before"].sum(), path_length(fc, r["path"]))
+        out["cases"][name] = dict(window=(T_MAIN, T_MAIN + t_enter + extra), **res)
+    # 금지 시간창 길이에 따른 손익분기 곡선
+    sweep = []
+    for extra in (0.0, 3.0, 6.0, 10.0, 15.0, 20.0, 30.0, 45.0, 60.0, 90.0, 120.0, 180.0, 300.0):
+        fc.clear_temporal_nfz()
+        fc.add_temporal_nfz_polygon(band, T_MAIN, T_MAIN + t_enter + extra)
+        rw = P.plan(st, gl, t_start=T_MAIN, mass=m, mode=1, allow_wait=True)
+        rn = P.plan(st, gl, t_start=T_MAIN, mass=m, mode=1, allow_wait=False)
+        sweep.append(dict(extra=extra, E_wait=rw["cost"], wait=float(rw["wait_before"].sum()), E_nowait=rn["cost"],
+                          L_wait=path_length(fc, rw["path"]), L_nowait=path_length(fc, rn["path"])))
+        print(sweep[-1])
+    out["sweep"] = sweep
+    fc.clear_temporal_nfz()
+    save("E4", out)
+    put_summary("E4_hover_vs_detour", {k: dict(window_s=v["window"][1] - v["window"][0],
+                                              E_wait_option=v["wait"]["E"], wait_s=v["wait"]["total_wait"],
+                                              E_detour_only=v["nowait"]["E"], L_wait=v["wait"]["L"],
+                                              L_detour=v["nowait"]["L"]) for k, v in out["cases"].items()})
+
+
+# ------------------------------------------------------------------ E5 롤링 호라이즌 재계획
+def E5():
+    g, fc, tr = sites()
+    dr = drone_calibrated()
+    P = Planner(fc, dr)
+    m = dr.m_empty  # 회수 임무 귀환: 무거운 쪽은 별도 – 여기서는 배송 후 귀환(역풍) 구간
+    a, b = DST, HUB
+    t0 = T_MAIN + 300.0
+    st, gl = fc.lowest_free_k(*a), fc.lowest_free_k(*b)
+    # (1) 정적 계획(1회) – 실제 바람에서 비행
+    base = P.plan(st, gl, t_start=t0, mass=m, mode=1)
+    sim_base = simulate(tr, dr, base["path"], base["wait_before"], t0, m, U=tr.U, V=tr.V, tax=tr.t_axis)
+    # 돌발 금지구역: 출발 60 s 후 발표, 계획경로 전방 (출발 후 ~150 s 지점)
+    i = int(np.searchsorted(sim_base["t"] - t0, 150.0))
+    cx, cy = float(sim_base["x"][i]), float(sim_base["y"][i])
+
+    def popup(site):
+        site.add_temporal_nfz_circle(cx, cy, 300.0, t0 + 60.0, t0 + 1800.0)
+
+    events = [(t0 + 60.0, popup)]
+    roll = run_rolling(P, tr, dr, a, b, t0, m, dt_replan=60.0, events=events, bias_update=True)
+    fc.clear_temporal_nfz()
+    roll_nb = run_rolling(P, tr, dr, a, b, t0, m, dt_replan=60.0, events=events, bias_update=False)
+    fc.clear_temporal_nfz()
+    # 정적 계획이 돌발 금지구역을 침범하는지 판정
+    inside = ((sim_base["x"] - cx) ** 2 + (sim_base["y"] - cy) ** 2 <= 300.0 ** 2) & (sim_base["t"] >= t0 + 60)
+    out = dict(base=dict(path=base["path"], sim=sim_base, soc=soc_drop(sim_base["e"][-1], dr),
+                         violates=bool(inside.any()), pred=soc_drop(base["cost"], dr)),
+               roll=roll, roll_nobias=roll_nb, popup=(cx, cy, 300.0, t0 + 60.0), t0=t0)
+    save("E5", out)
+    put_summary("E5_rolling", dict(static_soc=out["base"]["soc"], static_pred_soc=out["base"]["pred"],
+                                   static_violates_popup_nfz=out["base"]["violates"],
+                                   rolling_soc=roll["soc"], rolling_nobias_soc=roll_nb["soc"],
+                                   n_replans=len(roll["plans"]),
+                                   replan_cpu_mean=float(np.mean([q["cpu"] for q in roll["plans"]])),
+                                   replan_cpu_max=float(np.max([q["cpu"] for q in roll["plans"]]))))
+    print(load_summary()["E5_rolling"])
+
+
+if __name__ == "__main__":
+    todo = sys.argv[1:] or ["E0", "E1", "E2", "E3", "E4", "E5"]
+    for name in todo:
+        t = time.time()
+        print(f"===== {name}")
+        globals()[name]()
+        print(f"===== {name} done {time.time() - t:.0f}s")
