@@ -87,7 +87,7 @@
         <label class="inl">예비 SOC</label><input type="number" id="reserve" style="width:56px" value="20" min="0" max="50" step="5"> %</div>
       <div class="row"><label>탐색 정밀도</label><select id="weight"><option value="1.0">정밀 (가중치 1.0, 느림)</option><option value="1.2" selected>균형 (1.2)</option><option value="1.5">빠름 (1.5)</option></select></div>
       <div class="row"><label>궤적 불확실성</label><select id="eps"><option value="">무시 (예측 궤적 그대로)</option><option value="0.2">위험 한도 ε = 0.2</option><option value="0.1">ε = 0.1</option><option value="0.05" selected>ε = 0.05 (권장)</option><option value="0.01">ε = 0.01 (보수적)</option></select></div>
-      <div class="row"><label>팽창 모양</label><select id="shape"><option value="gauss">가우시안 (장애물별 σ 입력)</option><option value="adsb">실측 ADS-B 분위수 (속도 비례)</option></select></div>
+      <div class="row"><label>팽창 모양</label><select id="shape"><option value="gauss">가우시안 (장애물별 σ 입력)</option><option value="adsb">실측 ADS-B 분위수 (속도 비례, 20 s 지평)</option></select></div>
       <div class="row"><button id="mvhub">거점 위치 지정</button><button id="mvdst">목적지 위치 지정</button></div>
     </div>
     <div class="card">

@@ -3,7 +3,7 @@
 바람·지형·탑재중량을 반영해 **도착 SOC(배터리 잔량)를 최대화**하는 드론 물류 경로계획 알고리즘입니다.
 지난 회의에서 선정한 최단 경로 알고리즘(Lazy Theta*)을 3D 시공간 에너지 탐색기 **WE-LT\* (Wind-aware Energy Lazy Theta\*)**로 확장했습니다.
 
-- 회의 보고 자료: [`docs/drone_soc_path_planning_dev.pptx`](docs/drone_soc_path_planning_dev.pptx) (기존 회의자료와 같은 포맷, 28장)
+- 회의 보고 자료: [`docs/drone_soc_path_planning_dev.pptx`](docs/drone_soc_path_planning_dev.pptx) (기존 회의자료와 같은 포맷, 30장)
 - 최신 연구 대비 정식화 비교: [`docs/algorithm_comparison.md`](docs/algorithm_comparison.md) (문제 (P) 정의, 문헌별 정식화, 가정 축소 실험)
 - 확장안 (8방향 탐색 + 고도별 균일·선형 바람, LUT): [`docs/extension_8way_linear_wind.md`](docs/extension_8way_linear_wind.md)
 - 3D 시공간 확장 (동적 장애물) + 장애물 편집 플랫폼 + 장애물 변경 시 이벤트 기반 재계획: [`docs/spatiotemporal_dynamic_obstacles.md`](docs/spatiotemporal_dynamic_obstacles.md)
@@ -19,6 +19,8 @@ PYTHONPATH=src python -m dpo.webapp        # 브라우저에서 http://localhost
 지도를 클릭해 원기둥·구·박스 장애물을 놓고, 크기·고도 범위·존재 시간·안전 이격을 입력합니다. 경로점을 추가하면 장애물이 등속으로 이동하고, 드래그로 위치를 옮길 수 있습니다. `경로 계획 실행`을 누르면 3D 시공간 계획기(WE-SIPP-Theta*)가 장애물을 피하는 에너지 최적 경로를 계산합니다. 결과는 시간 슬라이더로 재생해 확인합니다. 허용 범위(지도 범위, 반경 5~1500 m, 이동 속도 ≤ 80 m/s, 공역·대기속도·배터리 예비 SOC)를 벗어난 입력은 거부하거나 "계획 불가"로 판정합니다.
 
 **비행 중 장애물 변경**: 재생 슬라이더를 변경 발표 시각에 두고 장애물을 수정한 뒤 `변경 반영`을 누릅니다. 남은 경로를 위험 시간구간 표로 검사해, 충돌이 없으면 기존 경로를 유지하고(약 0.3 s), 충돌이 예상되면 그 시점부터 다시 계획합니다(약 2 s, 재계획 지연 3 s 반영). 변경 이력과 재계획 지점이 함께 표시됩니다.
+
+**실측 팽창 모양**: '팽창 모양'에서 '실측 ADS-B 분위수'를 고르면, 이동 장애물의 팽창 반경이 '속도 × 실측 오차 분위수 곡선'(20 s 지평)으로 정해집니다.
 
 **궤적 불확실성**: 장애물마다 위치 오차 σ0, 오차 증가율 σv, 도달 시각 오차 σt를 입력하고 '궤적 불확실성'에서 위험 한도 ε를 고르면, 시간에 따라 커지는 불확실성 튜브를 피하도록 계획합니다(지도에 옅은 원으로 표시).
 - 결과 그림: `results/figures/` · 수치 요약: `results/summary.json`
@@ -50,6 +52,8 @@ PYTHONPATH=src python -m dpo.webapp        # 브라우저에서 http://localhost
 - 3D 시공간(E8): 다른 드론·응급 헬기·행사 제한구역이 기존 경로를 가로지르는 시나리오에서, 동적 장애물을 무시한 경로는 3종 모두와 충돌합니다(최대 136 m 침범). 시공간 계획은 최소 29 m 이격으로 회피하고, 그 대가로 에너지가 +9.5 % 듭니다.
 - 장애물 변경(E9): 비행 중 헬기 항로 변경과 행사 제한 확대가 발표되면 이벤트 기반 재계획이 재계획 2회로 충돌을 피합니다. 30 s 주기 방식은 같은 결과에 재계획 5회가 들고, 60 s 주기 방식은 변경을 늦게 확인해 충돌합니다. 1회 계획도 충돌합니다.
 - 궤적 불확실성(E10, 30 시나리오 × 1,000 샘플): 예측 궤적을 그대로 믿으면 충돌률이 16.4 %입니다. 고정 최악 버퍼와 위험 한도 튜브(ε=0.05)는 모두 0/30,000이지만, 튜브가 에너지를 **4.9 % 덜** 씁니다(28승 2패, Wilcoxon p = 1.6×10⁻⁷). 20 s 재관측 폐루프에서는 재계획 횟수를 73 % 줄입니다(충돌 차이는 유의하지 않음). 단, 오차 꼬리가 두꺼우면(Student-t) 이 에너지 이득은 사라지고 낮은 위험 영역에서는 고정 버퍼가 낫습니다(E10c·E10d, 그림 F19). 따라서 팽창 모양은 실제 예측 오차의 꼬리에 맞춰 정해야 합니다.
+- 실측 ADS-B 항적(OpenSky, 저고도 비항공사 18대, 관측 3,186개, 그림 F20)의 등속 예측 오차는 꼬리가 두껍고(99.9 % 분위수 9.1σ, 가우시안 3.7σ), 예측 시간의 약 1.5제곱으로 커집니다. 데이터로 맞춘 구간별 선형 팽창 모양을 쓰면, 학습에 쓰지 않은 기체에서 초과확률이 ε=0.05일 때 5.1 %, ε=0.01일 때 1.1 %로 목표에 맞습니다. 가우시안 튜브는 같은 조건에서 7.5 %와 4.2 %입니다.
+- 실측 궤적 침입기 폐루프(E11, 조우 400회, 그림 F21)에서는 충돌의 대부분(4.5 %)이 어떤 방법으로도 회피할 수 없는 조우에서 나왔습니다. 팽창 모양 간 충돌 차이는 유의하지 않았고, 데이터 튜브는 에너지가 +2.1 % 더 들었습니다. '반응 시간 하한'을 두면 이 차이가 줄어듭니다. 원래 속도(50 m/s)의 유인기는 수평 회피만으로는 막을 수 없었습니다.
 - 가정 축소 실험(E6) 결과, 비교 축별 기여는 **구간 속도 최적화 +10.2~13.0 %p**(10 m/s 고정이면 비행 불가) > **에너지 비교형 any-angle +4.1 %p** > **3D 고도 선택 +2.8~3.1 %p** 순입니다.
 
 ## 실행
@@ -61,6 +65,10 @@ PYTHONPATH=src python -m dpo.data_wind                     # GFS 10월 강풍일
 PYTHONPATH=src python scripts/run_experiments.py           # E0~E9 (약 16분)
 PYTHONPATH=src python -c "import sys; sys.path.insert(0,'scripts'); import run_experiments as R; R.E10(n_closed=0); R.E10b(); R.E10c(); R.E10d()"   # 불확실성 (약 65분)
 PYTHONPATH=src python scripts/analyze_robust.py            # 통계·그림 F16/F17/F19
+PYTHONPATH=src python scripts/analyze_adsb.py              # 실측 ADS-B 오차·꼬리·보정 (F20)
+PYTHONPATH=src python scripts/run_e11.py 80 5 4             # 실측 궤적 침입기 폐루프 (4코어 약 32분)
+E11_METHODS="QF0.05,QF0.01" E11_OUT=E11b PYTHONPATH=src python scripts/run_e11.py 80 5 4
+PYTHONPATH=src python scripts/analyze_e11.py               # 통계·그림 F21
 PYTHONPATH=src python scripts/make_figures.py && PYTHONPATH=src python scripts/make_figures.py gif
 PYTHONPATH=src python scripts/build_ppt.py <회의자료 템플릿.pptx> docs/drone_soc_path_planning_dev.pptx
 PYTHONPATH=src python -m pytest -q tests
@@ -84,12 +92,15 @@ GFS 원자료(`data/raw/gfs_*.npz`)와 격자(`data/processed/site_grid.npz`)는
 12. N. E. Du Toit, J. W. Burdick, “Robot Motion Planning in Dynamic, Uncertain Environments,” *IEEE T-RO*, 28(1):101–115, 2012. DOI: 10.1109/TRO.2011.2166435
 13. H. Zhu, J. Alonso-Mora, “Chance-Constrained Collision Avoidance for MAVs in Dynamic Environments,” *IEEE RA-L*, 4(2):776–783, 2019. DOI: 10.1109/LRA.2019.2893494
 14. K. Yakovlev, A. Andreychuk, “Any-Angle Pathfinding for Multiple Agents Based on SIPP Algorithm,” *ICAPS*, 2017. DOI: 10.1609/icaps.v27i1.13856
+15. X. Olive, “traffic, a toolbox for processing and analysing air traffic data,” *J. Open Source Softw.*, 4, 1518, 2019. DOI: 10.21105/joss.01518
+16. M. Schäfer, M. Strohmeier, V. Lenders, I. Martinovic, M. Wilhelm, “Bringing up OpenSky: A large-scale ADS-B sensor network for research,” *IPSN*, pp. 83–94, 2014. DOI: 10.1109/IPSN.2014.6846743
 
 ## 데이터 출처
 
 - 지형: Copernicus GLO-30 DSM (© DLR/Airbus, ESA Copernicus, AWS Open Data)
 - 건물: Overture Maps Foundation buildings 2026-10-21 (OSM 등, ODbL)
 - 바람: NOAA GFS 0.25° (AWS Open Data `noaa-gfs-bdp-pds`), 00Z 사이클은 계획용, 06Z 사이클은 '실제' 바람 대용
+- 항적: OpenSky Network ADS-B 샘플 (`traffic` 2.13 패키지 배포본, MIT) → `data/raw/adsb/`
 - 드론 실측: Rodrigues et al., *Scientific Data* 8:155 (2021), CMU KiltHub, CC BY 4.0 (비행 단위 집계본 사용)
 
 ## 한계 및 가정
@@ -98,5 +109,5 @@ GFS 원자료(`data/raw/gfs_*.npz`)와 격자(`data/processed/site_grid.npz`)는
 - 지형·도시 바람 보정은 간이 근사입니다(보정 계수 0.80~1.19). LDAPS나 CFD로 바꾸는 것을 권장합니다.
 - 전력모델 질량(3.1 kg)과 배터리(99.9 Wh, TB47D급)는 DJI 사양을 바탕으로 한 가정입니다. 검증 날짜에서는 평균 전력을 3~9 % 정도 낮게 예측했습니다.
 - WE-LT*는 노드마다 도착 시각 라벨을 하나만 두는 근사 탐색이라, 시간가변 비용에서 전역 최적을 보장하지 않습니다.
-- 장애물 불확실성은 가우시안·직선 등속 모델이고 σ 값은 가정입니다. 오차 꼬리가 두꺼우면 튜브의 이득이 사라집니다. 위험 한도 ε는 시점별 상계라 실측 위험보다 보수적입니다(임무 위험 확률로 직접 읽으면 안 됨).
+- 장애물 불확실성은 가우시안·직선 등속 모델이고 σ 값은 가정입니다. 오차 꼬리가 두꺼우면 튜브의 이득이 사라집니다. 실측 항적 표본은 시연용 샘플 18대라 무작위 표본이 아니고, 폐루프 시험은 유인기 항적을 드론 속도로 축소했습니다(속도 정규화 오차가 속도와 무관하다는 가정). 위험 한도 ε는 시점별 상계라 실측 위험보다 보수적입니다(임무 위험 확률로 직접 읽으면 안 됨).
 - 비행금지구역 원은 예시(가상)입니다. 실제 판교 일대는 서울공항 관제권이라 비행승인이 필요합니다.

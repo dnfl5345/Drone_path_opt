@@ -25,6 +25,9 @@ FIG = ROOT / "results" / "figures"
 S = json.loads((ROOT / "results" / "summary.json").read_text())
 _RS = ROOT / "results" / "robust_stats.json"
 RS = json.loads(_RS.read_text()) if _RS.exists() else None
+_AD, _E11 = ROOT / "results" / "adsb_error_model.json", ROOT / "results" / "e11_stats.json"
+AD = json.loads(_AD.read_text()) if _AD.exists() else None
+E11 = json.loads(_E11.read_text()) if _E11.exists() else None
 
 TEAL, NAVY, TITLE = RGBColor(0x1B, 0x6E, 0x8C), RGBColor(0x00, 0x4E, 0x8F), RGBColor(0x37, 0x60, 0x92)
 INK, GRAY, LIGHT = RGBColor(0x16, 0x20, 0x2A), RGBColor(0x4C, 0x5A, 0x66), RGBColor(0xE3, 0xEE, 0xF3)
@@ -736,6 +739,51 @@ def build(template, out):
         notes(s, "E10c/E10d, 29 시나리오(모든 방법 실행 가능) × 1,000 샘플. 상세: docs/paper/manuscript_en.md §6.4, §7. "
                  "1차 해석은 비용을 Σr 로 근사한 결과로, 방향만 설명함.")
 
+    # 15-9. 결과 ⑭ 실측 ADS-B 항적의 예측 오차 → 팽창 모양 적합 -------------------------
+    if AD is not None:
+        RED = RGBColor(0xD7, 0x26, 0x3D)
+        cv, tq = AD["cv"], AD["tail"]["quantiles"]
+        s = D.content("결과 ⑭ 실측 ADS-B 오차 꼬리 → 팽창 모양 적합")
+        picture(s, FIG / "F20_adsb_error_tail.png", 0.4, 1.0, 12.5, 4.7)
+        rows = [["ε", "가우시안 튜브", "가우시안 고정 버퍼", "데이터 분위수 튜브", "데이터 고정 버퍼"]]
+        for e in ("0.05", "0.01"):
+            rows.append([e] + [f"{cv[k + e]['mean'] * 100:.1f}% (최대 {cv[k + e]['max_mean'] * 100:.1f})"
+                               for k in ("G", "B", "Q", "QB")])
+        table(s, 0.5, 5.75, 8.2, rows, [0.8, 1.85, 1.85, 1.85, 1.85], row_h=0.36, head_size=11, body_size=10.5)
+        sp = box(s, 8.9, 5.7, 3.85, 1.2, fill=LIGHT, shadow=False)
+        box_text(sp, [[(f"OpenSky 실측(1 Hz) 저고도 {AD['n_aircraft']}대·{AD['n_obs']:,}관측", {"size": 10.5, "color": TITLE})],
+                      [(f"꼬리: 99.9% {tq['0.999']['data']:.1f}σ (가우시안 {tq['0.999']['gaussian']:.1f}σ), "
+                        f"성장 ∝ τ^{AD['growth']['0.95']['beta']:.1f}", {"size": 10})],
+                      [("표: 학습에 안 쓴 블록의 초과확률 → 데이터 튜브만 ε에 맞음", {"size": 10, "color": ORANGE})]],
+                 anchor=MSO_ANCHOR.TOP)
+        notes(s, "자료: traffic 패키지(Olive, JOSS 2019, MIT)의 OpenSky Network ADS-B 샘플 – 시연용 선별 표본(무작위 아님). "
+                 "등속 예측(ADS-B 보고 속도), 속도 정규화 오차의 분위수 곡선을 구간별 선형 꺾임점으로 적합 → "
+                 "DynObstacle.tube 로 계획기에 넣으면 위험구간을 해석해로 계산. 플랫폼 '팽창 모양 → 실측 ADS-B 분위수'.")
+
+    # 15-10. 결과 ⑮ 실측 궤적 침입기 폐루프 시험 ------------------------------------------
+    if E11 is not None:
+        RED = RGBColor(0xD7, 0x26, 0x3D)
+        M, un = E11["methods"], E11["unavoidable"]
+        ep = E11["energy_paired"]
+        s = D.content("결과 ⑮ 실측 궤적 침입기 폐루프 시험")
+        picture(s, FIG / "F21_adsb_closed_loop.png", 0.4, 1.0, 12.5, 4.3)
+        sp = box(s, 0.5, 5.4, 6.1, 1.5, fill=LIGHT, shadow=False)
+        box_text(sp, [[("시험", {"color": TITLE, "size": 12})],
+                      [(f"실측 항적(시간·선회 그대로, 8–30 m/s로 축소)을 충돌 코스에 배치, 5 s 감시·20 s 지평, "
+                        f"조우 {E11['n_used']}회 × 9개 방법 (교차 적합)", {"size": 10})],
+                      [("원래 속도(50 m/s) 유인기: 95–100% 조우에서 회피 불가 → 고도 분리·조기 탐지 필요",
+                        {"size": 10, "color": RED})]], anchor=MSO_ANCHOR.TOP)
+        sp = box(s, 6.8, 5.4, 5.95, 1.5, fill=LIGHT, shadow=False)
+        box_text(sp, [[("결과", {"color": TITLE, "size": 12})],
+                      [(f"· 회피 불가 {un['n']}회({un['frac'] * 100:.1f}%)가 충돌을 지배, 회피 가능 조우: 공칭 "
+                        f"{M['N']['avoidable']['nmac']}회 vs 팽창 2–4회 (유의차 없음)", {"size": 10})],
+                      [(f"· 데이터 튜브 에너지 +{ep['Q0.05_vs_G0.05']['diff_pct'][0]:.1f}% (가우시안 대비) → 반응 시간 하한으로 "
+                        f"{ep['QF0.05_vs_Q0.05']['diff_pct'][0]:+.1f}%", {"size": 10})],
+                      [("→ 폐루프 팽창은 '반응 시간 오차'를 기준으로 설계", {"size": 10, "color": ORANGE})]],
+                 anchor=MSO_ANCHOR.TOP)
+        notes(s, "같은 조우끼리 짝지은 McNemar·Wilcoxon 검정. 완화(fallback): 현재 위치가 팽창 영역 안이면 ε=0.2 → 팽창 없음 순으로 재계획. "
+                 "상세: docs/robust_uncertainty.md §8, docs/paper/manuscript_en.md §6.6–6.7.")
+
     # 16. 결론 ---------------------------------------------------------------
     s = D.content("결론 및 추후 개발할 내용")
     textbox(s, 0.8, 1.1, 7.4, 3.1, [
@@ -748,21 +796,22 @@ def build(template, out):
         [(" ○ 시간가변: 출발시각별 경로, 호버링/우회 판단, 비행 중 재계획", {})],
         [(" ○ 최신 연구 대비: 속도 최적화·에너지 지름길·고도 선택이 핵심 기여", {})],
         [(" ○ 3D 시공간: 동적 장애물 회피, 변경 시 이벤트 기반 재계획, 편집 플랫폼", {})],
-        [(" ○ 불확실성 튜브: 고정 버퍼 대비 4.9% 절감 (가우시안 오차 한정)", {})]], size=14,
+        [(" ○ 불확실성 튜브: 고정 버퍼 대비 4.9% 절감 (가우시안 오차 한정)", {})],
+        [(" ○ 실측 ADS-B: 꼬리 9.1σ·성장 τ^1.5 → 데이터 팽창 모양으로 보정 회복", {})]], size=13.5,
         space_after=8)
-    textbox(s, 0.8, 3.95, 7.4, 2.6, [
+    textbox(s, 0.8, 4.35, 7.4, 2.5, [
         [("□ 향후 계획", {"size": 18, "color": INK})],
         [(" ○ 기상청 LDAPS(1.5 km)·윈드프로파일러 연동, 도심 CFD 바람장", {})],
         [(" ○ WA-LPA*[5]식 증분 재계획 결합으로 재계획 시간 단축", {})],
         [(" ○ 보유 기체 비행 로그로 계수 재보정, 계획 vs 실측 SOC 비교", {})],
-        [(" ○ 실제 항적으로 오차 꼬리 추정 → 팽창 모양 결정, 실비행 검증 → 논문 투고", {})],
+        [(" ○ 감시 주기·탐지 시각·반응 시간 하한 공동 설계, 드론 원격식별 항적 검증 → 논문 투고", {})],
         [(" ○ 다중 배송지(VRP) 결합, UTM 비행승인·관제권 반영", {})]], size=14,
         space_after=8)
     picture(s, FIG / "F10_3d_paths.png", 8.4, 1.15, 4.3, 3.2)
     textbox(s, 8.4, 4.35, 4.3, 0.35, [[("3D 경로 (지형·건물 위)", {"size": 12, "color": GRAY})]], align=PP_ALIGN.CENTER)
     sp = box(s, 8.4, 4.8, 4.3, 1.35, fill=LIGHT, shadow=False)
     box_text(sp, [[("코드·재현", {"color": TITLE, "size": 14})],
-                  [("src/dpo: 데이터·에너지·바람장·탐색기\nscripts/run_experiments.py → make_figures.py\ntests/: 단위 테스트 16종 · 플랫폼: python -m dpo.webapp\ndocs/: 정식화 비교 · 8방향 확장 · 시공간 확장",
+                  [("src/dpo: 데이터·에너지·바람장·탐색기\nscripts/run_experiments.py → make_figures.py\ntests/: 단위 테스트 17종 · 플랫폼: python -m dpo.webapp\ndocs/: 정식화 비교 · 8방향 확장 · 시공간 확장",
                     {"size": 11, "color": INK})]], anchor=MSO_ANCHOR.TOP)
     notes(s, "실제 운용 시 판교 일대는 서울공항 관제권으로 비행승인 필요. 비행금지구역 원은 예시(가상).")
 
@@ -793,10 +842,12 @@ def build(template, out):
         "Robot. Autom. Lett., 4(2), 776–783, 2019. DOI: 10.1109/LRA.2019.2893494",
         "[14] K. Yakovlev, A. Andreychuk, \"Any-Angle Pathfinding for Multiple Agents Based on SIPP Algorithm,\" Proc. ICAPS, "
         "2017. DOI: 10.1609/icaps.v27i1.13856",
+        "[15] X. Olive, \"traffic, a toolbox for processing and analysing air traffic data,\" J. Open Source Softw., 4, 1518, 2019. "
+        "DOI: 10.21105/joss.01518 · [16] M. Schäfer et al., \"Bringing up OpenSky,\" Proc. IPSN, 83–94, 2014.",
         "데이터: Copernicus GLO-30 DSM (ESA/AWS Open Data) · Overture Maps buildings 2026-10-21 (ODbL) · "
-        "NOAA GFS 0.25° (AWS Open Data)",
+        "NOAA GFS 0.25° (AWS Open Data) · OpenSky ADS-B 샘플 (traffic 2.13)",
     ]
-    textbox(s, 0.6, 1.1, 12.1, 5.8, [[(r, {"size": 10.5, "bold": False, "color": INK})] for r in refs], space_after=4)
+    textbox(s, 0.6, 1.1, 12.1, 5.8, [[(r, {"size": 9.5, "bold": False, "color": INK})] for r in refs], space_after=3)
 
     normalize_partnames(D.prs)
     D.prs.save(out)

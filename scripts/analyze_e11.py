@@ -121,17 +121,17 @@ def figure(out, rows):
     M = out["methods"]
     fig, axs = plt.subplots(1, 3, figsize=(15.5, 4.5))
     ax = axs[0]
-    xs = np.arange(len(KEYS))
-    for i, k in enumerate(KEYS):
-        m = M[k]
-        ax.bar(i, m["p"] * 100, color=_col(k), alpha=0.9 if "0.01" not in k else 0.6,
-               yerr=[[max(m["p"] - m["lo"], 0) * 100], [max(m["hi"] - m["p"], 0) * 100]], capsize=3)
-        ax.text(i, m["hi"] * 100 + 0.8, f"{m['nmac']}/{m['n']}", ha="center", fontsize=7.5)
-    ax.set_xticks(xs); ax.set_xticklabels([LAB[k].replace("데이터 튜브+반응 하한", "데이터+반응").replace(" ε", "\nε") for k in KEYS],
-                       fontsize=6.8)
-    ax.set_ylabel("충돌 확률 [%] (Wilson 95% CI)")
-    ax.set_title("(a) 충돌 확률 (반경 R 이내)", loc="left", fontsize=10.5)
-    ax.grid(alpha=0.25, axis="y")
+    ys = np.arange(len(KEYS))[::-1]
+    for y, k in zip(ys, KEYS):
+        a_ = M[k]["avoidable"]
+        ax.barh(y, a_["p"] * 100, color=_col(k), alpha=0.9 if "0.01" not in k else 0.6, height=0.7,
+                xerr=[[max(a_["p"] - a_["lo"], 0) * 100], [max(a_["hi"] - a_["p"], 0) * 100]], capsize=3)
+        ax.text(a_["hi"] * 100 + 0.1, y, f"{a_['nmac']}/{a_['n']}", va="center", fontsize=8)
+    ax.set_yticks(ys); ax.set_yticklabels([LAB[k] for k in KEYS], fontsize=8)
+    ax.set_xlabel("충돌 확률 [%] (Wilson 95% CI)")
+    ax.set_title(f"(a) 회피 가능한 조우의 충돌\n(모든 방법이 충돌한 {out['unavoidable']['n']}회 = "
+                 f"{out['unavoidable']['frac'] * 100:.1f}% 제외)", loc="left", fontsize=10)
+    ax.grid(alpha=0.25, axis="x")
     ax = axs[1]
     for k in KEYS:
         m = M[k]

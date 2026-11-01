@@ -69,7 +69,7 @@ function tubeExtra(o, t) {
     const P = o.path, ts = P.map(p => p.t), tob = o.t_obs || 0;
     let k = 0; while (k < P.length - 2 && ts[k + 1] <= tob) k++;
     const V = Math.hypot(P[k + 1].x - P[k].x, P[k + 1].y - P[k].y) / Math.max(P[k + 1].t - P[k].t, 1e-9);
-    const kn = A.knots, q = A.q[String(e)], tau = Math.max(t - tob, 0);
+    const kn = A.knots, q = A.q[String(e)], tau = Math.min(Math.max(t - tob, 0), A.horizon || 20);
     let r;
     if (tau >= kn[kn.length - 1]) { const n = kn.length; r = q[n - 1] + (q[n - 1] - q[n - 2]) / (kn[n - 1] - kn[n - 2]) * (tau - kn[n - 1]); }
     else { let j = 0; while (kn[j + 1] < tau) j++; r = q[j] + (q[j + 1] - q[j]) * (tau - kn[j]) / (kn[j + 1] - kn[j]); }

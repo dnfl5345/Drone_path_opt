@@ -361,10 +361,11 @@ def _load_adsb():
         return None
     d = json.loads(f.read_text())
     m = d["model_all"]
-    return dict(knots=d["knots"], q=m["q"], n_aircraft=d["n_aircraft"], n_obs=d["n_obs"])
+    return dict(knots=d["knots"], q=m["q"], n_aircraft=d["n_aircraft"], n_obs=d["n_obs"], horizon=20.0)
 
 
 ADSB = _load_adsb()
+ADSB_HORIZON = 20.0     # 실측 모양의 팽창 증가를 멈추는 예측 지평 [s] (재관측 주기 가정 – 이후 반경 일정)
 
 
 def apply_shape(obs, cx):
@@ -379,7 +380,8 @@ def apply_shape(obs, cx):
         k = int(np.clip(np.searchsorted(ts, o.t_obs, side="right") - 1, 0, len(ts) - 2))
         p0, p1 = o.path[k], o.path[k + 1]
         V = math.hypot(p1["x"] - p0["x"], p1["y"] - p0["y"]) / max(p1["t"] - p0["t"], 1e-9)
-        o.tube = [[float(t), float(V * r)] for t, r in zip(ADSB["knots"], q)]
+        kn = [(float(t), float(V * r)) for t, r in zip(ADSB["knots"], q) if t <= ADSB_HORIZON]
+        o.tube = [list(k) for k in kn] + [[7200.0, kn[-1][1]]]       # 지평 이후 일정 (재관측으로 갱신 가정)
         o.sigma_t = 0.0
 
 

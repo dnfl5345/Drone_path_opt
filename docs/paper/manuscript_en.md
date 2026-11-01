@@ -9,7 +9,7 @@
 
 ## Abstract
 
-Delivery drones must complete round trips on a limited battery while sharing low-altitude airspace with aircraft whose future positions are only predicted. We plan routes that minimise predicted state-of-charge (SOC) consumption in a time-varying 3-D wind field, choosing route, altitude, segment speed and hovering jointly, while bounding the per-instant collision probability against moving obstacles with uncertain trajectories. The prediction uncertainty is modelled as a chance-constrained tube that grows with look-ahead time. We derive its unsafe intervals on a grid in closed form, including the case in which the tube grows faster than the obstacle moves, so that an any-angle safe-interval search with an energy cost (WE-SIPP-Theta\*) can use them directly. Experiments use real terrain, buildings, GFS wind forecasts and a power model validated on 198 recorded flights. Under Gaussian prediction errors (30 scenarios × 1,000 samples), nominal planning collided in 16.4 % of runs. The tube (ε = 0.05) and a constant worst-case buffer both had no collisions, and the tube used 4.9 % less energy (95 % CI 3.7–6.0 %, p = 1.6 × 10⁻⁷). Under heavy-tailed Student-t errors, this advantage disappeared: at matched risk the energy difference was not significant, and at the lowest risk levels the buffer was better. A first-order allocation argument explains this dependence on the error tail. With re-observation every 20 s, the tube reduced replanning by 73 % at a 2.6 % energy cost. The inflation profile should therefore be chosen from the empirical tail of prediction errors.
+Delivery drones must complete round trips on a limited battery while sharing low-altitude airspace with aircraft whose future positions are only predicted. We plan routes that minimise predicted state-of-charge consumption in a time-varying 3-D wind field, choosing route, altitude, segment speed and hovering jointly, while bounding the per-instant collision probability against moving obstacles with uncertain trajectories. Uncertainty is represented by inflation profiles that grow with look-ahead time. For any piecewise-linear profile we derive the unsafe intervals of a grid in closed form, so that an any-angle safe-interval search with an energy cost (WE-SIPP-Theta\*) can use them directly. On real terrain, GFS winds and a power model validated on 198 recorded flights, a Gaussian time-growing tube matched the empirical safety of a constant worst-case buffer with 4.9 % less energy (p = 1.6 × 10⁻⁷), but only under Gaussian errors; under heavy-tailed errors the advantage vanished. Recorded ADS-B tracks of 18 low-altitude aircraft confirmed heavy tails (99.9th percentile 9.1σ vs. 3.7σ) and super-linear error growth (∝ τ^1.5). A quantile profile fitted to these tracks restored out-of-sample per-instant calibration (5.1 % exceedance at ε = 0.05; Gaussian tube 7.5 %, up to 13 %). In 400 closed-loop encounters with recorded trajectories, however, collisions were dominated by geometrically unavoidable cases (4.5 %), inflation-profile differences were not significant, and a floor equal to the error accumulated over the reaction time decided the energy cost. Per-instant calibration is thus an open-loop guarantee; closed-loop safety depends on detection lead time and reaction-time margins.
 
 ---
 
@@ -26,6 +26,7 @@ This paper addresses that gap. Our central observation is that obstacle-predicti
 2. **Algorithm.** We present WE-SIPP-Theta\*, an any-angle SIPP search with an energy cost. Because the wind makes the energy cost norm non-convex (Section 4.3), shortcuts are accepted only when they are cheaper in energy. We also derive closed-form safe intervals for time-growing uncertainty tubes, including the case where the tube grows faster than the obstacle moves (Section 4.4).
 3. **Evidence on real data.** Using real terrain (Copernicus DSM), building footprints (Overture Maps), operational wind forecasts (NOAA GFS) and a power model calibrated on 198 recorded delivery flights of a DJI Matrice 100 [rodrigues2021dataset], we quantify the energy benefit of each planning component and the risk–energy trade-off of uncertainty handling with Monte Carlo evaluation (Sections 5–6).
 4. **When the time-growing tube helps.** Under Gaussian prediction errors, the tube matches the empirical safety of a constant worst-case buffer with less energy. Under heavy-tailed errors this advantage disappears. A first-order allocation argument explains why: the optimal inflation grows sublinearly with the prediction scale when the error tail is heavy (Sections 6.4 and 7).
+5. **Real-track evidence.** On recorded ADS-B tracks of low-altitude traffic, constant-velocity prediction errors are heavy-tailed and grow as τ^1.5. A data-fitted piecewise-linear profile, still solvable in closed form, restores out-of-sample per-instant calibration, whereas the Gaussian tube under-covers by up to 4×. In closed loop against real trajectories, however, collisions were dominated by geometrically unavoidable encounters, and a reaction-time floor mattered more than per-instant calibration (Sections 6.6–6.7).
 
 ---
 
@@ -127,7 +128,20 @@ When the obstacle moves faster than the tube grows ($\lVert\mathbf v\rVert>\rho_
 
 The merged complements are the cell's safe intervals, so SIPP uses them unchanged. Because $\sqrt{\sigma_0^2+\sigma_v^2\tau^2}\le\sigma_0+\sigma_v\tau$, the tube is conservative at every instant for the generative model of Section 5.4. The constraint is per instant; it does not bound the probability of a collision anywhere along the trajectory. We measure that probability empirically (Section 6.4).
 
-### 4.5 Search and replanning
+### 4.5 Data-driven, piecewise-linear inflation profiles
+The closed form of Section 4.4 needs the inflation radius to be linear in τ only *within* each sub-interval. We therefore allow any piecewise-linear profile ρ(τ) = R + m + c_cell + r(τ), with r given at knots τ_k. Each obstacle segment is split at t_obs + τ_k, and the quadratic (or the box inequality) is solved on each piece. The Gaussian tube is the special case with one linear piece.
+
+We fit r(τ) to recorded prediction errors. Let e(τ) be the error of a constant-velocity prediction made from a broadcast state, and V the broadcast speed. We use the speed-normalised quantile curve
+
+$$
+r_arepsilon(\tau)=V\,\hat q_{1-\varepsilon}\!\left(\lVert\mathbf e(\tau)\rVert/V\right),
+$$
+
+made monotone and linearly interpolated between knots (0, 5, 10, 20, 30, 45, 60 s). By construction, this profile bounds the per-instant exceedance at ε on the training data, without a distributional assumption.
+
+For closed-loop use, we also consider a *reaction floor*: r_ε^F(τ) = max(r_ε(τ), r_ε(T_r)). Here T_r is the time until the next observation has been processed (surveillance period + latency + replanning time). The floor keeps, at every look-ahead, at least the error that can accumulate before the planner can react.
+
+### 4.6 Search and replanning
 
 The search state is (cell, safe interval). Successors are generated in three ways:
 - departing immediately;
@@ -173,6 +187,25 @@ Each open-loop plan is evaluated against 1,000 sampled true trajectories, execut
 - the per-scenario energy overhead relative to N, with a bootstrap 95 % interval of the mean (10,000 resamples);
 - a paired Wilcoxon signed-rank test between R(ε) and B;
 - the computation time.
+
+### 5.5 Recorded ADS-B tracks and closed-loop encounters with real trajectories
+**Data.** We used the OpenSky Network ADS-B track samples [schafer2014opensky] distributed with the `traffic` Python library (v2.13, MIT licence) [olive2019traffic]. We kept non-airline aircraft below 6,000 ft at 10–75 m s⁻¹ and only tracks recorded at 1 Hz. Coarser samples showed position–time inconsistencies that inflated the errors. Some calibration-flight samples reported tracks more than 90° off the actual motion, and repeated stale positions were removed. The result is 18 aircraft (three helicopter emergency medical service flights, general and business aviation around Paris, and one surveillance aircraft) and 3,186 prediction instants at 2 s spacing.
+
+**Error model.** The predictor extrapolates the broadcast ground velocity; the position-derived velocity over 3 s is used when the broadcast track disagrees by more than 45°. Errors are computed for τ = 0–180 s. We compare four profiles fitted on training data:
+- **G(ε):** a Gaussian tube with σ(τ) linear in τ, least-squares fitted to the per-axis RMS of the speed-normalised error;
+- **B(ε):** the corresponding constant buffer;
+- **Q(ε):** the quantile profile of Section 4.5;
+- **QB(ε):** a constant quantile buffer.
+
+Calibration is evaluated by 20 repetitions of a two-fold split by 10-minute blocks (aircraft × time), so that no flight segment appears in both folds.
+
+**Closed-loop encounters (E11).** Recorded tracks were used as true intruder trajectories:
+- **Detection and geometry:** the intruder is first detected during cruise. It is rotated and translated so that its initial constant-velocity prediction meets the drone's nominal position 15–40 s later (a collision course).
+- **Surveillance and replanning:** every 5 s the drone re-observes the intruder's broadcast state, rebuilds the profile over a 20 s horizon, and replans only on a predicted conflict (3 s latency).
+- **Fallback:** if the current state is already inside the inflated region, the planner falls back to ε = 0.2 and then to no inflation, instead of continuing on the old plan.
+- **Speed scaling:** at the recorded speeds (median 50 m s⁻¹), the 95 % profile reaches about 1 km within 20 s, and no profile could be avoided by a 12 m s⁻¹ drone (Section 6.7). The main experiment therefore scales each recorded track in space by U/V₀ with U ∈ [8, 30] m s⁻¹, keeping its timing and turn history. This represents other drones and light helicopters, under the assumption that speed-normalised errors do not depend on speed [주장약화: 드론 실측 항적(원격식별)으로 미검증].
+- **Collision definition:** intruder radius R ∈ [40, 150] m; collision = within R + 0.5 m.
+- **Sample:** 80 scenarios × 5 recorded segments = 400 encounters. Profiles were fitted on the opposite fold (cross-fitting).
 
 ---
 
@@ -288,7 +321,47 @@ With announced obstacle changes instead of periodic observation (E9, Fig. F15), 
 | N+O | 2/600 (0.33 %, CI 0.09–1.21 %) | 0.32 | 73.8 kJ |
 | R(0.05)+O | 0/600 (CI ≤0.64 %) | 0.087 | 75.8 kJ (+2.6 %, CI 1.0–4.5) |
 
-### 6.6 Computation
+### 6.6 Prediction errors of real low-altitude traffic (RQ: what tail and growth do real errors have?)
+Fig. F20 and Table 5 summarise the 1 Hz ADS-B errors.
+- **Tail.** Normalised by the per-instant RMS, the error radius has median 0.39σ (Gaussian 1.18σ), 99th percentile 4.39σ (3.03σ) and 99.9th percentile 9.12σ (3.72σ). The per-axis excess kurtosis is 12.3, and the Hill index of the top 5 % of radii is α ≈ 5.1. Most predictions are accurate (straight flight), and turns produce a long tail.
+- **Growth.** The speed-normalised quantiles grow as τ^1.4–1.5, not linearly, because heading changes accumulate.
+- **Calibration of the Gaussian tube.** Fitting a linear σ(τ) therefore misshapes the profile. It over-covers short look-aheads and under-covers long ones: the out-of-sample per-instant exceedance at ε = 0.05 averages 7.5 % and reaches 13.4 % at τ = 60 s; at ε = 0.01 it averages 4.2 %.
+- **Calibration of the quantile profile.** The quantile profile stays close to ε at every look-ahead: 5.1 % (maximum 6.9 %) at ε = 0.05 and 1.1 % (maximum 2.0 %) at ε = 0.01.
+- **Calibration of the buffers.** Constant buffers over-cover, with radii 1.5–2 times larger.
+
+**Table 5.** Out-of-sample per-instant exceedance (τ = 5–60 s, mean over 20 block splits; in brackets, mean of the per-split maximum over τ).
+
+| ε | Gaussian tube | Gaussian buffer | Quantile profile | Quantile buffer |
+|---|---|---|---|---|
+| 0.05 | 7.5 % [13.4 %] | 3.5 % [13.4 %] | **5.1 % [6.9 %]** | 1.0 % [5.3 %] |
+| 0.01 | 4.2 % [8.1 %] | 1.7 % [8.1 %] | **1.1 % [2.0 %]** | 0.2 % [1.2 %] |
+| Mean radius / V (ε = 0.05) | 29 s | 54 s | 36 s | 75 s |
+
+### 6.7 Closed loop against real trajectories (RQ: does a calibrated profile make closed-loop planning safer or cheaper?)
+**At recorded speeds.** With intruders at their recorded speeds, every inflated method had to degrade to a smaller inflation in 95–100 % of encounters. Even the nominal planner had no collision-free option in 25–38 % of them (pilot run, 151 encounters). Horizontal replanning by a slow drone cannot provide probabilistic protection against fast, manoeuvring manned aircraft detected 15–40 s ahead. Such encounters need vertical separation, earlier detection or shared intent.
+
+**At drone speeds (Table 6, Fig. F21).**
+- **Unavoidable encounters.** Eighteen of the 400 encounters (4.5 %) ended in collision for all nine methods. In these, a faster intruder turned towards the drone within one surveillance period plus latency.
+- **Avoidable encounters.** In the remaining 382, the nominal planner collided 7 times (1.8 %) and the inflated methods 2–4 times (0.5–1.0 %). No paired difference is significant (McNemar; e.g. nominal vs. quantile profile with reaction floor at ε = 0.01: 6 vs. 1 discordant encounters, p = 0.13).
+- **Separation.** All inflated methods increased the median minimum separation from 45 m to 107–184 m.
+- **Energy of the quantile profile.** The per-instant calibrated quantile profile cost 2.1 % more energy than the Gaussian tube (95 % CI 1.6–2.7 %, p = 3 × 10⁻¹⁸) and 2.1 % more than the buffer. With 5 s re-observation, the relevant look-ahead is 5–10 s, where the quantile profile is small and the linear Gaussian tube over-covers. Drones using the quantile profile approached closer, were more often inside the inflated region at the next observation (fallback in 50 % vs. 32 % of encounters), and replanned more.
+- **Reaction floor.** The floor (T_r = 10 s) recovered part of this cost: −0.6 % energy relative to the plain quantile profile (p = 6 × 10⁻⁷). At ε = 0.01 it matched the Gaussian tube and the buffer (+0.1 %, p = 0.79).
+
+**Table 6.** Closed-loop encounters with recorded trajectories scaled to 8–30 m s⁻¹ (400 encounters; 18 unavoidable for all methods).
+
+| Profile | Collisions, all | Collisions, avoidable 382 | Median min. separation | Energy vs. nominal (same encounter) | Replans / flight |
+|---|---|---|---|---|---|
+| Nominal | 25 (6.2 %) | 7 (1.8 %) | 45 m | – | 2.5 |
+| Gaussian tube, ε = 0.05 | 21 | 3 (0.8 %) | 153 m | +5.4 % | 3.7 |
+| Buffer, ε = 0.05 | 22 | 4 (1.0 %) | 176 m | +5.4 % | 6.3 |
+| Quantile profile, ε = 0.05 | 22 | 4 (1.0 %) | 134 m | +7.6 % | 4.8 |
+| Quantile + reaction floor, ε = 0.05 | 21 | 3 (0.8 %) | 134 m | +6.9 % | 5.6 |
+| Gaussian tube, ε = 0.01 | 20 | 2 (0.5 %) | 159 m | +6.4 % | 4.3 |
+| Buffer, ε = 0.01 | 22 | 4 (1.0 %) | 184 m | +6.5 % | 7.6 |
+| Quantile profile, ε = 0.01 | 20 | 2 (0.5 %) | 110 m | +8.4 % | 5.8 |
+| Quantile + reaction floor, ε = 0.01 | 20 | 2 (0.5 %) | 107 m | +6.4 % | 6.9 |
+
+### 6.8 Computation
 With heuristic weight 1.0 on a 4-core cloud VM [확인요망: CPU 모델], one leg takes 2.2 s to plan for N and 2.9–3.4 s for the tube variants. Building the unsafe-interval table for three obstacles takes about 0.1 s. Checking a remaining plan against a new table takes 50–300 ms. With weight 1.2, the platform replans a leg in about 2 s.
 
 
@@ -304,6 +377,8 @@ With heuristic weight 1.0 on a 4-core cloud VM [확인요망: CPU 모델], one l
 
 This argument [주장약화: 비용을 Σr_i 로 근사한 1차 분석 – 실제 에너지 비용은 경로 기하에 따라 달라짐] predicts the direction of the change but not its size. In our experiment the blended profile did not outperform the buffer under heavy tails, so the argument should not be read as a prescription for λ. The practical consequence is that the *shape* of the inflation profile, not only ε, must be chosen from the empirical tail of the prediction errors. Profiles that are piecewise linear in τ keep the closed-form safe intervals of Section 4.4, so tail-adaptive profiles fitted to real track data are a direct extension.
 
+**What real tracks change.** The recorded errors confirm the premise of the tail argument above and make it sharper. The errors are heavy-tailed, and their quantiles grow faster than linearly, so a linear Gaussian tube is wrong in both shape and tail. A quantile profile fitted on recorded tracks restores per-instant calibration out of sample (Table 5). This matters wherever the plan is executed open loop, for example under a surveillance outage. In closed loop with frequent re-observation, however, per-instant calibration did not translate into fewer collisions or less energy (Table 6). Two features dominated instead: encounters that no horizontal plan could avoid, and the margin available during the reaction time. We therefore suggest designing closed-loop inflation around the error accumulated over the reaction time (the reaction floor), and treating the per-instant ε as an open-loop guarantee. Reducing the unavoidable share requires earlier detection, shorter surveillance periods or vertical separation, not a different horizontal profile.
+
 **What ε means in this setting.** ε bounds the collision probability per instant and per obstacle under a linear upper bound on the prediction error. The empirical trajectory-level rates were 1–3 orders of magnitude below ε. Practitioners should therefore treat ε as a conservative tuning parameter rather than a calibrated mission risk. Calibrating ε to a target trajectory-level risk — for example with union bounds over encounter windows, or with scenario-based validation — is left for future work.
 
 **Closed loop.** Frequent re-observation removes most of the risk of nominal planning, but at the price of more frequent plan changes. The tube keeps the plan valid for longer and costs a few percent more energy. Whether fewer plan changes matter operationally — for UTM negotiation and predictability for other airspace users — is outside the scope of our simulation. [인용필요: 계획 변경 빈도가 UTM/공역 운영에 미치는 영향에 대한 문헌]
@@ -311,9 +386,10 @@ This argument [주장약화: 비용을 Σr_i 로 근사한 1차 분석 – 실�
 **Limitations.**
 1. **Single site, day and airframe.** All results come from one 6 × 5.5 km site, one high-wind day and one small quadrotor (DJI M100, 99.9 Wh). Generality to other cities, seasons and larger delivery drones is untested.
 2. **Wind data.** GFS (0.25°) is coarse, and the terrain and urban corrections are heuristic. The "actual" wind is a later forecast cycle, not an observation.
-3. **Synthetic obstacle uncertainty.** Obstacles and their uncertainty are generated, not observed. The main comparison uses a Gaussian generative model from the same family as the planner's assumption. Under heavy-tailed (Student-t) errors, the tube's energy advantage disappeared (Section 6.4). The practical value of the tube therefore depends on how close real prediction errors are to the assumed model, and this was not measured, because no real track data of aircraft or drones were used.
+3. **Synthetic scenarios.** In Sections 6.4–6.5, obstacles and their uncertainty are generated from a Gaussian model of the same family as the planner's assumption. Under heavy-tailed errors (Section 6.4), and on recorded tracks (Section 6.6), this assumption does not hold. The 4.9 % saving should therefore be read as conditional on near-Gaussian errors.
 4. **Approximate optimality.** The search keeps one label per (cell, safe interval) and uses an approximately admissible heuristic, so it is not guaranteed optimal under time-varying costs. Small non-monotonicities between nested constraint sets can occur.
-5. **No flight test.** The calibrated model was validated against recorded flights, but no planned trajectory was flown.
+5. **Real-track data.** The ADS-B samples (18 aircraft) come from a library's demonstration set, not a random sample, and over-represent emergency helicopters and general aviation around Paris. The drone-speed experiment rescales manned-aircraft tracks, assuming speed-invariant normalised errors. Remote ID tracks of drones would be the appropriate data. Collisions were judged in 2-D, ignoring altitude separation.
+6. **No flight test.** The calibrated model was validated against recorded flights, but no planned trajectory was flown.
 
 
 ---
@@ -328,7 +404,9 @@ On real terrain, buildings and forecast winds, with a power model validated on r
 - under heavy-tailed (Student-t, ν = 3) errors this advantage disappeared. At matched risk the energy difference was not significant, and at the lowest risk levels the constant buffer was better. The inflation profile must therefore match the tail of the error distribution;
 - in closed loop with re-observation, the tubes reduced replanning by 73 % at a 2.6 % energy cost.
 
-Future work covers real obstacle track data to identify the error tail and fit tail-adaptive (piecewise-linear) inflation profiles, calibration of ε to trajectory-level risk, multi-day and multi-site evaluation, observation-based wind, and flight tests.
+- on recorded ADS-B tracks, prediction errors were heavy-tailed (99.9th percentile 9.1σ) and grew as τ^1.5; a data-fitted piecewise-linear profile restored out-of-sample calibration (5.1 % at ε = 0.05), but in closed loop against real trajectories the collision rate was dominated by unavoidable encounters (4.5 %), and a reaction-time floor, not per-instant calibration, determined the energy cost.
+
+Future work covers drone (Remote ID) track data, calibration of ε to trajectory-level and closed-loop risk, the joint design of surveillance period and inflation, vertical separation, multi-day and multi-site evaluation, observation-based wind, and flight tests.
 
 
 ---
