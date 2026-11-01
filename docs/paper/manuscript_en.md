@@ -9,7 +9,7 @@
 
 ## Abstract
 
-<!-- ABSTRACT -->
+Delivery drones must complete round trips on a limited battery while sharing low-altitude airspace with aircraft whose future positions are only predicted. We plan routes that minimise predicted state-of-charge (SOC) consumption in a time-varying 3-D wind field, choosing route, altitude, segment speed and hovering jointly, while bounding the per-instant collision probability against moving obstacles with uncertain trajectories. The prediction uncertainty is modelled as a chance-constrained tube that grows with look-ahead time. We derive its unsafe intervals on a grid in closed form, including the case in which the tube grows faster than the obstacle moves, so that an any-angle safe-interval search with an energy cost (WE-SIPP-Theta\*) can use them directly. Experiments use real terrain, buildings, GFS wind forecasts and a power model validated on 198 recorded flights. Under Gaussian prediction errors (30 scenarios × 1,000 samples), nominal planning collided in 16.4 % of runs. The tube (ε = 0.05) and a constant worst-case buffer both had no collisions, and the tube used 4.9 % less energy (95 % CI 3.7–6.0 %, p = 1.6 × 10⁻⁷). Under heavy-tailed Student-t errors, this advantage disappeared: at matched risk the energy difference was not significant, and at the lowest risk levels the buffer was better. A first-order allocation argument explains this dependence on the error tail. With re-observation every 20 s, the tube reduced replanning by 73 % at a 2.6 % energy cost. The inflation profile should therefore be chosen from the empirical tail of prediction errors.
 
 ---
 
@@ -19,12 +19,13 @@ Small multirotor drones are being considered for last-mile parcel delivery, wher
 
 Energy-aware planners that account for wind have been proposed on grids [lian2025walpa, lian2025wind] and with any-angle search over CFD wind fields [gu2026wind], and delivery-routing studies have modelled wind- and payload-dependent energy on graphs [bettisorbelli2021wind]. Separately, safe-interval path planning (SIPP) handles moving obstacles with known trajectories [phillips2011sipp, yakovlev2017aasipp], and chance-constrained planning bounds the collision probability under uncertainty [blackmore2011chance, dutoit2012robot, zhu2019chance]. To our knowledge, these lines have not been combined into a single planner that (i) minimises predicted state-of-charge (SOC) consumption in a time-varying 3D wind field, (ii) chooses route, altitude, segment speed and hovering jointly, and (iii) bounds the collision risk against moving obstacles whose predicted trajectories are uncertain. [확인요망: 2024–2026 문헌 추가 조사로 "처음" 주장 범위 재확인 – 현재는 "to our knowledge"로 약화]
 
-This paper addresses that gap. Our central observation is that obstacle-prediction uncertainty grows with look-ahead time, so a constant worst-case buffer — the usual engineering practice — over-constrains the near future where predictions are accurate. We encode the uncertainty as a time-growing chance-constrained tube and show that its safe intervals on a grid can be computed in closed form, which lets an energy-optimal SIPP search use it directly.
+This paper addresses that gap. Our central observation is that obstacle-prediction uncertainty grows with look-ahead time, so a constant worst-case buffer — the usual engineering practice — over-constrains the near future where predictions are accurate. We encode the uncertainty as a time-growing chance-constrained tube and show that its safe intervals on a grid can be computed in closed form, which lets an energy-optimal SIPP search use it directly. We also show the limit of this idea: the benefit depends on the tail of the prediction errors, not only on their variance.
 
 **Contributions.**
 1. **Formulation.** We pose delivery planning as minimisation of predicted SOC consumption over route, altitude, segment ground speed and waiting time, under a time-varying 3D wind field, leg-specific payload mass and per-time-instant chance constraints against uncertain moving obstacles (Section 3).
 2. **Algorithm.** We present WE-SIPP-Theta\*, an any-angle SIPP search with an energy cost. Because the wind makes the energy cost norm non-convex (Section 4.3), shortcuts are accepted only when they are cheaper in energy. We also derive closed-form safe intervals for time-growing uncertainty tubes, including the case where the tube grows faster than the obstacle moves (Section 4.4).
 3. **Evidence on real data.** Using real terrain (Copernicus DSM), building footprints (Overture Maps), operational wind forecasts (NOAA GFS) and a power model calibrated on 198 recorded delivery flights of a DJI Matrice 100 [rodrigues2021dataset], we quantify the energy benefit of each planning component and the risk–energy trade-off of uncertainty handling with Monte Carlo evaluation (Sections 5–6).
+4. **When the time-growing tube helps.** Under Gaussian prediction errors, the tube matches the empirical safety of a constant worst-case buffer with less energy. Under heavy-tailed errors this advantage disappears. A first-order allocation argument explains why: the optimal inflation grows sublinearly with the prediction scale when the error tail is heavy (Sections 6.4 and 7).
 
 ---
 
@@ -162,9 +163,10 @@ with $\mathbf e\sim\mathcal N(0,\sigma_0^2I)$, $\delta\mathbf v\sim\mathcal N(0,
 The open-loop planners are:
 - **N**: nominal prediction with a 15 m margin;
 - **B**: constant buffer equal to the tube at 1.3× the nominal mission time, at $\varepsilon=0.05$;
-- **R(ε)**: time-growing tube, $\varepsilon\in\{0.2,0.1,0.05,0.01\}$.
+- **R(ε)**: time-growing tube, $\varepsilon\in\{0.2,0.1,0.05,0.01\}$ (extended to $\{0.002,0.001,10^{-4}\}$ for the mismatch study);
+- **B(ε)** and **M(ε)** (mismatch study only): the constant buffer at $\varepsilon\in\{0.2,0.1,0.05,0.01\}$ and the blended profile $\sigma_\lambda(\tau)=(1-\lambda)\sigma(\tau)+\lambda\sigma(T_h)$, $\lambda=0.5$, at $\varepsilon\in\{0.2,0.05,0.01,0.001\}$.
 
-Each open-loop plan is evaluated against 1,000 sampled true trajectories, executed in the planning wind (primary) and in the updated wind (secondary). The closed-loop planners **N+O** and **R(0.05)+O** re-observe every 20 s. Each is evaluated on the first 20 scenarios × 30 sampled true trajectories. All searches use heuristic weight 1.0, except closed-loop replans, which use 1.2. [확인요망: 하드웨어 – 4-core cloud VM, numba JIT]
+Each open-loop plan is evaluated against 1,000 sampled true trajectories, executed in the planning wind (primary) and in the updated wind (secondary). For the mismatch study, each plan is additionally evaluated against 1,000 trajectories whose $\mathbf e$, $\delta\mathbf v$ and $\delta t$ follow a Student-t distribution with 3 degrees of freedom, scaled to the same standard deviations. The closed-loop planners **N+O** and **R(0.05)+O** re-observe every 20 s. Each is evaluated on the first 20 scenarios × 30 sampled true trajectories. All searches use heuristic weight 1.0, except closed-loop replans, which use 1.2. [확인요망: 하드웨어 – 4-core cloud VM, numba JIT]
 
 **Metrics.** We report:
 - the collision probability, pooled over scenarios, with a Wilson 95 % interval;
@@ -234,7 +236,35 @@ Table 3 and Fig. F16a summarise 30 scenarios × 1,000 sampled true trajectories.
 | **R (ε = 0.05)** | **0 (≤0.013 %)** | 0/30 | **+11.5 % (7.7–16.3)** | 0 |
 | R (ε = 0.01) | 0 (≤0.013 %) | 0/30 | +14.6 % (10.4–19.7) | 0 |
 
-<!-- TAIL_DELAY -->
+**How the robust plans buy safety.** The robust plans use time as well as space. Mean hover time per flight is 0.6 s for N, 7.5 s for the tube at ε = 0.05 (bootstrap 95 % CI 3.5–12.9 s), 9.7 s at ε = 0.01 and 10.5 s for B. B also delays take-off by 1.0 s on average (0–3 s), while the tube variants never do. Mean flight time rises from 132 s (N) to 145 s (tube, ε = 0.05) and 152 s (B). A plan must therefore be executed with its waits: re-flying the same paths without the planned waits changes the encounter timing by 10–12 s and invalidates the risk evaluation.
+
+**Model mismatch: heavy-tailed prediction errors (Fig. F19, Table 3b).** All results above use errors drawn from the same Gaussian family that the planner assumes. To test robustness to this assumption, we re-evaluated every plan against Student-t errors with 3 degrees of freedom and the same standard deviations (seeds 30,000 + scenario id). We also added tube plans at ε ∈ {0.002, 0.001, 10⁻⁴}, constant buffers at ε ∈ {0.2, 0.1, 0.01}, and a blended profile σ_λ(τ) = (1−λ)σ(τ) + λσ(T_h) with λ = 0.5. The blend stays linear in τ, so its safe intervals keep the closed form of Section 4.4. Table 3b reports the 29 scenarios in which every variant found a plan.
+
+- **Under Gaussian errors**, the tube family lies below the buffer family: at about +12 % energy the tube (ε = 0.05) had no collision in 29,000 runs, whereas the buffer (ε = 0.2) collided in 0.028 % of runs.
+- **Under heavy-tailed errors, this ordering disappears.** At matched energy, the buffer has the lower risk: the tube at ε = 0.01 uses 2.2 % less energy than B (ε = 0.05) (95 % CI 0.9–3.6 %, p = 0.006) but collides in 0.28 % vs 0.18 % of runs. At matched risk, the energy difference is not significant: the tube at ε = 0.001 has risk 0.17 % vs 0.18 % and uses 1.2 % more energy (95 % CI −0.5–3.1 %, p = 0.27). At the lowest risk levels the buffer is better: B at ε = 0.01 reaches 0.069 % at +22.2 % energy, while the tube at ε = 10⁻⁴ reaches 0.12 % at +22.7 %.
+- **The blended profile lies between the two families.** It does not dominate the constant buffer under heavy tails.
+- **The nominal planner collides in 12.3 % (Student-t) vs 17.0 % (Gaussian) of runs on this subset.** Heavy-tailed errors with the same variance put more mass near zero, so small deviations are more frequent and large ones rarer at moderate radii.
+
+The energy advantage of the time-growing tube is therefore conditional on the error model: it holds when the prediction error is close to Gaussian with a linearly growing scale, and it is lost under heavy-tailed errors. We return to the reason in Section 7.
+
+**Table 3b.** Risk–energy trade-off under matched (Gaussian) and mismatched (Student-t, ν = 3) prediction errors (29 scenarios × 1,000 samples; energy overhead vs N, mean with bootstrap 95 % CI; collision rate with Wilson 95 % CI).
+
+| Profile | ε | Energy overhead | Gaussian errors | Student-t errors |
+|---|---|---|---|---|
+| Tube (λ = 0) | 0.2 | +8.3 % (5.2–12.5) | 0.11 % (0.08–0.16) | 0.94 % (0.83–1.06) |
+| Tube | 0.05 | +11.9 % (8.1–16.8) | 0 (≤0.013 %) | 0.53 % (0.45–0.62) |
+| Tube | 0.01 | +15.1 % (10.9–20.4) | 0 | 0.28 % (0.22–0.35) |
+| Tube | 0.001 | +19.3 % (14.4–25.3) | 0 | 0.17 % (0.12–0.22) |
+| Tube | 10⁻⁴ | +22.7 % (17.6–28.7) | 0 | 0.12 % (0.08–0.16) |
+| Blend (λ = 0.5) | 0.2 | +10.3 % (7.4–14.2) | 0.045 % | 0.58 % (0.50–0.67) |
+| Blend | 0.05 | +14.6 % (10.9–19.1) | 0 | 0.26 % (0.20–0.32) |
+| Blend | 0.01 | +19.0 % (15.2–23.6) | 0 | 0.15 % (0.11–0.20) |
+| Blend | 0.001 | +24.1 % (19.9–29.1) | 0 | 0.086 % (0.06–0.13) |
+| Buffer (λ = 1) | 0.2 | +12.0 % (9.0–15.8) | 0.028 % | 0.40 % (0.33–0.48) |
+| Buffer | 0.1 | +14.9 % (11.6–18.8) | 0.003 % | 0.25 % (0.20–0.31) |
+| Buffer | 0.05 | +17.6 % (14.3–21.6) | 0 | 0.18 % (0.14–0.24) |
+| Buffer | 0.01 | +22.2 % (18.7–26.4) | 0 | 0.069 % (0.05–0.11) |
+
 
 **Sensitivity to the uncertainty growth rate (Fig. F17).** The tube's energy advantage over B grows with σ_v:
 - at σ_v = 0.25 m s⁻¹: 2.5 % (95 % CI 1.7–3.4 %, 26 of 28 decided scenarios);
@@ -268,6 +298,12 @@ With heuristic weight 1.0 on a 4-core cloud VM [확인요망: CPU 모델], one l
 
 **Why the tube is cheaper than a constant buffer.** A constant buffer must be sized for the largest look-ahead it may face. It therefore over-inflates obstacles at encounters that happen early in the flight, when the prediction is still accurate. The time-growing tube spends margin only where the prediction has degraded. Most of the paired saving comes from scenarios in which an obstacle is met in the first half of the mission [자료필요: 조우 시각별 절감 분해 분석 – 미실시]. The advantage grows with σ_v (Fig. F17), consistent with this explanation.
 
+**Why the advantage depends on the error tail.** A first-order allocation argument explains the direction of the mismatch result. Consider n encounters with prediction scales σ_i and inflation radii r_i, and approximate the energy cost by a function increasing in Σ r_i. Minimising the summed risk Σ F̄(r_i/σ_i) subject to Σ r_i = R gives the stationarity condition f(r_i/σ_i)/σ_i = μ, where F̄ and f are the tail and the density of the normalised error radius.
+- For the 2-D Gaussian (Rayleigh) radius, f(u) = u e^{−u²/2}, the optimal normalised radius u_i decreases only logarithmically with σ_i. Hence r_i ≈ κσ_i with an almost constant κ, which is the time-growing tube.
+- For a power-law tail, F̄(u) ∝ u^{−α}, the condition gives u_i ∝ σ_i^{−1/(α+1)} and therefore r_i ∝ σ_i^{α/(α+1)}. For α = 3 (the Student-t case) this is r ∝ σ^{3/4}: the optimal inflation grows sublinearly with the prediction scale, so the profile is flatter than the tube and closer to a constant buffer.
+
+This argument [주장약화: 비용을 Σr_i 로 근사한 1차 분석 – 실제 에너지 비용은 경로 기하에 따라 달라짐] predicts the direction of the change but not its size. In our experiment the blended profile did not outperform the buffer under heavy tails, so the argument should not be read as a prescription for λ. The practical consequence is that the *shape* of the inflation profile, not only ε, must be chosen from the empirical tail of the prediction errors. Profiles that are piecewise linear in τ keep the closed-form safe intervals of Section 4.4, so tail-adaptive profiles fitted to real track data are a direct extension.
+
 **What ε means in this setting.** ε bounds the collision probability per instant and per obstacle under a linear upper bound on the prediction error. The empirical trajectory-level rates were 1–3 orders of magnitude below ε. Practitioners should therefore treat ε as a conservative tuning parameter rather than a calibrated mission risk. Calibrating ε to a target trajectory-level risk — for example with union bounds over encounter windows, or with scenario-based validation — is left for future work.
 
 **Closed loop.** Frequent re-observation removes most of the risk of nominal planning, but at the price of more frequent plan changes. The tube keeps the plan valid for longer and costs a few percent more energy. Whether fewer plan changes matter operationally — for UTM negotiation and predictability for other airspace users — is outside the scope of our simulation. [인용필요: 계획 변경 빈도가 UTM/공역 운영에 미치는 영향에 대한 문헌]
@@ -275,7 +311,7 @@ With heuristic weight 1.0 on a 4-core cloud VM [확인요망: CPU 모델], one l
 **Limitations.**
 1. **Single site, day and airframe.** All results come from one 6 × 5.5 km site, one high-wind day and one small quadrotor (DJI M100, 99.9 Wh). Generality to other cities, seasons and larger delivery drones is untested.
 2. **Wind data.** GFS (0.25°) is coarse, and the terrain and urban corrections are heuristic. The "actual" wind is a later forecast cycle, not an observation.
-3. **Synthetic obstacle uncertainty.** Obstacles and their uncertainty are generated, not observed. The Gaussian generative model belongs to the same family as the planner's assumption. A heavy-tailed check is reported in Section 6.4, but real track data of aircraft or drones have not been used.
+3. **Synthetic obstacle uncertainty.** Obstacles and their uncertainty are generated, not observed. The main comparison uses a Gaussian generative model from the same family as the planner's assumption. Under heavy-tailed (Student-t) errors, the tube's energy advantage disappeared (Section 6.4). The practical value of the tube therefore depends on how close real prediction errors are to the assumed model, and this was not measured, because no real track data of aircraft or drones were used.
 4. **Approximate optimality.** The search keeps one label per (cell, safe interval) and uses an approximately admissible heuristic, so it is not guaranteed optimal under time-varying costs. Small non-monotonicities between nested constraint sets can occur.
 5. **No flight test.** The calibrated model was validated against recorded flights, but no planned trajectory was flown.
 
@@ -288,10 +324,11 @@ We presented a planner for delivery drones that minimises predicted SOC consumpt
 
 On real terrain, buildings and forecast winds, with a power model validated on recorded flights:
 - segment-speed optimisation and energy-compared any-angle shortcuts were the two largest sources of SOC saving;
-- time-growing chance-constrained tubes, computed in closed form as SIPP safe intervals, matched the empirical safety of a constant worst-case buffer while using 4.9 % less energy (30 scenarios, p = 1.6 × 10⁻⁷);
+- under Gaussian prediction errors, time-growing chance-constrained tubes, computed in closed form as SIPP safe intervals, matched the empirical safety of a constant worst-case buffer while using 4.9 % less energy (30 scenarios, p = 1.6 × 10⁻⁷);
+- under heavy-tailed (Student-t, ν = 3) errors this advantage disappeared. At matched risk the energy difference was not significant, and at the lowest risk levels the constant buffer was better. The inflation profile must therefore match the tail of the error distribution;
 - in closed loop with re-observation, the tubes reduced replanning by 73 % at a 2.6 % energy cost.
 
-Future work covers multi-day and multi-site evaluation, observation-based wind, real obstacle track data, calibration of ε to trajectory-level risk, and flight tests.
+Future work covers real obstacle track data to identify the error tail and fit tail-adaptive (piecewise-linear) inflation profiles, calibration of ε to trajectory-level risk, multi-day and multi-site evaluation, observation-based wind, and flight tests.
 
 
 ---

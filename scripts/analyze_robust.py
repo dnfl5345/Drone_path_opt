@@ -157,9 +157,14 @@ def frontier(E10):
 
 
 def fig_frontier(F):
+    import os
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from matplotlib import font_manager as fm
+    for f in ("/root/.fonts/NanumGothic-Regular.ttf", "/root/.fonts/NanumGothic-Bold.ttf"):
+        if os.path.exists(f):
+            fm.fontManager.addfont(f)
     plt.rcParams.update({"font.family": ["NanumGothic", "DejaVu Sans"], "axes.unicode_minus": False, "font.size": 10,
                          "axes.spines.top": False, "axes.spines.right": False, "savefig.dpi": 200,
                          "savefig.bbox": "tight", "axes.titleweight": "bold"})
@@ -177,20 +182,24 @@ def fig_frontier(F):
             ys = [p[0] * 100 for p in ps]
             lo = [max(p[0] - p[1], 0) * 100 for p in ps]; hi = [max(p[2] - p[0], 0) * 100 for p in ps]
             ax.errorbar(xs, ys, yerr=[lo, hi], color=col, marker=mk, ms=6, lw=1.8, capsize=3, label=lab)
-            for x, y, e in zip(xs, ys, eps_list):
-                ax.annotate(f"ε={float(e):g}", (x, y), textcoords="offset points", xytext=(4, 5), fontsize=7.5, color=col)
+            off = {"R": (-6, 7), "B": (4, -13), "M": (6, 2)}[pre]
+            for x, y, e, p_ in zip(xs, ys, eps_list, ps):
+                if kind == "gauss" and p_[0] == 0:
+                    continue                      # 0건 점은 범례 설명으로 대체 (겹침 방지)
+                ax.annotate(f"{float(e):g}", (x, y), textcoords="offset points", xytext=off, fontsize=7.5, color=col)
         ax.set_yscale("symlog", linthresh=0.01)
         ax.set_yticks([0, 0.01, 0.1, 1]); ax.set_yticklabels(["0", "0.01", "0.1", "1"])
         ax.set_ylim(-0.002, 3)
-        ax.set_xlabel("공칭 대비 에너지 증가 [%] (30 시나리오 평균)")
+        ax.set_xlabel(f"공칭 대비 에너지 증가 [%] ({F['n_scen']} 시나리오 평균)")
         ax.set_ylabel("실측 충돌률 [%] (Wilson 95% CI)")
         ax.set_title(title, fontsize=10.5, loc="left")
         ax.grid(alpha=0.25)
-    axs[0].legend(frameon=False, loc="upper right")
-    axs[1].text(0.98, 0.97, f"공칭: {M['N']['t3'][0] * 100:.1f}%", transform=axs[1].transAxes, ha="right", va="top",
-                fontsize=9, color="#555")
-    axs[0].text(0.98, 0.80, f"공칭: {M['N']['gauss'][0] * 100:.1f}%", transform=axs[0].transAxes, ha="right", va="top",
-                fontsize=9, color="#555")
+    axs[0].legend(frameon=False, loc="upper right", title="숫자 = 위험 한도 ε", title_fontsize=8.5, fontsize=9)
+    axs[1].text(0.02, 0.03, f"공칭(불확실성 무시): {M['N']['t3'][0] * 100:.1f}%", transform=axs[1].transAxes, fontsize=9,
+                color="#555")
+    axs[0].text(0.36, 0.56, f"공칭(불확실성 무시): {M['N']['gauss'][0] * 100:.1f}%\n"
+                f"0 = {M['N']['n']:,}회 중 충돌 0건 (95% 상한 {M['B0.05']['gauss'][2] * 100:.3f}%)",
+                transform=axs[0].transAxes, fontsize=8.5, color="#555")
     fig.suptitle("위험–에너지 곡선: 오차 분포가 가정과 다를 때 (모델 불일치)", fontweight="bold", y=1.02)
     fig.savefig(C.FIG / "F19_frontier_mismatch.png")
     plt.close(fig)

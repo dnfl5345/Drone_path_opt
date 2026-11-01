@@ -3,7 +3,7 @@
 바람·지형·탑재중량을 반영해 **도착 SOC(배터리 잔량)를 최대화**하는 드론 물류 경로계획 알고리즘입니다.
 지난 회의에서 선정한 최단 경로 알고리즘(Lazy Theta*)을 3D 시공간 에너지 탐색기 **WE-LT\* (Wind-aware Energy Lazy Theta\*)**로 확장했습니다.
 
-- 회의 보고 자료: [`docs/drone_soc_path_planning_dev.pptx`](docs/drone_soc_path_planning_dev.pptx) (기존 회의자료와 같은 포맷, 21장)
+- 회의 보고 자료: [`docs/drone_soc_path_planning_dev.pptx`](docs/drone_soc_path_planning_dev.pptx) (기존 회의자료와 같은 포맷, 28장)
 - 최신 연구 대비 정식화 비교: [`docs/algorithm_comparison.md`](docs/algorithm_comparison.md) (문제 (P) 정의, 문헌별 정식화, 가정 축소 실험)
 - 확장안 (8방향 탐색 + 고도별 균일·선형 바람, LUT): [`docs/extension_8way_linear_wind.md`](docs/extension_8way_linear_wind.md)
 - 3D 시공간 확장 (동적 장애물) + 장애물 편집 플랫폼 + 장애물 변경 시 이벤트 기반 재계획: [`docs/spatiotemporal_dynamic_obstacles.md`](docs/spatiotemporal_dynamic_obstacles.md)
@@ -49,7 +49,7 @@ PYTHONPATH=src python -m dpo.webapp        # 브라우저에서 http://localhost
 - 확장안(E7): 바람을 "같은 고도면 같고, 고도에 따라 선형"으로 가정하면 간선 비용을 조회표(LUT)로 바꿀 수 있습니다. 이렇게 하면 계산이 8.9 s → 0.44 s로 **약 20배 빨라지고**, SOC는 같은 가정의 WE-LT*와 같습니다(78.2 vs 78.1 %p). 3D 바람장 대비로는 약 1.4 %p 손해입니다.
 - 3D 시공간(E8): 다른 드론·응급 헬기·행사 제한구역이 기존 경로를 가로지르는 시나리오에서, 동적 장애물을 무시한 경로는 3종 모두와 충돌합니다(최대 136 m 침범). 시공간 계획은 최소 29 m 이격으로 회피하고, 그 대가로 에너지가 +9.5 % 듭니다.
 - 장애물 변경(E9): 비행 중 헬기 항로 변경과 행사 제한 확대가 발표되면 이벤트 기반 재계획이 재계획 2회로 충돌을 피합니다. 30 s 주기 방식은 같은 결과에 재계획 5회가 들고, 60 s 주기 방식은 변경을 늦게 확인해 충돌합니다. 1회 계획도 충돌합니다.
-- 궤적 불확실성(E10, 30 시나리오 × 1,000 샘플): 예측 궤적을 그대로 믿으면 충돌률이 16.4 %입니다. 고정 최악 버퍼와 위험 한도 튜브(ε=0.05)는 모두 0/30,000이지만, 튜브가 에너지를 **4.9 % 덜** 씁니다(28승 2패, Wilcoxon p = 1.6×10⁻⁷). 20 s 재관측 폐루프에서는 재계획 횟수를 73 % 줄입니다(충돌 차이는 유의하지 않음).
+- 궤적 불확실성(E10, 30 시나리오 × 1,000 샘플): 예측 궤적을 그대로 믿으면 충돌률이 16.4 %입니다. 고정 최악 버퍼와 위험 한도 튜브(ε=0.05)는 모두 0/30,000이지만, 튜브가 에너지를 **4.9 % 덜** 씁니다(28승 2패, Wilcoxon p = 1.6×10⁻⁷). 20 s 재관측 폐루프에서는 재계획 횟수를 73 % 줄입니다(충돌 차이는 유의하지 않음). 단, 오차 꼬리가 두꺼우면(Student-t) 이 에너지 이득은 사라지고 낮은 위험 영역에서는 고정 버퍼가 낫습니다(E10c·E10d, 그림 F19). 따라서 팽창 모양은 실제 예측 오차의 꼬리에 맞춰 정해야 합니다.
 - 가정 축소 실험(E6) 결과, 비교 축별 기여는 **구간 속도 최적화 +10.2~13.0 %p**(10 m/s 고정이면 비행 불가) > **에너지 비교형 any-angle +4.1 %p** > **3D 고도 선택 +2.8~3.1 %p** 순입니다.
 
 ## 실행
@@ -59,8 +59,8 @@ pip install -r requirements.txt
 PYTHONPATH=src python -m dpo.data_terrain                  # DSM·건물 수집 → data/processed/site_grid.npz
 PYTHONPATH=src python -m dpo.data_wind                     # GFS 10월 강풍일 스캔
 PYTHONPATH=src python scripts/run_experiments.py           # E0~E9 (약 16분)
-PYTHONPATH=src python -c "import sys; sys.path.insert(0,'scripts'); import run_experiments as R; R.E10(n_closed=0); R.E10b()"   # 불확실성 (약 45분)
-PYTHONPATH=src python scripts/analyze_robust.py            # 통계·그림 F16/F17
+PYTHONPATH=src python -c "import sys; sys.path.insert(0,'scripts'); import run_experiments as R; R.E10(n_closed=0); R.E10b(); R.E10c(); R.E10d()"   # 불확실성 (약 65분)
+PYTHONPATH=src python scripts/analyze_robust.py            # 통계·그림 F16/F17/F19
 PYTHONPATH=src python scripts/make_figures.py && PYTHONPATH=src python scripts/make_figures.py gif
 PYTHONPATH=src python scripts/build_ppt.py <회의자료 템플릿.pptx> docs/drone_soc_path_planning_dev.pptx
 PYTHONPATH=src python -m pytest -q tests
@@ -98,5 +98,5 @@ GFS 원자료(`data/raw/gfs_*.npz`)와 격자(`data/processed/site_grid.npz`)는
 - 지형·도시 바람 보정은 간이 근사입니다(보정 계수 0.80~1.19). LDAPS나 CFD로 바꾸는 것을 권장합니다.
 - 전력모델 질량(3.1 kg)과 배터리(99.9 Wh, TB47D급)는 DJI 사양을 바탕으로 한 가정입니다. 검증 날짜에서는 평균 전력을 3~9 % 정도 낮게 예측했습니다.
 - WE-LT*는 노드마다 도착 시각 라벨을 하나만 두는 근사 탐색이라, 시간가변 비용에서 전역 최적을 보장하지 않습니다.
-- 장애물 불확실성은 가우시안·직선 등속 모델이고 σ 값은 가정입니다. 위험 한도 ε는 시점별 상계라 실측 위험보다 보수적입니다(임무 위험 확률로 직접 읽으면 안 됨).
+- 장애물 불확실성은 가우시안·직선 등속 모델이고 σ 값은 가정입니다. 오차 꼬리가 두꺼우면 튜브의 이득이 사라집니다. 위험 한도 ε는 시점별 상계라 실측 위험보다 보수적입니다(임무 위험 확률로 직접 읽으면 안 됨).
 - 비행금지구역 원은 예시(가상)입니다. 실제 판교 일대는 서울공항 관제권이라 비행승인이 필요합니다.
