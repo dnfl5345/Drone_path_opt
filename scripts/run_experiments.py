@@ -711,11 +711,16 @@ def E10b(n_closed=12, K_closed=15, obs_period=20.0, replan_weight=1.2):
                                                   replan_weight=replan_weight, latency=3.0)))
 
 
-def E10c(n_scen=30, K=1000):
+def E10d(n_scen=30, K=1000):
+    """E10 보강 2: 혼합 튜브 M(λ=0.5) – 시간 증가 튜브와 고정 버퍼 사이 (Student-t 불일치 대응 검토)."""
+    E10c(n_scen, K, variant="d")
+
+
+def E10c(n_scen=30, K=1000, variant="c"):
     """E10 보강: 모델 불일치(Student-t, df=3)에서 위험–에너지 곡선 비교.
     같은 시나리오(시드 2026)에서 튜브 ε ∈ {0.002, 0.001, 1e-4} 와 고정 버퍼 B(ε ∈ {0.2, 0.1, 0.01}) 를 추가 계획."""
     from dpo.st_planner import STPlanner
-    from dpo.robust_eval import make_scenario, sample_truth, sample_truth_t, mc_collisions, fixed_buffer
+    from dpo.robust_eval import make_scenario, sample_truth, sample_truth_t, mc_collisions, fixed_buffer, blend_buffer
     g, fc, tr = sites()
     dr = drone_calibrated()
     m = dr.m_empty + PAYLOAD
@@ -741,8 +746,11 @@ def E10c(n_scen=30, K=1000):
         smp_t = sample_truth_t(np.random.default_rng(30_000 + sc["id"]), sc["obs"], K)
         res = dict(id=sc["id"], hour=sc["hour"])
         Th = 1.3 * sc["T_nom"]
-        cfg = [(f"R{e}", sc["obs"], e) for e in (0.002, 0.001, 0.0001)] + \
-              [(f"B{e}", fixed_buffer(sc["obs"], Th), e) for e in (0.2, 0.1, 0.01)]
+        if variant == "c":
+            cfg = [(f"R{e}", sc["obs"], e) for e in (0.002, 0.001, 0.0001)] + \
+                  [(f"B{e}", fixed_buffer(sc["obs"], Th), e) for e in (0.2, 0.1, 0.01)]
+        else:
+            cfg = [(f"M{e}", blend_buffer(sc["obs"], Th, 0.5), e) for e in (0.2, 0.05, 0.01, 0.001)]
         for key, obs_plan, eps in cfg:
             SP.set_obstacles(obs_plan, sc["t_dep"], eps=eps)
             r = SP.plan(st, gl, t_start=sc["t_dep"], mass=m, weight=1.0, budget=usable)
@@ -756,11 +764,11 @@ def E10c(n_scen=30, K=1000):
                 out[wname] = dict(n_hit=int(hit.sum()), K=K)
             res[key] = out
         rows.append(res)
-        print(f"[E10c] scen {sc['id']:2d} " + " ".join(
+        print(f"[E10{variant}] scen {sc['id']:2d} " + " ".join(
             f"{k}:{v['plan']['n_hit']}/{v['t3']['n_hit']}/{v['E'] / 1000:.1f}" if v.get("feasible") else f"{k}:X"
             for k, v in res.items() if isinstance(v, dict)), f"({time.time() - t_all:.0f}s)", flush=True)
-    save("E10c", dict(rows=rows, params=dict(n_scen=n_scen, K=K)))
-    print("[E10c] done")
+    save(f"E10{variant}", dict(rows=rows, params=dict(n_scen=n_scen, K=K)))
+    print(f"[E10{variant}] done")
 
 
 if __name__ == "__main__":

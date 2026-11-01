@@ -82,6 +82,7 @@ def paired(E10, k1, k2, wind="plan"):
 
 TUBE_EPS = ["0.2", "0.1", "0.05", "0.01", "0.002", "0.001", "0.0001"]
 BUF_EPS = ["0.2", "0.1", "0.05", "0.01"]
+MIX_EPS = ["0.2", "0.05", "0.01", "0.001"]
 
 
 def _unified(E10):
@@ -91,10 +92,14 @@ def _unified(E10):
     except FileNotFoundError:
         return None
     c = {r["id"]: r for r in E10c["rows"]}
+    try:
+        dd = {r["id"]: r for r in L("E10d")["rows"]}
+    except FileNotFoundError:
+        dd = {}
     U = []
     for r in E10["rows"]:
         d = {}
-        for k, v in list(r.items()) + list(c.get(r["id"], {}).items()):
+        for k, v in list(r.items()) + list(c.get(r["id"], {}).items()) + list(dd.get(r["id"], {}).items()):
             if not isinstance(v, dict) or not v.get("feasible") or "_sv" in k:
                 continue
             key = "B0.05" if k == "B" else k
@@ -110,6 +115,8 @@ def frontier(E10):
     if U is None:
         return None
     keys = ["N"] + [f"R{e}" for e in TUBE_EPS] + [f"B{e}" for e in BUF_EPS]
+    if any(f"M{MIX_EPS[0]}" in d for d in U):
+        keys += [f"M{e}" for e in MIX_EPS]
     common = [d for d in U if all(k in d for k in keys)]          # 모든 방법이 실행 가능한 시나리오만
     out = dict(n_scen=len(common), methods={})
     for k in keys:
@@ -136,6 +143,16 @@ def frontier(E10):
         out["risk_matched"] = dict(tube=best, t3_tube=out["methods"][best]["t3"], t3_B=out["methods"]["B0.05"]["t3"],
                                    energy_diff_pct=boot_ci((x / y - 1) * 100),
                                    wilcoxon_p=float(stats.wilcoxon(x, y).pvalue), wins=int(np.sum(x < y)))
+    # 혼합 튜브 vs 고정 버퍼 (같은 ε 끼리 짝 비교: 에너지, 두 오차 모델의 위험)
+    if "M0.05" in keys:
+        mm = {}
+        for e in ("0.2", "0.05", "0.01"):
+            x = np.array([d[f"M{e}"][0] for d in common]); y = np.array([d[f"B{e}"][0] for d in common])
+            mm[e] = dict(energy_diff_pct=boot_ci((x / y - 1) * 100), wilcoxon_p=float(stats.wilcoxon(x, y).pvalue),
+                         wins=int(np.sum(x < y)), gauss_M=out["methods"][f"M{e}"]["gauss"],
+                         gauss_B=out["methods"][f"B{e}"]["gauss"], t3_M=out["methods"][f"M{e}"]["t3"],
+                         t3_B=out["methods"][f"B{e}"]["t3"])
+        out["mix_vs_B"] = mm
     return out
 
 
@@ -150,8 +167,11 @@ def fig_frontier(F):
     fig, axs = plt.subplots(1, 2, figsize=(11, 4.3), sharey=False)
     for ax, kind, title in ((axs[0], "gauss", "(a) 가우시안 오차 (계획 가정과 일치)"),
                             (axs[1], "t3", "(b) Student-t 오차, 자유도 3 (꼬리가 두꺼움)")):
-        for pre, eps_list, col, lab, mk in (("R", TUBE_EPS, "#1B6CA8", "시간 증가 튜브", "o"),
-                                             ("B", BUF_EPS, "#E07B39", "고정 버퍼 σ(1.3T)", "s")):
+        series = [("R", TUBE_EPS, "#1B6CA8", "시간 증가 튜브 (λ=0)", "o"),
+                  ("B", BUF_EPS, "#E07B39", "고정 버퍼 σ(1.3T) (λ=1)", "s")]
+        if "M0.05" in M:
+            series.append(("M", MIX_EPS, "#2CA58D", "혼합 튜브 (λ=0.5)", "^"))
+        for pre, eps_list, col, lab, mk in series:
             xs = [M[f"{pre}{e}"]["overhead"][0] for e in eps_list]
             ps = [M[f"{pre}{e}"][kind] for e in eps_list]
             ys = [p[0] * 100 for p in ps]

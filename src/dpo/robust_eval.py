@@ -64,6 +64,17 @@ def fixed_buffer(obs, horizon):
     return out
 
 
+def blend_buffer(obs, horizon, lam):
+    """혼합 튜브: σ_λ(τ) = (1−λ)·σ(τ) + λ·σ(T_h)  (λ=0 시간 증가 튜브, λ=1 고정 버퍼). 여전히 τ 에 선형 → 해석해 유지."""
+    out = []
+    for o in obs:
+        c = copy.deepcopy(o)
+        c.sigma0 = o.sigma0 + lam * o.sigma_v * max(horizon - o.t_obs, 0.0)
+        c.sigma_v = (1.0 - lam) * o.sigma_v
+        out.append(c)
+    return out
+
+
 # ------------------------------------------------------------------ 실제 궤적 샘플
 def sample_truth(rng, obs, K):
     """각 장애물의 실제 궤적 파라미터 K 세트 (e, δv, δt)."""
