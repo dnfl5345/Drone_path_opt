@@ -10,6 +10,14 @@ API
   POST /api/validate {obstacles} 유효성 검사 ("가능한 범위에서만 허용")
   POST /api/plan  {obstacles, hub, dst, dep_hour, payload, kind, round_trip, allow_wait, max_wait, wind, reserve}
   POST /api/replan {obstacles, t_now}   비행 중(t_now) 장애물 변경 발표 → 남은 경로 검사 → 충돌 시 재계획
+
+실시간 운용 (/live 화면, dpo.live.LiveEngine)
+  POST /api/live/start   {임무 설정, obstacles}     비행 시작 (시계·감시·재계획 스레드)
+  POST /api/live/control {action: pause|resume|stop, speed}
+  POST /api/live/obstacle {id?, obstacle} · POST /api/live/obstacle/delete {id}   비행 중 장애물 추가·수정·삭제
+  POST /api/live/intruder {lead, speed, radius, heading, seed}   실측 ADS-B 항적 침입기 투입
+  POST /api/live/report  {id, x, y, vx, vy | lat, lon, gs, track, radius}   외부 감시 보고(ADS-B 수신기·UTM 연동)
+  GET  /api/live/stream  SSE 실시간 상태 (10 Hz) · GET /api/live/state · GET /api/live/log
 """
 from __future__ import annotations
 
@@ -55,6 +63,10 @@ class App:
         self.planners = {}
         self.base_cache = {}
         self.basemap = self._render_basemap()
+        from ..live import LiveEngine
+        m = ADSB_FULL
+        self.live = LiveEngine(self.site, self.drone,
+                               None if m is None else dict(knots=m["knots"], q=m["model_all"]["q"], s1=m["model_all"]["s1"]))
         # JIT 예열
         t = time.time()
         self.plan(dict(obstacles=[], dep_hour=15, payload=0.5, kind="delivery", round_trip=False))
@@ -354,6 +366,14 @@ class App:
         return ObstacleTimeline(list(ss["revisions"])).truth()
 
 
+def _load_adsb_full():
+    f = C.RES / "adsb_error_model.json"
+    return json.loads(f.read_text()) if f.exists() else None
+
+
+ADSB_FULL = _load_adsb_full()
+
+
 def _load_adsb():
     from .. import config as C
     f = C.RES / "adsb_error_model.json"
@@ -438,6 +458,24 @@ def make_handler(app):
                 return self._send(200, (STATIC / "index.html").read_bytes(), "text/html; charset=utf-8")
             if path == "/app.js":
                 return self._send(200, (STATIC / "app.js").read_bytes(), "text/javascript; charset=utf-8")
+            if path in ("/live", "/live.html"):
+                return self._send(200, (STATIC / "live.html").read_bytes(), "text/html; charset=utf-8")
+            if path == "/live.js":
+                return self._send(200, (STATIC / "live.js").read_bytes(), "text/javascript; charset=utf-8")
+            if path == "/api/live/state":
+                q = dict(x.split("=") for x in self.path.split("?")[1].split("&")) if "?" in self.path else {}
+                return self._send(200, app.live.snapshot(int(q.get("since", 0)), int(q.get("plan_ver", -1))))
+            if path == "/api/live/log":
+                body = json.dumps(_jsonable(app.live.log() if app.live.state != "idle" else {}), ensure_ascii=False)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Disposition", 'attachment; filename="live_log.json"')
+                self.send_header("Content-Length", str(len(body.encode())))
+                self.end_headers()
+                self.wfile.write(body.encode())
+                return
+            if path == "/api/live/stream":
+                return self._stream()
             if path == "/basemap.png":
                 return self._send(200, app.basemap, "image/png")
             if path == "/api/site":
@@ -446,6 +484,31 @@ def make_handler(app):
                 p = C.ROOT / "scenarios" / "e8_dynamic.json"
                 return self._send(200, json.loads(p.read_text(encoding="utf-8")) if p.exists() else dict(obstacles=[]))
             self._send(404, dict(error="not found"))
+
+        def _stream(self):
+            """Server-Sent Events: 0.1 s 마다 상태 프레임 (새 이벤트만, 계획은 바뀔 때만)."""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+            since, pv, sess = 0, -1, None
+            try:
+                while True:
+                    snap = app.live.snapshot(since, pv)
+                    if snap.get("session") != sess:          # 새 임무 → 처음부터
+                        sess = snap.get("session")
+                        since, pv = 0, -1
+                        snap = app.live.snapshot(since, pv)
+                    if snap.get("events"):
+                        since = snap["events"][-1]["id"] + 1
+                    pv = snap.get("plan_ver", pv)
+                    data = json.dumps(_jsonable(snap), ensure_ascii=False)
+                    self.wfile.write(f"data: {data}\n\n".encode("utf-8"))
+                    self.wfile.flush()
+                    time.sleep(0.1)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                return
 
         def do_POST(self):
             try:
@@ -458,6 +521,23 @@ def make_handler(app):
                     return self._send(200, app.plan(req))
                 if self.path == "/api/replan":
                     return self._send(200, app.replan(req))
+                if self.path == "/api/live/start":
+                    obs = req.pop("obstacles", [])
+                    for k in ("hub", "dst"):
+                        if req.get(k) is not None:
+                            req[k] = app._valid_point(req[k], k)
+                    return self._send(200, app.live.start(req, obs))
+                if self.path == "/api/live/control":
+                    return self._send(200, app.live.control(req))
+                if self.path == "/api/live/obstacle":
+                    return self._send(200, dict(id=app.live.upsert_obstacle(req["obstacle"], req.get("id"))))
+                if self.path == "/api/live/obstacle/delete":
+                    app.live.delete_obstacle(req["id"])
+                    return self._send(200, dict(ok=True))
+                if self.path == "/api/live/intruder":
+                    return self._send(200, dict(id=app.live.inject_intruder(req)))
+                if self.path == "/api/live/report":
+                    return self._send(200, dict(id=app.live.report(req)))
                 self._send(404, dict(error="not found"))
             except ValueError as ex:
                 self._send(400, dict(error=str(ex)))
@@ -475,6 +555,8 @@ def main(argv=None):
     a = ap.parse_args(argv)
     app = App()
     srv = ThreadingHTTPServer((a.host, a.port), make_handler(app))
+    srv.daemon_threads = True
+    print(f"[platform] 실시간 운용: http://{a.host}:{a.port}/live")
     print(f"[platform] http://{a.host}:{a.port}  (Ctrl+C 종료)")
     try:
         srv.serve_forever()

@@ -30,7 +30,7 @@ INF = 1e30
 
 
 # ---------------------------------------------------------------- 공통 유틸
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def _wind(U, V, tax, t, k, j, i):
     nt = tax.shape[0]
     if nt == 1 or t <= tax[0]:
@@ -44,7 +44,7 @@ def _wind(U, V, tax, t, k, j, i):
     return (1 - w) * U[a, k, j, i] + w * U[a + 1, k, j, i], (1 - w) * V[a, k, j, i] + w * V[a + 1, k, j, i]
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def seg_eval(k0, j0, i0, k1, j1, i1, t0, mode, check, free, tid, twin, U, V, tax, rho,
              m, prm, va_max, vz_up, vz_dn, speeds, dx, dz, vconst):
     """직선 구간 비용 평가.
@@ -91,7 +91,7 @@ def seg_eval(k0, j0, i0, k1, j1, i1, t0, mode, check, free, tid, twin, U, V, tax
     return e, t - t0, 0, -1
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def _edge(k0, j0, i0, k1, j1, i1, t0, mode, allow_wait, free, tid, twin, U, V, tax, rho, m, prm, va_max, vz_up,
           vz_dn, speeds, dx, dz, vconst):
     """격자 이웃 간 이동 비용. 시간제 금지구역에 막히면 (허용 시) 출발 노드에서 호버링 대기 후 통과.
@@ -114,7 +114,7 @@ def _edge(k0, j0, i0, k1, j1, i1, t0, mode, allow_wait, free, tid, twin, U, V, t
     return INF, 0.0, 0.0, False
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def _search(start, goal, t_start, mode, free, tid, twin, U, V, tax, rho, m, prm, va_max, vz_up, vz_dn,
             speeds, dx, dz, vconst, e_lb, max_seg, allow_wait, any_angle, weight):
     nz, ny, nx = free.shape

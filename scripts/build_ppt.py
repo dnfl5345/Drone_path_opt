@@ -26,6 +26,8 @@ S = json.loads((ROOT / "results" / "summary.json").read_text())
 _RS = ROOT / "results" / "robust_stats.json"
 RS = json.loads(_RS.read_text()) if _RS.exists() else None
 _AD, _E11 = ROOT / "results" / "adsb_error_model.json", ROOT / "results" / "e11_stats.json"
+_LB = ROOT / "results" / "live_bench.json"
+LB = json.loads(_LB.read_text())["aggregate"] if _LB.exists() else None
 AD = json.loads(_AD.read_text()) if _AD.exists() else None
 E11 = json.loads(_E11.read_text()) if _E11.exists() else None
 
@@ -784,6 +786,33 @@ def build(template, out):
         notes(s, "같은 조우끼리 짝지은 McNemar·Wilcoxon 검정. 완화(fallback): 현재 위치가 팽창 영역 안이면 ε=0.2 → 팽창 없음 순으로 재계획. "
                  "상세: docs/robust_uncertainty.md §8, docs/paper/manuscript_en.md §6.6–6.7.")
 
+    # 15-11. 실시간 운용 플랫폼 ------------------------------------------------------------
+    if LB is not None and (FIG / "live_platform_flight.png").exists():
+        RED = RGBColor(0xD7, 0x26, 0x3D)
+        s = D.content("실시간 운용 플랫폼 – 비행 중 감시·충돌 검사·재계획")
+        picture(s, FIG / "live_platform_flight.png", 0.4, 1.0, 7.9, 5.8)
+        sp = box(s, 8.5, 1.05, 4.25, 5.85, fill=LIGHT, shadow=False)
+        box_text(sp, [[("구조 (스레드)", {"color": TITLE, "size": 13})],
+                      [("① 시계 20 Hz: 배속 비행·단계 전환·경로 교체\n② 감시: 예측+튜브 → 남은 경로 검사\n"
+                        "③ 재계획: 교체 시각 = 지연+1.5×계산×배속\n④ 개선: 정밀 탐색으로 더 싸면 교체", {"size": 10.5})],
+                      [("", {"size": 4})],
+                      [("안전 장치", {"color": TITLE, "size": 13})],
+                      [("완화 단계(ε→0.2→없음) · 비상 정지(호버) · 지상 출발 대기 · 예비 SOC/연속 실패 시 비상 착륙",
+                        {"size": 10.5})],
+                      [("", {"size": 4})],
+                      [("비행 중 입력", {"color": TITLE, "size": 13})],
+                      [("장애물 추가·삭제(지도 클릭), 실측 ADS-B 침입기, 외부 감시 보고 REST", {"size": 10.5})],
+                      [("", {"size": 4})],
+                      [(f"벤치 (×{LB['speed']:g} 왕복 {LB['runs']}회, 침입기+경로 위 장애물+외부 보고)", {"color": TITLE, "size": 13})],
+                      [(f"· 완주 {LB['completed']}/{LB['runs']}, 침범 {LB['collisions']}, 최소 이격 {LB['min_sep']:.0f} m",
+                        {"size": 10.5, "color": ORANGE})],
+                      [(f"· 검사 {LB['check_ms_median']:.1f} ms · 재계획 {LB['replan_cpu_median']:.1f} s (최대 {LB['replan_cpu_max']:.1f})",
+                        {"size": 10.5})],
+                      [(f"· 시계 주기 p95 {LB['tick_ms_p95']:.0f} ms (목표 50) · 화면 SSE 10 Hz", {"size": 10.5})]],
+                 anchor=MSO_ANCHOR.TOP)
+        notes(s, "실행: python -m dpo.webapp → http://localhost:8765/live. numba nogil 로 계산 중에도 시계가 멈추지 않음. "
+                 "상세: docs/live_platform.md, 시험: tests/test_live.py, scripts/bench_live.py.")
+
     # 16. 결론 ---------------------------------------------------------------
     s = D.content("결론 및 추후 개발할 내용")
     textbox(s, 0.8, 1.1, 7.4, 3.1, [
@@ -797,21 +826,22 @@ def build(template, out):
         [(" ○ 최신 연구 대비: 속도 최적화·에너지 지름길·고도 선택이 핵심 기여", {})],
         [(" ○ 3D 시공간: 동적 장애물 회피, 변경 시 이벤트 기반 재계획, 편집 플랫폼", {})],
         [(" ○ 불확실성 튜브: 고정 버퍼 대비 4.9% 절감 (가우시안 오차 한정)", {})],
-        [(" ○ 실측 ADS-B: 꼬리 9.1σ·성장 τ^1.5 → 데이터 팽창 모양으로 보정 회복", {})]], size=13.5,
+        [(" ○ 실측 ADS-B: 꼬리 9.1σ·성장 τ^1.5 → 데이터 팽창 모양으로 보정 회복", {})],
+        [(" ○ 실시간 운용 플랫폼: 비행 중 감시·재계획, 10배속 5/5 무침범 완주", {})]], size=13,
         space_after=8)
-    textbox(s, 0.8, 4.35, 7.4, 2.5, [
+    textbox(s, 0.8, 4.6, 7.4, 2.3, [
         [("□ 향후 계획", {"size": 18, "color": INK})],
         [(" ○ 기상청 LDAPS(1.5 km)·윈드프로파일러 연동, 도심 CFD 바람장", {})],
         [(" ○ WA-LPA*[5]식 증분 재계획 결합으로 재계획 시간 단축", {})],
         [(" ○ 보유 기체 비행 로그로 계수 재보정, 계획 vs 실측 SOC 비교", {})],
         [(" ○ 감시 주기·탐지 시각·반응 시간 하한 공동 설계, 드론 원격식별 항적 검증 → 논문 투고", {})],
-        [(" ○ 다중 배송지(VRP) 결합, UTM 비행승인·관제권 반영", {})]], size=14,
+        [(" ○ 다중 배송지(VRP) 결합, UTM 비행승인·관제권 반영", {})]], size=13,
         space_after=8)
     picture(s, FIG / "F10_3d_paths.png", 8.4, 1.15, 4.3, 3.2)
     textbox(s, 8.4, 4.35, 4.3, 0.35, [[("3D 경로 (지형·건물 위)", {"size": 12, "color": GRAY})]], align=PP_ALIGN.CENTER)
     sp = box(s, 8.4, 4.8, 4.3, 1.35, fill=LIGHT, shadow=False)
     box_text(sp, [[("코드·재현", {"color": TITLE, "size": 14})],
-                  [("src/dpo: 데이터·에너지·바람장·탐색기\nscripts/run_experiments.py → make_figures.py\ntests/: 단위 테스트 17종 · 플랫폼: python -m dpo.webapp\ndocs/: 정식화 비교 · 8방향 확장 · 시공간 확장",
+                  [("src/dpo: 데이터·에너지·바람장·탐색기\nscripts/run_experiments.py → make_figures.py\ntests/: 단위 테스트 22종 · 플랫폼: python -m dpo.webapp\ndocs/: 정식화 비교 · 8방향 확장 · 시공간 확장",
                     {"size": 11, "color": INK})]], anchor=MSO_ANCHOR.TOP)
     notes(s, "실제 운용 시 판교 일대는 서울공항 관제권으로 비행승인 필요. 비행금지구역 원은 예시(가상).")
 

@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>드론 실시간 운용</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --teal:#1B6E8C; --navy:#004E8F; --title:#376092; --ink:#16202A; --gray:#4C5A66; --light:#E3EEF3;
+          --orange:#E46C0A; --blue:#1B6CA8; --red:#D7263D; --green:#2CA58D; --purple:#7A3E9D; --bg:#FFFFFF; --page:#F6F8FA; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: "Malgun Gothic","맑은 고딕","NanumGothic",Arial,sans-serif; color:var(--ink); background:var(--page); }
+  header { background:var(--bg); padding:9px 18px; border-left:6px solid var(--navy); display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  header h1 { margin:0; font-size:19px; color:var(--title); }
+  header a { font-size:12px; color:var(--teal); }
+  #conn { font-size:12px; padding:2px 8px; border-radius:10px; background:#eee; color:var(--gray); }
+  #conn.on { background:#DDF3EC; color:#1E7A63; }
+  main { display:grid; grid-template-columns: minmax(480px, 1fr) 470px; gap:12px; padding:12px; }
+  @media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+  .card { background:var(--bg); border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.08); padding:10px 12px; margin-bottom:10px; }
+  .card h2 { font-size:14px; margin:0 0 8px; color:var(--teal); }
+  #mapwrap { position:relative; }
+  canvas#map { width:100%; height:auto; border-radius:6px; display:block; background:#ddd; cursor:crosshair; }
+  #banner { position:absolute; top:10px; left:50%; transform:translateX(-50%); padding:6px 14px; border-radius:6px;
+            background:var(--red); color:#fff; font-weight:bold; font-size:14px; display:none; box-shadow:0 2px 8px rgba(0,0,0,.25); }
+  #modehint { position:absolute; bottom:10px; left:10px; padding:4px 10px; border-radius:5px; background:rgba(22,32,42,.8);
+              color:#fff; font-size:12px; display:none; }
+  .row { display:flex; gap:8px; align-items:center; margin:4px 0; flex-wrap:wrap; }
+  .row label { font-size:12px; color:var(--gray); min-width:64px; }
+  input[type=number], select { font-size:12px; padding:3px 5px; border:1px solid #C9D3DB; border-radius:4px; width:72px; }
+  .inputs input[type=number] { width:54px; }
+  select { width:auto; }
+  button { font-size:12px; padding:5px 10px; border:1px solid var(--teal); background:#fff; color:var(--teal); border-radius:5px; cursor:pointer; }
+  button.primary { background:var(--teal); color:#fff; }
+  button.warn { border-color:var(--red); color:var(--red); }
+  button.active { background:var(--orange); border-color:var(--orange); color:#fff; }
+  button:disabled { opacity:.45; cursor:default; }
+  .gauges { display:grid; grid-template-columns: repeat(3, 1fr); gap:8px; }
+  .g { background:var(--light); border-radius:6px; padding:6px 8px; }
+  .g .k { font-size:11px; color:var(--gray); }
+  .g .v { font-size:19px; font-weight:bold; color:var(--ink); font-variant-numeric: tabular-nums; }
+  .g .v small { font-size:11px; font-weight:normal; color:var(--gray); }
+  #socbar { height:12px; background:#e6e9ec; border-radius:6px; position:relative; overflow:hidden; margin-top:4px; }
+  #socfill { height:100%; background:var(--green); width:100%; }
+  #socres { position:absolute; top:0; bottom:0; width:2px; background:var(--red); }
+  #events { list-style:none; margin:0; padding:0; max-height:260px; overflow:auto; font-size:12px; }
+  #events li { padding:3px 4px; border-bottom:1px solid #f0f0f0; display:flex; gap:6px; }
+  #events li .t { color:var(--gray); min-width:52px; font-variant-numeric: tabular-nums; }
+  #events li.replan .m { color:var(--blue); } #events li.refine .m { color:var(--green); }
+  #events li.alert .m { color:var(--red); font-weight:bold; } #events li.warn .m { color:var(--orange); }
+  #events li.intruder .m, #events li.obstacle .m { color:var(--purple); }
+  .hint { font-size:11px; color:var(--gray); }
+  .legend span { display:inline-block; margin-right:10px; font-size:11px; }
+  .sw { display:inline-block; width:14px; height:4px; vertical-align:middle; margin-right:3px; }
+  canvas#chart { width:100%; height:120px; display:block; }
+</style>
+</head>
+<body>
+<header><h1>드론 실시간 운용 – 감시·충돌 검사·재계획</h1>
+  <span id="conn">연결 중…</span><span id="clock" style="font-size:13px;color:var(--gray)"></span>
+  <a href="/">← 계획·장애물 편집 화면</a></header>
+<main>
+  <section>
+    <div class="card">
+      <div id="mapwrap"><canvas id="map" width="760" height="680"></canvas><div id="banner"></div><div id="modehint"></div></div>
+      <div class="legend" style="margin-top:6px">
+        <span><i class="sw" style="background:#1B6CA8"></i>현재 계획</span>
+        <span><i class="sw" style="background:#E46C0A"></i>교체 예약 경로</span>
+        <span><i class="sw" style="background:#16202A"></i>비행 궤적</span>
+        <span><i class="sw" style="background:#D7263D"></i>침입기(실제)</span>
+        <span><i class="sw" style="background:rgba(215,38,61,.25)"></i>예측 + 불확실성 튜브</span>
+        <span><i class="sw" style="background:#7A3E9D"></i>사용자 장애물</span>
+      </div>
+    </div>
+    <div class="card"><h2>SOC · 이격 (시간)</h2><canvas id="chart" width="760" height="120"></canvas></div>
+  </section>
+  <section>
+    <div class="card">
+      <h2>임무 설정</h2>
+      <div class="row"><label>출발 시각</label><select id="dep"></select>
+        <label style="min-width:0">탑재</label><input type="number" id="payload" value="0.5" min="0" max="0.75" step="0.05"> kg</div>
+      <div class="row"><label>임무</label><select id="kind"><option value="delivery">배송 (갈 때 적재)</option><option value="pickup">회수 (올 때 적재)</option></select>
+        <label style="min-width:0"><input type="checkbox" id="round" checked> 왕복</label></div>
+      <div class="row"><label>위험 한도</label><select id="eps"><option value="">무시 (팽창 없음)</option><option value="0.2">ε = 0.2</option><option value="0.05" selected>ε = 0.05</option><option value="0.01">ε = 0.01</option></select>
+        <select id="shape"><option value="adsb">실측 ADS-B 분위수</option><option value="gauss">가우시안 (선형)</option></select></div>
+      <div class="row"><label>감시 주기</label><select id="period"><option value="1">1 s</option><option value="2" selected>2 s</option><option value="5">5 s</option></select>
+        <label style="min-width:0">재계획 지연</label><input type="number" id="latency" value="3" min="0" max="20" step="1"> s
+        <label style="min-width:0"><input type="checkbox" id="refine" checked> 백그라운드 개선</label></div>
+      <div class="row"><label>배속</label><select id="speed"><option>1</option><option>2</option><option selected>5</option><option>10</option><option>20</option></select>
+        <button id="start" class="primary">▶ 비행 시작</button><button id="pause" disabled>일시정지</button><button id="stop" class="warn" disabled>정지</button></div>
+    </div>
+    <div class="card">
+      <h2>실시간 상태 <span id="phase" style="color:var(--orange)"></span></h2>
+      <div class="gauges">
+        <div class="g"><div class="k">비행 시각</div><div class="v" id="g_t">–</div></div>
+        <div class="g"><div class="k">SOC (예비 <span id="g_res">20</span>%)</div><div class="v" id="g_soc">–</div>
+          <div id="socbar"><div id="socfill"></div><div id="socres"></div></div></div>
+        <div class="g"><div class="k">사용 에너지</div><div class="v" id="g_e">–</div></div>
+        <div class="g"><div class="k">현재 최근접 이격</div><div class="v" id="g_sep">–</div></div>
+        <div class="g"><div class="k">최소 이격 (누적)</div><div class="v" id="g_min">–</div></div>
+        <div class="g"><div class="k">경보 / 침범</div><div class="v" id="g_al">–</div></div>
+        <div class="g"><div class="k">재계획 / 개선</div><div class="v" id="g_rp">–</div></div>
+        <div class="g"><div class="k">마지막 계산</div><div class="v" id="g_cpu">–</div></div>
+        <div class="g"><div class="k">검사 (중앙값)</div><div class="v" id="g_chk">–</div></div>
+      </div>
+      <div class="hint" id="g_state" style="margin-top:6px"></div>
+    </div>
+    <div class="card inputs">
+      <h2>비행 중 입력</h2>
+      <div class="row"><button id="inject" class="primary" disabled>✈ 실측 ADS-B 침입기 투입</button></div>
+      <div class="row"><label>침입기</label>속도 <input type="number" id="i_speed" value="20" min="5" max="60" step="1"> m/s ·
+        반경 <input type="number" id="i_r" value="80" min="20" max="300" step="10"> m ·
+        <input type="number" id="i_lead" value="25" min="8" max="90" step="1"> s 뒤 드론 예정 위치로</div>
+      <div class="row"><button id="addobs" disabled>＋ 정지 장애물 (지도 클릭)</button>
+        <button id="addmov" disabled>＋ 이동 장애물 (시작→끝 클릭)</button></div>
+      <div class="row"><label>장애물</label>반경 <input type="number" id="o_r" value="120" min="20" max="800" step="10"> m ·
+        속도 <input type="number" id="o_v" value="15" min="1" max="60" step="1"> m/s (이동 장애물)</div>
+      <div class="hint">장애물을 클릭하면 삭제합니다. 외부 감시 보고: <code>POST /api/live/report {id, x, y, vx, vy}</code> 또는 <code>{id, lat, lon, gs, track}</code></div>
+    </div>
+    <div class="card">
+      <h2 style="display:flex;justify-content:space-between">이벤트 <a href="/api/live/log" style="font-size:12px;font-weight:normal">로그 내려받기 (JSON)</a></h2>
+      <ul id="events"></ul>
+    </div>
+  </section>
+</main>
+<script src="/live.js"></script>
+</body>
+</html>

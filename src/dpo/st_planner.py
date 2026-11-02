@@ -28,7 +28,7 @@ INF = 1e30
 
 
 # ------------------------------------------------------------------ 안전구간 조회
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def _unsafe(n, t, off, cnt, lo, hi):
     o = off[n]
     if o < 0:
@@ -39,7 +39,7 @@ def _unsafe(n, t, off, cnt, lo, hi):
     return False
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def _iv_index(n, t, off, cnt, lo, hi):
     """시각 t 가 속한 안전구간 번호 (위험구간 안이면 -1)."""
     o = off[n]
@@ -54,7 +54,7 @@ def _iv_index(n, t, off, cnt, lo, hi):
     return idx
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def _iv_bounds(n, idx, off, cnt, lo, hi):
     o = off[n]
     if o < 0:
@@ -65,7 +65,7 @@ def _iv_bounds(n, idx, off, cnt, lo, hi):
 
 
 # ------------------------------------------------------------------ 시공간 구간 평가
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def seg_st(k0, j0, i0, k1, j1, i1, t0, free, off, cnt, lo, hi, U, V, tax, rho, m, prm, va_max, vz_up, vz_dn,
            speeds, dx, dz, mode, vconst):
     """직선 구간을 시각과 함께 샘플링: 정적 충돌(1), 동적 충돌(2), 비행불가(3), 통과(0).
@@ -104,7 +104,7 @@ def seg_st(k0, j0, i0, k1, j1, i1, t0, free, off, cnt, lo, hi, U, V, tax, rho, m
     return e, t - t0, 0
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def _hover_power(U, V, tax, t, k, j, i, m, rho, prm, mode):
     if mode == 0:
         return 1.0
@@ -113,7 +113,7 @@ def _hover_power(U, V, tax, t, k, j, i, m, rho, prm, mode):
 
 
 # ------------------------------------------------------------------ 휴리스틱
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def _heur(di, dj, dk, dx, dz, e_lb, Htab):
     """방위 의존 하한: 목표 방향 φ 로 1 m 전진하는 데 드는 최소 에너지 H(φ) × 수평거리.
     H(φ) = min_θ e_min(θ) / cos(θ − φ)  (cos>0) – 바람장 전체의 방위별 최소 에너지로 구성 → (근사)허용적."""
@@ -128,7 +128,7 @@ def _heur(di, dj, dk, dx, dz, e_lb, Htab):
 
 
 # ------------------------------------------------------------------ 탐색
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def _search_st(start, goal, t_start, free, off, cnt, lo, hi, maxi, U, V, tax, rho, m, prm, va_max, vz_up, vz_dn,
                speeds, dx, dz, mode, vconst, e_lb, budget, max_wait, wait_step, any_angle, max_seg, Htab, weight):
     nz, ny, nx = free.shape
@@ -248,7 +248,7 @@ def _search_st(start, goal, t_start, free, off, cnt, lo, hi, maxi, U, V, tax, rh
     return g, tt, par, wait, goal_state, n_exp
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def _emin_table(w, th, m, rho, prm, va_max, vz_up, vz_dn, speeds):
     out = np.full(th.shape[0], INF)
     for q in range(th.shape[0]):
@@ -294,8 +294,9 @@ class STPlanner:
         """방위별 최소 미터당 에너지 e_min(θ) (바람장 표본 전체 최소) → H(φ) 표.
         표본(수평 stride 셀, 전 레이어·전 시각)의 최소에 안전계수를 곱해 근사 허용성 확보."""
         key = (round(m, 3), n_head, stride)
-        if getattr(self, "_htab", None) is not None and self._htab[0] == key:
-            return self._htab[1]
+        cache = self.__dict__.setdefault("_htabs", {})          # 질량별 캐시 (왕복 구간 질량이 번갈아 쓰임)
+        if key in cache:
+            return cache[key]
         from .layered import _build_slope_lut  # noqa: F401  (numba 예열 공유)
         s = self.site
         U = s.U[:, :, ::stride, ::stride]; V = s.V[:, :, ::stride, ::stride]
@@ -312,7 +313,7 @@ class STPlanner:
             ok = c > 1e-3
             H[q] = np.min(emin[ok] / c[ok])
         H *= safety
-        self._htab = (key, H)
+        cache[key] = H
         return H
 
     def plan(self, start, goal, t_start=0.0, mass=None, mode=1, budget=np.inf, max_wait=180.0, wait_step=3.0,

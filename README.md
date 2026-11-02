@@ -3,12 +3,29 @@
 바람·지형·탑재중량을 반영해 **도착 SOC(배터리 잔량)를 최대화**하는 드론 물류 경로계획 알고리즘입니다.
 지난 회의에서 선정한 최단 경로 알고리즘(Lazy Theta*)을 3D 시공간 에너지 탐색기 **WE-LT\* (Wind-aware Energy Lazy Theta\*)**로 확장했습니다.
 
-- 회의 보고 자료: [`docs/drone_soc_path_planning_dev.pptx`](docs/drone_soc_path_planning_dev.pptx) (기존 회의자료와 같은 포맷, 30장)
+- 회의 보고 자료: [`docs/drone_soc_path_planning_dev.pptx`](docs/drone_soc_path_planning_dev.pptx) (기존 회의자료와 같은 포맷, 31장)
 - 최신 연구 대비 정식화 비교: [`docs/algorithm_comparison.md`](docs/algorithm_comparison.md) (문제 (P) 정의, 문헌별 정식화, 가정 축소 실험)
 - 확장안 (8방향 탐색 + 고도별 균일·선형 바람, LUT): [`docs/extension_8way_linear_wind.md`](docs/extension_8way_linear_wind.md)
 - 3D 시공간 확장 (동적 장애물) + 장애물 편집 플랫폼 + 장애물 변경 시 이벤트 기반 재계획: [`docs/spatiotemporal_dynamic_obstacles.md`](docs/spatiotemporal_dynamic_obstacles.md)
 - 장애물 궤적 불확실성 → 위험 한도(ε) 강건 계획 + 몬테카를로 검증: [`docs/robust_uncertainty.md`](docs/robust_uncertainty.md)
 - **논문 자료**: 영문 원고 초안 [`docs/paper/manuscript_en.md`](docs/paper/manuscript_en.md), 참고문헌 [`docs/paper/references.bib`](docs/paper/references.bib), 논문화 가이드(학술적 의미·투고처·남은 작업) [`docs/paper/논문화_가이드.md`](docs/paper/논문화_가이드.md)
+
+## 실시간 운용 플랫폼 (`/live`)
+
+```bash
+PYTHONPATH=src python -m dpo.webapp        # 브라우저에서 http://localhost:8765/live
+```
+
+드론이 시계에 맞춰 비행하는 동안(1~30배속) 감시·충돌 검사·재계획을 계속 수행합니다. 계산은 백그라운드에서 돌고 비행은 멈추지 않습니다.
+- **비행 중 입력:** 정지·이동 장애물 추가·삭제(지도 클릭), 실측 ADS-B 침입기 투입, 외부 감시 보고 REST(`POST /api/live/report`)
+- **안전 장치:** 불확실성 튜브(실측 분위수·가우시안), 완화 단계, 비상 정지(호버), 지상 출발 대기, 배터리 예비 도달·연속 실패 시 비상 착륙
+- **효율:** 즉시 계획 후 백그라운드 개선(anytime)
+- **화면:** SSE 10 Hz 상태 화면, 이벤트 타임라인, 로그(JSON) 내려받기
+- **벤치(10배속 왕복 5회, 침입기·경로 위 장애물·외부 보고 동시 투입):**
+  - 완주 5/5, 침범 0
+  - 감시 검사 6.9 ms, 재계획 0.8 s(최대 1.6 s)
+  - 시계 주기 p95 63 ms
+- 상세: [`docs/live_platform.md`](docs/live_platform.md)
 
 ## 장애물 편집·경로계획 플랫폼
 
@@ -71,6 +88,7 @@ E11_METHODS="QF0.05,QF0.01" E11_OUT=E11b PYTHONPATH=src python scripts/run_e11.p
 PYTHONPATH=src python scripts/analyze_e11.py               # 통계·그림 F21
 PYTHONPATH=src python scripts/make_figures.py && PYTHONPATH=src python scripts/make_figures.py gif
 PYTHONPATH=src python scripts/build_ppt.py <회의자료 템플릿.pptx> docs/drone_soc_path_planning_dev.pptx
+PYTHONPATH=src python scripts/bench_live.py 5 10              # 실시간 엔진 벤치 (약 6분)
 PYTHONPATH=src python -m pytest -q tests
 ```
 
