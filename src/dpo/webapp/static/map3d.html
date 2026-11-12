@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>3D 지도 경로 생성 – 드론 SOC 최적 경로계획</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --teal:#1B6E8C; --navy:#004E8F; --title:#376092; --ink:#16202A; --gray:#4C5A66; --light:#E3EEF3;
+          --orange:#E46C0A; --blue:#1B6CA8; --red:#D7263D; --bg:#FFFFFF; }
+  * { box-sizing: border-box; }
+  html, body { height:100%; }
+  body { margin:0; font-family:"Malgun Gothic","맑은 고딕","NanumGothic",Arial,sans-serif; color:var(--ink); background:#F6F8FA;
+         display:flex; flex-direction:column; }
+  header { background:var(--bg); padding:10px 18px; border-left:6px solid var(--navy); display:flex; align-items:baseline; gap:14px; flex:none; }
+  header h1 { margin:0; font-size:20px; color:var(--title); }
+  header span { color:var(--gray); font-size:13px; }
+  header a { font-size:13px; color:var(--teal); text-decoration:none; margin-left:auto; }
+  header a + a { margin-left:0; }
+  main { flex:1; min-height:0; display:grid; grid-template-columns:minmax(480px, 1fr) 400px; gap:12px; padding:12px; }
+  #left { display:flex; flex-direction:column; gap:10px; min-height:0; }
+  #view { position:relative; flex:1; min-height:320px; border-radius:8px; overflow:hidden; background:#DCE6EE; box-shadow:0 1px 3px rgba(0,0,0,.08); }
+  #view canvas { display:block; width:100%; height:100%; }
+  #layers { position:absolute; left:10px; top:10px; background:rgba(255,255,255,.92); border-radius:6px; padding:8px 10px; font-size:12px;
+            box-shadow:0 1px 3px rgba(0,0,0,.15); display:flex; flex-direction:column; gap:3px; }
+  #layers b { color:var(--teal); font-size:12px; }
+  #layers label { display:flex; gap:5px; align-items:center; cursor:pointer; }
+  #hud { position:absolute; right:10px; top:10px; background:rgba(22,32,42,.82); color:#fff; border-radius:6px; padding:7px 10px; font-size:12px;
+         line-height:1.5; min-width:170px; display:none; }
+  #hud b { color:#FFC48A; }
+  #hint { position:absolute; left:50%; bottom:10px; transform:translateX(-50%); background:rgba(22,32,42,.78); color:#fff; font-size:12px;
+          padding:5px 12px; border-radius:14px; pointer-events:none; white-space:nowrap; }
+  #webglerr { position:absolute; inset:0; display:none; align-items:center; justify-content:center; padding:30px; text-align:center; font-size:14px; color:var(--red); }
+  #bottom { flex:none; background:var(--bg); border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.08); padding:8px 12px; }
+  #bottom .row { margin:2px 0 6px; }
+  #profile { width:100%; height:170px; display:block; }
+  aside { overflow:auto; min-height:0; }
+  .card { background:var(--bg); border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.08); padding:10px 12px; margin-bottom:10px; }
+  .card h2 { font-size:14px; margin:0 0 8px; color:var(--teal); }
+  .row { display:flex; gap:8px; align-items:center; margin:5px 0; flex-wrap:wrap; }
+  .row label { font-size:12px; color:var(--gray); min-width:72px; }
+  .row label.inl { min-width:0; display:flex; gap:4px; align-items:center; }
+  input[type=number], select { font-size:12px; padding:3px 5px; border:1px solid #C9D3DB; border-radius:4px; width:86px; }
+  select { width:auto; max-width:250px; }
+  input[type=range] { flex:1; min-width:120px; }
+  button { font-size:12px; padding:6px 10px; border:1px solid var(--teal); background:#fff; color:var(--teal); border-radius:5px; cursor:pointer; }
+  button.primary { background:var(--teal); color:#fff; }
+  button.active { background:var(--orange); border-color:var(--orange); color:#fff; }
+  button:disabled { opacity:.45; cursor:default; }
+  #status { font-size:12px; color:var(--gray); min-height:16px; }
+  #errors { font-size:12px; color:var(--red); }
+  table.res { font-size:12px; border-collapse:collapse; width:100%; }
+  table.res th { background:var(--teal); color:#fff; padding:3px; font-weight:normal; }
+  table.res td { border-bottom:1px solid #eee; padding:3px; text-align:center; }
+  .big { font-size:22px; font-weight:bold; color:var(--navy); }
+  .ok { color:#1E8E5A; font-weight:bold; } .bad { color:var(--red); font-weight:bold; }
+  .hint { font-size:11px; color:var(--gray); line-height:1.5; }
+  .kv { font-size:12px; display:grid; grid-template-columns:auto 1fr; gap:2px 10px; }
+  .kv span:nth-child(odd) { color:var(--gray); }
+  .warnbox { font-size:11.5px; background:#FFF4E8; border:1px solid #F2C79A; border-radius:5px; padding:6px 8px; line-height:1.5; }
+  @media (max-width: 900px) { main { grid-template-columns:1fr; } aside { overflow:visible; } body { height:auto; } #view { min-height:420px; } }
+</style>
+<script type="importmap">{ "imports": { "three": "/vendor/three.module.min.js" } }</script>
+</head>
+<body>
+<header>
+  <h1>3D 지도 경로 생성</h1>
+  <span id="sub">지형·건물·바람 위에서 SOC 최소 경로를 만들고 ArduPilot 미션으로 내보냅니다</span>
+  <a href="/">2D 장애물 편집</a><a href="/live">실시간 운용</a>
+</header>
+<main>
+  <div id="left">
+    <div id="view">
+      <div id="layers">
+        <b>표시</b>
+        <label><input type="checkbox" id="l_bld" checked> 건물</label>
+        <label><input type="checkbox" id="l_nfz" checked> 비행금지구역</label>
+        <label><input type="checkbox" id="l_floor"> 비행 가능 하한면</label>
+        <label><input type="checkbox" id="l_wind"> 바람 벡터</label>
+        <label><input type="checkbox" id="l_base" checked> 장애물 무시 경로</label>
+        <label><input type="checkbox" id="l_obs" checked> 이동 장애물</label>
+        <label>높이 과장 <select id="zs"><option value="1">1배</option><option value="2" selected>2배</option><option value="3">3배</option></select></label>
+        <label>바람 고도 <select id="wk"></select></label>
+        <button id="fit" style="margin-top:3px;padding:3px 8px">경로에 맞춰 보기</button>
+      </div>
+      <div id="hud"></div>
+      <div id="hint">왼쪽 끌기: 회전 · 오른쪽 끌기: 이동 · 휠: 확대</div>
+      <div id="webglerr">이 브라우저에서 WebGL을 쓸 수 없어 3D 지도를 표시하지 못했습니다.</div>
+    </div>
+    <div id="bottom">
+      <div class="row">
+        <button id="play" disabled>▶ 재생</button>
+        <input type="range" id="tl" min="0" max="1" step="1" value="0" disabled>
+        <span id="tlab" style="font-size:12px;color:var(--gray);min-width:150px">경로를 생성하면 재생할 수 있습니다</span>
+      </div>
+      <canvas id="profile"></canvas>
+    </div>
+  </div>
+  <aside>
+    <div class="card">
+      <h2>임무 설정</h2>
+      <div class="row"><label>기체</label><select id="drone"></select></div>
+      <div class="kv" id="droneinfo"></div>
+      <div class="warnbox" id="dronewarn" style="display:none;margin-top:6px"></div>
+      <div class="row"><label>탑재중량</label><input type="number" id="payload" min="0" step="0.1" value="0.5"> kg <span class="hint" id="pmax"></span></div>
+      <div class="row"><label>임무</label><select id="kind"><option value="delivery">배송 (갈 때 적재)</option><option value="pickup">회수 (올 때 적재)</option></select>
+        <label class="inl"><input type="checkbox" id="rt" checked> 왕복</label></div>
+      <div class="row"><label>출발 시각</label><select id="hour"></select><span class="hint" id="windinfo"></span></div>
+      <div class="row"><label>예비 SOC</label><input type="number" id="reserve" min="0" max="50" step="5" value="20"> %
+        <label class="inl" style="margin-left:8px">바람 <select id="wind"><option value="full">3D 예보</option><option value="linear">고도별 선형</option></select></label></div>
+      <div class="row"><label>이동 장애물</label><label class="inl"><input type="checkbox" id="useobs"> 예시 3종 (타 드론·헬기·행사 제한)</label></div>
+      <div class="row"><label>위치</label><button id="pickhub">출발지 찍기</button><button id="pickdst">도착지 찍기</button>
+        <span class="hint" id="ptinfo"></span></div>
+      <div class="row"><button id="plan" class="primary">경로 생성</button><span id="status"></span></div>
+      <div id="errors"></div>
+    </div>
+    <div class="card" id="rescard" style="display:none">
+      <h2>결과</h2>
+      <div class="row"><span>도착 SOC</span><span class="big" id="r_soc"></span><span id="r_feas"></span></div>
+      <table class="res"><thead><tr><th>구간</th><th>에너지</th><th>SOC</th><th>시간</th><th>거리</th><th>고도(해발)</th><th>계산</th></tr></thead><tbody id="r_legs"></tbody></table>
+      <div class="hint" id="r_note" style="margin-top:6px"></div>
+    </div>
+    <div class="card" id="miscard" style="display:none">
+      <h2>ArduPilot 미션 내보내기</h2>
+      <div class="row"><button id="dl_wpl" class="primary">미션 파일 (.waypoints)</button><button id="dl_csv">경로표 (.csv)</button></div>
+      <table class="res" id="m_tab" style="display:none"><thead><tr><th>구간</th><th>항목</th><th>경로점</th><th>속도 변경</th><th>상대 고도</th><th>대지속도</th></tr></thead><tbody id="m_rows"></tbody></table>
+      <div class="hint" style="margin-top:6px">
+        Mission Planner·QGroundControl에서 읽는 형식(QGC WPL 110)입니다. 구간마다 파일이 하나씩 나옵니다(왕복이면 가는 편·오는 편).<br>
+        고도는 <b>출발지 지면 기준 상대 고도</b>입니다. 계획기는 상승 <span id="m_up"></span> m/s, 하강 <span id="m_dn"></span> m/s를 가정했으므로
+        기체의 WP_SPD_UP·WP_SPD_DN(구버전 WPNAV_SPEED_UP·DN)을 이 값 이상으로 맞추세요.<br>
+        이동 장애물을 피하려고 넣은 대기·출발 지연은 시각에 맞춰 비행해야 유효합니다. 실제 비행 전에는 반드시 현장 확인과 비행승인이 필요합니다.
+      </div>
+    </div>
+  </aside>
+</main>
+<script type="module" src="/map3d.js"></script>
+</body>
+</html>

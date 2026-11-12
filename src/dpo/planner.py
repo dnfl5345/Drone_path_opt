@@ -219,7 +219,7 @@ class Planner:
     def __init__(self, site, drone, speeds=None):
         self.site = site
         self.drone = drone
-        self.speeds = np.asarray(speeds if speeds is not None else np.arange(3.0, 20.01, 0.5), float)
+        self.speeds = np.asarray(speeds if speeds is not None else drone.speed_candidates(), float)
         self.rho = site.rho_layers()
 
     def energy_lower_bound(self, m):
@@ -278,7 +278,7 @@ def simulate(site, drone, path, waits, t_start, mass, speed_policy="opt", vconst
     tax = site.t_axis if tax is None else tax
     rho = site.rho_layers()
     prm = drone.params()
-    spd = np.arange(3.0, 20.01, 0.5) if speed_policy == "opt" else np.array([vconst])
+    spd = drone.speed_candidates() if speed_policy == "opt" else np.array([vconst])
     t, e = t_start, 0.0
     rec = []
     pts = np.array(path, float)

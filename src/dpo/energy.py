@@ -48,6 +48,7 @@ class Drone:
     vz_up: float = 3.0          # 상승률 [m/s]
     vz_dn: float = 2.0          # 하강률 [m/s]
     va_fix: float = 0.0         # >0 이면 '고정 대기속도' 정책(비교 실험용, 속도 최적화 비활성)
+    vg_max: float = 20.0        # 계획에 쓰는 대지속도 상한 [m/s] (속도 후보 3 ~ vg_max)
 
     @property
     def area(self):
@@ -57,6 +58,10 @@ class Drone:
         """numba 함수용 파라미터 배열."""
         return np.array([self.area, self.u_tip, self.k_ind, self.eta, self.p0, self.cda,
                          self.p_av, self.c_desc, self.va_fix], dtype=np.float64)
+
+    def speed_candidates(self, step=0.5):
+        """구간 대지속도 후보 [m/s]."""
+        return np.arange(3.0, self.vg_max + 0.01, step)
 
     def to_dict(self):
         d = asdict(self)

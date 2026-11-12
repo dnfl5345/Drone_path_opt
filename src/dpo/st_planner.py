@@ -267,7 +267,7 @@ class STPlanner:
     def __init__(self, site, drone, speeds=None):
         self.site = site
         self.drone = drone
-        self.speeds = np.asarray(speeds if speeds is not None else np.arange(3.0, 20.01, 0.5), float)
+        self.speeds = np.asarray(speeds if speeds is not None else drone.speed_candidates(), float)
         self.rho = site.rho_layers()
         self.table = None
 
