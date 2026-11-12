@@ -1,0 +1,16 @@
+key	type	get	set	action	description
+KeyConnection	Boolean	get			Boolean true means that the battery on the aircraft is connected.
+KeyFullChargeCapacity	Integer	get			Integer Get the battery capacity when the battery is fully charged. Unit: mAh. As the battery is continuously used, the capacity of the battery when fully charged will decrease over time.
+KeyChargeRemaining	Integer	get			Integer To get remaining battery capacity. Unit: mAh.
+KeyChargeRemainingInPercent	Integer	get			Integer Get the percentage of remaining battery power. If you need to get the total power percentage of all batteries, you can get all the remaining battery power and battery capacity by setting different componentIndex for calculation.
+KeyBatteryHighVoltageStorageTime	Long	get			Long Store at High Battery Level means storing battery when it has 90% or higher battery level. If high battery level storage time in total is less than 120 days in 12 months, battery can be charged for up to 400 cycles. Change Time to Battery Self-Discharge to adjust time of battery storage at high
+KeyBatteryTemperature	Double	get			Double Get the battery temperature. Unit: Celsius. Range interval: [-128, 127].
+KeyVoltage	Integer	get			Integer Get the voltage of a single battery. Unit: mV.
+KeyCurrent	Integer	get			Integer Get the real-time current consumption of the battery. Unit: mA. Negative values indicate that the battery is discharging, and positive values indicate that it is charging.
+KeyNumberOfDischarges	Integer	get			Integer Gets the total number of discharges that a battery has experienced during its lifetime. The total number of discharges includes discharges that occur through normal use and those that are manually set.
+KeyNumberOfCells	Integer	get			Integer Get the number of cells contained in the battery.
+KeyCellVoltages	List<Integer>	get			List Get the voltage of each cell contained in the battery.Unit: mV.
+KeyBatteryManufacturedDate	Date	get			Date Get the production date of battery. Note: This interface is deprecated starting from MSDK 5.9.0.
+KeySerialNumber	String	get			String Get the serial number of battery.
+KeyFirmwareVersion	String	get			String Get the firmware version of battery.
+KeyBatterySelfDischargeInDays	Integer	get	set		Integer Set and get the battery self-discharge days. The range interval: [1, 10]. In order to ensure the safety of the battery, when the number of days of placing the battery for a long time exceeds the number of self-discharge days, the battery will automatically discharge to the safely placing pow

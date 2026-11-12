@@ -1,0 +1,14 @@
+flag	description
+impactInAir	0: No impact, 1: Impact happens in Air
+randomFly	0: Normal, 1: Randomly fly in GPS mode without stick input
+heightCtrlFail	0: Height control normal, 1: Height control failed
+rollPitchCtrlFail	0: Tilt control normal, 1: Tilt control failed
+yawCtrlFail	0: Yaw control normal, 1: Yaw control failed
+aircraftIsFalling	0: Aircraft is not falling, 1: Aircraft is falling
+strongWindLevel1	0: Wind is under big wind level 1, 1: wind is stronger than big wind level 1
+strongWindLevel2	0: Wind is under big wind level 2, 1: wind is stronger than big wind level 2
+compassInstallationError	0: Compass install right, 1: Compass install error
+imuInstallationError	0: IMU install right, 1: IMU install error
+escTemperatureHigh	0: ESC temperature is normal, 1: ESC temperature is high
+atLeastOneEscDisconnected	0: No ESC disconnected, 1: At least one ESC is disconnected
+gpsYawError	0: No GPS yaw error, 1: GPS yaw error
