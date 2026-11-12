@@ -8,6 +8,10 @@
 - 최신 연구 대비 정식화 비교: [`docs/algorithm_comparison.md`](docs/algorithm_comparison.md) (문제 (P) 정의, 문헌별 정식화, 가정 축소 실험)
 - 확장안 (8방향 탐색 + 고도별 균일·선형 바람, LUT): [`docs/extension_8way_linear_wind.md`](docs/extension_8way_linear_wind.md)
 - 3D 시공간 확장 (동적 장애물) + 장애물 편집 플랫폼 + 장애물 변경 시 이벤트 기반 재계획: [`docs/spatiotemporal_dynamic_obstacles.md`](docs/spatiotemporal_dynamic_obstacles.md)
+- **실증 대상 기체(Holybro X650, ArduPilot) 반영과 3D 지도 경로 생성**: [`docs/target_x650.md`](docs/target_x650.md)
+  - 기체 프리셋 `src/dpo/drones.py` (전력 모델은 제원·제조사 호버 시간 기반 추정), 결과 `scripts/run_x650.py` → `results/x650.json`, 그림 F26
+  - 3D 지도 화면 `http://127.0.0.1:8765/3d` (지형·건물·바람·경로·이동 장애물, 지도에서 출발·도착 지정)
+  - ArduPilot 미션 내보내기 `src/dpo/ardupilot.py` (QGC WPL 110 `.waypoints` + 경로표 CSV), 예: `results/missions/`
 - **연구 배경** (왜 SOC가 목적 변수인가, 왜 바람의 크기·방향이 변인인가, 왜 드론이 경로를 결정하는가): [`docs/research_background.md`](docs/research_background.md)
   - 바람 선택 근거: DJI SDK 항목 200개(Onboard 47 · Payload 56 · Mobile V5 97) 전수 분류와 다섯 질문 선별, CMU 실측 확인 → `scripts/dji_conditions_review.py`, `results/dji_conditions.json`, 그림 F25, 항목 목록 `data/raw/dji_sdk/`
 - 장애물 궤적 불확실성 → 위험 한도(ε) 강건 계획 + 몬테카를로 검증: [`docs/robust_uncertainty.md`](docs/robust_uncertainty.md)

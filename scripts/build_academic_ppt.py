@@ -21,6 +21,8 @@ from build_ppt import (BOX, FIG, GRAY, INK, LIGHT, NAVY, ORANGE, ROOT, TEAL, TIT
                        normalize_partnames, notes, picture, set_run, table, textbox)
 
 DJ = json.loads((ROOT / "results" / "dji_conditions.json").read_text())
+_X = ROOT / "results" / "x650.json"
+X6 = json.loads(_X.read_text()) if _X.exists() else None
 X0, W = 0.6, 12.15          # 본문 좌우 범위 [in]
 SRC_Y = 7.02                # 출처 줄 위치 (오른쪽 아래 로고와 겹치지 않게 폭 제한)
 
@@ -101,7 +103,7 @@ def build(template, out):
     cards = [("01", "Introduction", "연구 동기, 연구 질문, 기여"),
              ("02", "Background", "왜 SOC·왜 바람·왜 경로인가, DJI 드론 조건 전수 검토, 전력 모델, 시공간 계획"),
              ("03", "Related Works", "최신 연구와의 비교, 남은 공백"),
-             ("04", "Proposed Method", "문제 정식화, WE-SIPP-Theta*, 해석적 위험구간, 데이터 팽창 모양, 실시간 운용"),
+             ("04", "Proposed Method", "문제 정식화, WE-SIPP-Theta*, 해석적 위험구간, 실시간 운용, 대상 기체 X650·3D 지도"),
              ("05", "Results", "실측 데이터 기반 실험 E0–E12, 실시간 벤치"),
              ("06", "Conclusion", "핵심 결론, 한계, 향후 연구")]
     for i, (no, t, d) in enumerate(cards):
@@ -522,6 +524,66 @@ def build(template, out):
              "끼울 시각을 미리 정합니다. 계산이 그보다 늦게 끝나면 결과를 버리고 다시 계산합니다. 충돌까지 남은 시간이 재계획에 "
              "필요한 시간보다 짧으면 그 자리에서 멈춰 호버합니다.")
 
+    if X6:
+        xd, xs, xc = X6["drone"], X6["spec"], X6["curves"]["x650"]
+        s = D.content("실증 대상 기체 Holybro X650 – 제원과 전력 모델")
+        section(s, SEC[3])
+        head(s, X0, 1.15, "첨부 제원 (실증 기체 3대 동일 구성)", w=6.0)
+        rows = [["구분", "내용"], ["비행제어", "Pixhawk 6X + ArduCopter (AUTO·RTL·Geofence)"],
+                ["추진", "MN4014 KV330 × 4 · Tekko32 45A · 15×5.5 in 프로펠러"],
+                ["전원", "LiPo 6S 10,000 mAh (222 Wh) · PM02D 전압·전류 측정"],
+                ["측위", "H-RTK F9P (RTK 8 Hz)"],
+                ["중량", f"자체 {xs['empty_kg']} kg · 최대이륙 {xs['mtow_kg']} kg → 탑재 최대 {X6['payload_max']:g} kg"],
+                ["호버 시간", "무탑재 약 30분 (제조사)"]]
+        table(s, X0, 1.62, 6.0, rows, [1.25, 4.75], row_h=0.5, head_size=13, body_size=12.5,
+              aligns=[PP_ALIGN.CENTER, PP_ALIGN.LEFT])
+        head(s, 6.95, 1.15, "전력 모델: 제원으로 정한 값과 가정한 값", w=5.8)
+        rows = [["계수", "값", "출처"], ["질량·회전면", f"{xd['m_empty']} kg · {xd['area']:.3f} m²", "제원"],
+                ["상승 / 하강률", f"{xd['vz_up']} / {xd['vz_dn']} m/s", "ArduCopter 기본값"],
+                ["종합 효율 η", f"{xd['eta']:.3f}", "호버 30분에 맞춤"],
+                ["형상동력 · 항력면적", f"{xd['p0']:.0f} W · {xd['cda']} m²", "가정"],
+                ["속도 상한", f"대기 {xd['va_max']:.0f} · 대지 {xd['vg_max']:.0f} m/s", "가정"]]
+        table(s, 6.95, 1.62, 5.8, rows, [1.95, 2.0, 1.85], row_h=0.5, head_size=13, body_size=12,
+              highlight=(3,), aligns=[PP_ALIGN.LEFT, PP_ALIGN.CENTER, PP_ALIGN.CENTER], first_col_center=False)
+        stat(s, X0, 5.3, 3.95, 1.45, "호버 전력 (탑재 0 / 1 / 2.2 kg)",
+             f"{xc['hover_W']['0.0']:.0f} / {xc['hover_W']['1.0']:.0f} / {xc['hover_W']['2.2']:.0f} W",
+             f"호버 시간 {xc['hover_min']['0.0']:.0f} / {xc['hover_min']['1.0']:.0f} / {xc['hover_min']['2.2']:.0f}분", vsize=20)
+        sv = [v["soc"] for v in X6["sensitivity"].values()]
+        stat(s, X0 + 4.1, 5.3, 3.95, 1.45, "가정에 따른 왕복 SOC 범위", f"{min(sv):.1f}–{max(sv):.1f} %p",
+             f"기준 {sv[0]:.1f} %p (탑재 1 kg)", dark=True, vsize=24)
+        items(s, X0 + 8.25, 5.3, 3.9, 1.6, [("비행 자료로 보정하지 않은 추정", "입니다."),
+                                           ("호버 시간·항력면적", " 가정이 가장 크게 작용합니다.")], size=13, gap=6)
+        source(s, "출처: 실증 드론 부품 구성표·초경량비행장치 제원 및 성능표 (첨부) · ArduPilot AC_WPNav.cpp")
+        notes(s, "실증 대상 기체는 DJI가 아니라 Holybro X650이고, Pixhawk 6X와 ArduCopter로 비행합니다. 배터리는 222 Wh로 M100의 "
+                 "2.2배입니다. 이 기체의 비행 자료가 아직 없어 전력 모델은 추정입니다. 질량, 회전면 면적, 배터리는 제원에서 "
+                 "가져왔고, 종합 효율은 제조사가 밝힌 무탑재 호버 30분에 맞췄습니다. 형상동력과 항력면적은 가정입니다. 가정을 "
+                 f"바꾸면 같은 임무의 왕복 SOC가 {min(sv):.1f}에서 {max(sv):.1f} %p까지 달라지므로, 절댓값은 참고용이고 비행 "
+                 "기록으로 보정해야 합니다. 두 첨부 문서의 무게 표기가 달라(프레임 2.0 kg, 자체무게 4.1 kg) 4.1 kg을 무탑재 이륙 "
+                 "중량으로 보았습니다.")
+
+        s = D.content("3D 지도에서 경로 생성 → ArduPilot 미션")
+        section(s, SEC[3])
+        picture(s, FIG / "platform_3d.png", X0, 1.1, 8.3, 5.75)
+        head(s, 9.1, 1.15, "3D 지도 화면 (/3d)", w=3.7)
+        items(s, 9.1, 1.6, 3.65, 2.5, ["지형·건물 7천여 동·금지구역·바람", "지도를 눌러 출발·도착 지정",
+                                       "경로, 고도 단면, 시간 재생", "기체 선택 (X650 / M100)"], size=13, gap=5)
+        head(s, 9.1, 3.75, "미션 내보내기", w=3.7)
+        ex = X6["mission_export"]
+        items(s, 9.1, 4.2, 3.65, 2.7, [
+            "QGC WPL 110 (.waypoints) + 경로표",
+            "이륙·경로점·속도 변경·대기·착륙",
+            "고도는 출발지 지면 기준 상대 고도",
+            f"예: 가는 편 {ex['out']['n_items']}개, 오는 편 {ex['back']['n_items']}개 항목",
+            "시간·SOC가 시뮬레이션과 일치"], size=13, gap=5)
+        source(s, "pymavlink 미션 로더로 형식 확인 · SITL·실기체 비행은 하지 않음")
+        notes(s, "계획기는 처음부터 3D 격자에서 경로를 찾았습니다. 이번에 더한 것은 그 3D 공간을 그대로 보면서 임무를 정하는 "
+                 "화면입니다. 지형과 건물, 비행금지구역, 고도별 바람을 3D로 보고, 지도를 눌러 출발지와 도착지를 정하면 경로와 "
+                 "고도 단면이 나옵니다. 만든 경로는 ArduCopter의 AUTO 모드가 읽는 미션 파일로 내보냅니다. 이륙, 경로점, 구간 "
+                 "대지속도, 호버 대기, 착륙 명령으로 바꾸며, 고도는 출발지 지면 기준 상대 고도입니다. 미션의 예상 시간과 SOC는 "
+                 "전체 시뮬레이션과 일치하고 pymavlink 로더가 파일을 읽는 것까지 확인했습니다. 모의 비행(SITL)과 실기체 "
+                 "비행은 아직 하지 않았습니다. 이 기체는 주변 비행체를 스스로 탐지하지 못하므로, 동적 장애물 정보는 지상에서 "
+                 "받아 넣어야 합니다.")
+
     # ================================================================= 05 Results
     s = D.content("실험 설정: 실측 데이터만 사용")
     section(s, SEC[4])
@@ -637,6 +699,25 @@ def build(template, out):
     notes(s, "20시 출발 왕복을 10배속으로 5회 돌리면서, 매회 실측 ADS-B 침입기, 정지 장애물, 외부 감시 보고 항적을 동시에 "
              "넣었습니다. 다섯 번 모두 침범 없이 완주했습니다. 시계 주기 p95는 63 ms로 목표 50 ms보다 조금 깁니다.")
 
+    if X6:
+        bm, bp = X6["missions"]["by_method"], X6["missions"]["by_payload"]
+        s = D.content("대상 기체 X650 결과 (추정 모델)")
+        section(s, SEC[4])
+        picture(s, FIG / "F26_x650_target.png", X0, 1.1, W, 3.7)
+        A, Dm = bm["A_shortest_v10"], bm["D_WE_LTstar"]
+        stat(s, X0, 4.95, 3.95, 1.5, "왕복 SOC 소모 (탑재 1 kg, 15시)", f"{A['soc']:.1f} → {Dm['soc']:.1f} %p",
+             "최단 + 정속 10 m/s → 제안 WE-LT*", dark=True, vsize=24)
+        stat(s, X0 + 4.1, 4.95, 3.95, 1.5, "비행 시간", f"{A['T']:.0f} → {Dm['T']:.0f} s",
+             f"{(Dm['T'] / A['T'] - 1) * 100:+.0f} %", vsize=24)
+        stat(s, X0 + 8.2, 4.95, 3.95, 1.5, "탑재 0 / 1 / 2.2 kg (제안 방법)",
+             " / ".join(f"{bp[p]['D_WE_LTstar']['soc']:.1f}" for p in ("0.0", "1.0", "2.2")) + " %p",
+             "모두 예비 20 % 이상", vsize=22)
+        source(s, "성남 판교·분당, GFS 2026-10-27, 2.4 km 왕복 · X650 전력 모델은 미보정 추정 → 절댓값은 참고용")
+        notes(s, f"대상 기체로 같은 임무를 다시 계산했습니다. 배터리가 커서 정속 최단 경로도 예비 20 %를 지키지만, 제안 방법은 "
+                 f"SOC를 {A['soc']:.1f}에서 {Dm['soc']:.1f} %p로, 비행 시간을 {A['T']:.0f}초에서 {Dm['T']:.0f}초로 줄입니다. "
+                 "남는 SOC는 더 먼 배송지나 더 무거운 화물에 쓸 수 있습니다. 오른쪽 그림처럼 모델 가정에 따라 절댓값이 "
+                 "달라지므로, 이 수치는 비행 기록으로 보정하기 전의 추정입니다.")
+
     # ================================================================= 06 Conclusion
     s = D.content("결론")
     section(s, SEC[5])
@@ -667,7 +748,7 @@ def build(template, out):
         "실측 비행 자료에는 풍향이 없어 방향 효과를 직접 검증하지 못했습니다.",
         "DJI 풍속·풍향 키의 지원 기체와 정확도를 확인하지 못했습니다.",
         "ADS-B 표본 18대는 시연용 샘플입니다(무작위 아님).",
-        "2D 충돌 판정이며 실비행으로 검증하지 않았습니다.",
+        "X650 전력 모델은 추정이며, 2D 충돌 판정에 실비행 검증이 없습니다.",
     ], size=14, gap=7)
     head(s, 6.85, 1.2, "향후 연구")
     items(s, 6.85, 1.7, 5.9, 3.6, [
@@ -680,8 +761,8 @@ def build(template, out):
     ], size=14, gap=7)
     sp = box(s, X0, 5.45, W, 1.35, fill=NAVY, shadow=False)
     box_text(sp, [[("가장 먼저 할 일 – 소규모 실비행", {"size": 15, "bold": True, "color": ORANGE})],
-                  [("기체의 풍속·풍향 키와 지상 풍속계, 배터리 잔량을 함께 기록합니다. 키의 정확도, 풍향 효과, 계획 대비 실측 SOC를 한 번에 "
-                    "확인할 수 있습니다.", {"size": 14, "bold": False, "color": WHITE})]])
+                  [("X650으로 호버·정속 왕복 비행을 하며 전압·전류, 기체 추정 바람, 지상 풍속계를 함께 기록합니다. 전력 모델 보정, 바람 "
+                    "추정 정확도, 풍향 효과, 계획 대비 실측 SOC를 한 번에 확인할 수 있습니다.", {"size": 14, "bold": False, "color": WHITE})]])
     notes(s, "한계는 먼저 밝혀 두는 것이 좋습니다. 결과는 한 지역, 하루, 한 기체에서 나왔습니다. 바람은 운영 예보라 해상도가 낮고, "
              "실측 비행 자료에는 풍향이 없습니다. DJI 풍속·풍향 키는 SDK 문서에서 존재만 확인했습니다. 향후에는 기체가 주는 바람 "
              "값으로 예보를 보정하고, 실비행으로 풍향 효과와 SOC를 검증하는 것이 가장 먼저 할 일입니다.")
@@ -705,7 +786,8 @@ def build(template, out):
              "[18] Zhang et al. Energy consumption models for delivery drones. Transp. Res. D 2021.",
              "[19] Stolaroff et al. Energy use of drones for package delivery. Nat. Commun. 2018.",
              "[20] Thibbotuwawa et al. UAV mission planning resistant to weather uncertainty. Sensors 2020.",
-             "[21] DJI. Onboard SDK, Payload SDK, Mobile SDK V5 (GitHub: dji-sdk), 2026-11 열람."]
+             "[21] DJI. Onboard SDK, Payload SDK, Mobile SDK V5 (GitHub: dji-sdk), 2026-11 열람.",
+             "[22] ArduPilot (ArduCopter), MAVLink common.xml·ardupilotmega.xml (GitHub), 2026-11 열람."]
     textbox(s, X0, 1.2, 6.0, 5.6, [[(r, {"size": 12, "bold": False, "color": INK})] for r in left], space_after=7)
     textbox(s, 6.75, 1.2, 6.0, 5.6, [[(r, {"size": 12, "bold": False, "color": INK})] for r in right], space_after=7)
     source(s, "데이터: Copernicus GLO-30 DSM · Overture Maps · NOAA GFS · CMU M100 비행 · OpenSky ADS-B (traffic 2.13)")
