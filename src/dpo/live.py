@@ -154,6 +154,7 @@ class LiveEngine:
             c = dict(hub=(2700.0, 3000.0), dst=(4600.0, 1500.0), dep_hour=15, payload=0.5, kind="delivery",
                      round_trip=True, eps=0.05, shape="gauss", speed=5.0, period=2.0, latency=3.0, horizon=20.0,
                      weight=2.0, replan_weight=2.0, refine_weight=1.2, refine=True, reserve=20.0, service_s=20.0,
+                     hold=True,       # False = 기체가 스스로 멈추지 못함(원격 판단만 가정, 배경 실험용)
                      max_wait=120.0)
             c.update({k: v for k, v in cfg.items() if v is not None})
             c["hub"], c["dst"] = tuple(c["hub"]), tuple(c["dst"])
@@ -642,7 +643,7 @@ class LiveEngine:
             if hit is not None and self.phase == "순항" and self.plan is plan:
                 t_hit = hit - self.t_dep
                 need = self._margin() + 2.0
-                if t_hit - self.t < need:
+                if t_hit - self.t < need and self.cfg.get("hold", True):
                     # 계산이 끝나기 전에 충돌 → 즉시 그 자리 호버(비상 정지) 후 정지 위치에서 재계획
                     self._hold(f"비상 정지: {t_hit - self.t:.0f} s 뒤 충돌 예상 (재계획 소요 {need:.0f} s)")
                     self.pending = None
