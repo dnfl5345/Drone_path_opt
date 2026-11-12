@@ -200,7 +200,7 @@ def figures(B):
         ax.plot(hrs, [r[k]["soc"] if r[k] else np.nan for r in A["sweep"]], color=col, marker="o", ms=4, lw=2,
                 label=f"{lab.splitlines()[0]} – 예비 충족 {A[f'{k}_feasible']}/12")
     ax.axhline(80, color=RED, lw=1, ls="--")
-    ax.text(hrs[0], 80.8, "예비 SOC 20% 한계 (이 선 위는 임무 불가)", color=RED, ha="left", fontsize=8)
+    ax.text(hrs[0], 79.3, "예비 SOC 20% 한계 (이 선 위는 임무 불가)", color=RED, ha="left", va="top", fontsize=8)
     ax.set_xlabel("출발 시각 [시]"); ax.set_ylabel("왕복 SOC 소모 [%p]"); ax.set_ylim(62, 122)
     ax.set_title("(b) 임무 가능 여부는 SOC 로 판정된다", loc="left", fontsize=10.5)
     ax.legend(frameon=False, fontsize=8, loc="upper left"); ax.grid(alpha=0.25)
@@ -296,10 +296,16 @@ def figures(B):
                                       [max(r["hi"] - r["p"], 0) * 100 for r in rr]], color=col, marker="o", lw=2,
                         capsize=3, label=lab)
             for x_, p_, r in zip(xs, ps, rr):
-                ax.text(x_, p_ + 4, f"{r['intrusions']}/{r['n']}", ha="center", fontsize=8, color=col)
+                if r["latency"] <= 3:           # 두 방식 모두 0 – 한 번만 표기
+                    if mode == "remote" and r["latency"] == 1:
+                        ax.annotate("지연 1–3 s: 둘 다 0/16", (2, 0), xytext=(4, 22), fontsize=8, color="#333",
+                                    arrowprops=dict(arrowstyle="-", color="#999", lw=0.8))
+                    continue
+                ax.annotate(f"{r['intrusions']}/{r['n']}", (x_, p_), textcoords="offset points",
+                            xytext=(-16, 6) if mode == "remote" else (12, -14), fontsize=8.5, color=col)
         ax.axvline(E12["lead"], color="#999", lw=0.8, ls=":")
-        ax.text(E12["lead"] - 0.5, 92, f"조우까지 {E12['lead']:.0f} s", ha="right", fontsize=8, color="#555")
-        ax.set_ylim(-5, 105); ax.legend(frameon=False, fontsize=8, loc="center left")
+        ax.text(E12["lead"] - 0.5, 62, f"조우까지 {E12['lead']:.0f} s", ha="right", fontsize=8, color="#555")
+        ax.set_ylim(-8, 105); ax.legend(frameon=False, fontsize=8, loc="upper left")
     ax.set_xlabel("결정 지연 [s] (탐지 → 새 경로 적용)"); ax.set_ylabel("침범 비율 [%] (Wilson 95% CI)")
     ax.set_title("(b) 결정이 늦으면 피할 수 없다", loc="left", fontsize=10.5); ax.grid(alpha=0.25)
     ax = axs[2]

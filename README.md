@@ -7,6 +7,7 @@
 - 최신 연구 대비 정식화 비교: [`docs/algorithm_comparison.md`](docs/algorithm_comparison.md) (문제 (P) 정의, 문헌별 정식화, 가정 축소 실험)
 - 확장안 (8방향 탐색 + 고도별 균일·선형 바람, LUT): [`docs/extension_8way_linear_wind.md`](docs/extension_8way_linear_wind.md)
 - 3D 시공간 확장 (동적 장애물) + 장애물 편집 플랫폼 + 장애물 변경 시 이벤트 기반 재계획: [`docs/spatiotemporal_dynamic_obstacles.md`](docs/spatiotemporal_dynamic_obstacles.md)
+- **연구 배경** (왜 SOC가 목적 변수인가, 왜 바람의 크기·방향이 변인인가, 왜 드론이 경로를 결정하는가): [`docs/research_background.md`](docs/research_background.md)
 - 장애물 궤적 불확실성 → 위험 한도(ε) 강건 계획 + 몬테카를로 검증: [`docs/robust_uncertainty.md`](docs/robust_uncertainty.md)
 - **논문 자료**: 영문 원고 초안 [`docs/paper/manuscript_en.md`](docs/paper/manuscript_en.md), 참고문헌 [`docs/paper/references.bib`](docs/paper/references.bib), 논문화 가이드(학술적 의미·투고처·남은 작업) [`docs/paper/논문화_가이드.md`](docs/paper/논문화_가이드.md)
 
