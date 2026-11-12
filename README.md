@@ -4,10 +4,12 @@
 지난 회의에서 선정한 최단 경로 알고리즘(Lazy Theta*)을 3D 시공간 에너지 탐색기 **WE-LT\* (Wind-aware Energy Lazy Theta\*)**로 확장했습니다.
 
 - 회의 보고 자료: [`docs/drone_soc_path_planning_dev.pptx`](docs/drone_soc_path_planning_dev.pptx) (기존 회의자료와 같은 포맷, 31장)
+- **학술 발표 자료** (Intro → Background → Related Works → Proposed Method → Results → Conclusion, KETI 템플릿, 34장, 발표자 노트 포함): [`docs/drone_soc_academic_talk.pptx`](docs/drone_soc_academic_talk.pptx)
 - 최신 연구 대비 정식화 비교: [`docs/algorithm_comparison.md`](docs/algorithm_comparison.md) (문제 (P) 정의, 문헌별 정식화, 가정 축소 실험)
 - 확장안 (8방향 탐색 + 고도별 균일·선형 바람, LUT): [`docs/extension_8way_linear_wind.md`](docs/extension_8way_linear_wind.md)
 - 3D 시공간 확장 (동적 장애물) + 장애물 편집 플랫폼 + 장애물 변경 시 이벤트 기반 재계획: [`docs/spatiotemporal_dynamic_obstacles.md`](docs/spatiotemporal_dynamic_obstacles.md)
 - **연구 배경** (왜 SOC가 목적 변수인가, 왜 바람의 크기·방향이 변인인가, 왜 드론이 경로를 결정하는가): [`docs/research_background.md`](docs/research_background.md)
+  - 바람 선택 근거: DJI SDK 항목 200개(Onboard 47 · Payload 56 · Mobile V5 97) 전수 분류와 다섯 질문 선별, CMU 실측 확인 → `scripts/dji_conditions_review.py`, `results/dji_conditions.json`, 그림 F25, 항목 목록 `data/raw/dji_sdk/`
 - 장애물 궤적 불확실성 → 위험 한도(ε) 강건 계획 + 몬테카를로 검증: [`docs/robust_uncertainty.md`](docs/robust_uncertainty.md)
 - **논문 자료**: 영문 원고 초안 [`docs/paper/manuscript_en.md`](docs/paper/manuscript_en.md), 참고문헌 [`docs/paper/references.bib`](docs/paper/references.bib), 논문화 가이드(학술적 의미·투고처·남은 작업) [`docs/paper/논문화_가이드.md`](docs/paper/논문화_가이드.md)
 
@@ -89,6 +91,8 @@ E11_METHODS="QF0.05,QF0.01" E11_OUT=E11b PYTHONPATH=src python scripts/run_e11.p
 PYTHONPATH=src python scripts/analyze_e11.py               # 통계·그림 F21
 PYTHONPATH=src python scripts/make_figures.py && PYTHONPATH=src python scripts/make_figures.py gif
 PYTHONPATH=src python scripts/build_ppt.py <회의자료 템플릿.pptx> docs/drone_soc_path_planning_dev.pptx
+PYTHONPATH=src python scripts/dji_conditions_review.py                                   # DJI 조건 검토 (F25)
+PYTHONPATH=src python scripts/build_academic_ppt.py <회의자료 템플릿.pptx> docs/drone_soc_academic_talk.pptx
 PYTHONPATH=src python scripts/bench_live.py 5 10              # 실시간 엔진 벤치 (약 6분)
 PYTHONPATH=src python -m pytest -q tests
 ```
