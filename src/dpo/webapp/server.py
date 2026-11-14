@@ -48,23 +48,25 @@ from ..st_planner import STPlanner, check_path_conflicts
 from ..wind_field import Site3D
 
 STATIC = Path(__file__).parent / "static"
-T0 = np.datetime64("2026-10-27T00:00")
 KST = 9
-DEFAULT_HUB = (2700.0, 3000.0)
-DEFAULT_DST = (4600.0, 1500.0)
-NFZ = (3650.0, 2250.0, 250.0)
+MAX_TOUR = 12            # 순회 경유점 최대 개수
 
 
 class App:
     def __init__(self):
-        g = dict(np.load(C.PROC / "site_grid.npz"))
-        f0 = dict(np.load(C.RAW / "gfs_20261027_00z.npz", allow_pickle=True))
+        S = C.SITE
+        g = dict(np.load(C.PROC / S["grid"]))
+        f0 = dict(np.load(C.RAW / S["gfs"], allow_pickle=True))
         self.g = g
-        self.site = Site3D(g, f0, T0)
-        self.site.add_static_nfz_circle(*NFZ)
+        self.site = Site3D(g, f0, np.datetime64(S["t0"]))
+        self.nfz = [tuple(z) for z in S["nfz"]]
+        for z in self.nfz:
+            self.site.add_static_nfz_circle(*z)
+        self.hub0, self.dst0, self.tour0 = self._default_points(S)
         self.drones = {k: DR.get(k) for k in ("m100", "x650")}     # m100: 실측 보정, x650: 실증 대상 기체(추정)
         self.drone = self.drones["m100"]
         self._scene3d = None
+        self._example = None
         self.lock = threading.Lock()
         self._site_lin = None
         self.planners = {}
@@ -79,10 +81,36 @@ class App:
         self.plan(dict(obstacles=[], dep_hour=15, payload=0.5, kind="delivery", round_trip=False))
         print(f"[platform] 준비 완료 ({time.time() - t:.1f}s)")
 
+    def _default_points(self, S):
+        """지역 기본 출발지·도착지·순회 경유점. 등록값이 없으면 기준 주소 주변에서 비행 가능한 점을 고른다."""
+        s = self.site
+        if S.get("hub") is not None:
+            return tuple(S["hub"]), tuple(S["dst"]), [tuple(p) for p in S.get("tour") or []]
+        from ..data_terrain import ll2xy
+        x0, y0 = (float(v) for v in ll2xy(*S["anchor"]))
+
+        def ok(x, y):
+            if not (2 * s.dx <= x < (s.nx - 2) * s.dx and 2 * s.dx <= y < (s.ny - 2) * s.dx):
+                return False
+            return bool(s.free[:, int(y // s.dx), int(x // s.dx)].any())
+
+        def near(x, y):                      # 그 점이 안 되면 가까운 비행 가능 셀
+            for r in range(0, 12):
+                for dx_ in range(-r, r + 1):
+                    for dy_ in range(-r, r + 1):
+                        if max(abs(dx_), abs(dy_)) == r and ok(x + dx_ * s.dx, y + dy_ * s.dx):
+                            return (float(x + dx_ * s.dx), float(y + dy_ * s.dx))
+            raise ValueError("기준 주소 주변에 비행 가능한 지점이 없습니다")
+
+        hub = near(x0, y0)
+        tour = [near(x0 + R * math.cos(math.radians(a)), y0 + R * math.sin(math.radians(a)))
+                for a, R in ((20, 1000), (95, 800), (165, 1100), (235, 900), (300, 1000))]
+        return hub, tour[0], tour
+
     def site_lin(self):
         if self._site_lin is None:
             from ..layered import fit_linear_profile, linear_wind_site
-            f0 = dict(np.load(C.RAW / "gfs_20261027_00z.npz", allow_pickle=True))
+            f0 = dict(np.load(C.RAW / C.SITE["gfs"], allow_pickle=True))
             prof = fit_linear_profile(f0, 0.5 * (C.LAT_MIN + C.LAT_MAX), 0.5 * (C.LON_MIN + C.LON_MAX),
                                       float(self.g["ground"].mean()))
             self._site_lin = linear_wind_site(self.site, prof)
@@ -122,13 +150,14 @@ class App:
             ws.append(dict(hour=int(h + KST), speed=float(math.hypot(u, v)),
                            dir_from=float((math.degrees(math.atan2(-u, -v))) % 360)))
         return dict(W=s.nx * s.dx, H=s.ny * s.dx, dx=s.dx, z=[float(z) for z in s.z],
-                    ground=[float(s.ground.min()), float(s.ground.max())], hub=DEFAULT_HUB, dst=DEFAULT_DST,
-                    nfz=NFZ, wind=ws, limits=LIMITS, drone=dict(name=self.drone.name, battery_wh=self.drone.battery_wh,
+                    ground=[float(s.ground.min()), float(s.ground.max())], hub=self.hub0, dst=self.dst0,
+                    tour=self.tour0, site=dict(key=C.SITE_KEY, label=C.SITE["label"], hub_name=C.SITE["hub_name"]),
+                    nfz=self.nfz[0] if self.nfz else None, wind=ws, limits=LIMITS, drone=dict(name=self.drone.name, battery_wh=self.drone.battery_wh,
                                                                 m_empty=self.drone.m_empty),
                     drones=[dict(key=k, label=DR.LABEL[k], name=d.name, battery_wh=d.battery_wh, m_empty=d.m_empty,
                                  payload_max=DR.PAYLOAD_MAX[k], va_max=d.va_max, vg_max=d.vg_max, vz_up=d.vz_up,
                                  vz_dn=d.vz_dn) for k, d in self.drones.items()],
-                    date="2026-10-27 (GFS 00Z 예보)", adsb=ADSB)
+                    date=C.SITE["date"], adsb=ADSB)
 
     def _parse(self, req):
         obs = [DynObstacle.from_dict(o) for o in req.get("obstacles", [])]
@@ -146,8 +175,14 @@ class App:
 
     # ---------------------------------------------------------------- 계획 (세션 저장)
     def _ctx(self, req):
-        hub = self._valid_point(req.get("hub", DEFAULT_HUB), "물류거점")
-        dst = self._valid_point(req.get("dst", DEFAULT_DST), "목적지")
+        hub = self._valid_point(req.get("hub") or self.hub0, "출발지")
+        tour = [self._valid_point(p, f"경유점 {n + 1}") for n, p in enumerate(req.get("tour") or [])]
+        if len(tour) > MAX_TOUR:
+            raise ValueError(f"경유점은 최대 {MAX_TOUR}개")
+        dst = hub if tour else self._valid_point(req.get("dst") or self.dst0, "목적지")
+        dwell = float(req.get("dwell", 0.0))
+        if not (0 <= dwell <= 300):
+            raise ValueError("경유점 체류 시간은 0~300 s")
         dep_hour = int(req.get("dep_hour", 15))
         if not (KST <= dep_hour <= KST + len(self.site.t_axis) - 2):
             raise ValueError("출발 시각은 9~20시")
@@ -179,26 +214,41 @@ class App:
         d = self.drones[dkey]
         m0 = d.m_empty
         m_out, m_back = (m0 + payload, m0) if kind == "delivery" else (m0, m0 + payload)
-        legs_req = [("out", hub, dst, m_out)]
-        if req.get("round_trip", True):
-            legs_req.append(("back", dst, hub, m_back))
+        if tour:
+            # 순회: 출발지 → 경유점들 → 출발지. 중간에 착륙하지 않고, 탑재중량은 끝까지 같다.
+            pts = [hub] + tour + [hub]
+            for n in range(len(pts) - 1):
+                if (int(pts[n][0] // site.dx), int(pts[n][1] // site.dx)) == (int(pts[n + 1][0] // site.dx), int(pts[n + 1][1] // site.dx)):
+                    raise ValueError(f"경유점 {n + 1} 이 앞 지점과 같은 칸(25 m)에 있습니다")
+            legs_req = [(f"t{n + 1}", pts[n], pts[n + 1], m0 + payload) for n in range(len(pts) - 1)]
+        else:
+            legs_req = [("out", hub, dst, m_out)]
+            if req.get("round_trip", True):
+                legs_req.append(("back", dst, hub, m_back))
         pkey = (wind, dkey)
         if pkey not in self.planners:
             self.planners[pkey] = STPlanner(site, d)
         return dict(site=site, wind=wind, d=d, t_dep=(dep_hour - KST) * 3600.0, dep_hour=dep_hour, legs_req=legs_req,
                     E_usable=d.battery_wh * 3600 * (1 - reserve / 100.0), reserve=reserve, max_wait=max_wait,
-                    weight=weight, eps=eps, shape=shape, SP=self.planners[pkey], dkey=dkey, payload=payload)
+                    weight=weight, eps=eps, shape=shape, SP=self.planners[pkey], dkey=dkey, payload=payload,
+                    tour=bool(tour), dwell=dwell, tour_pts=tour)
 
     def _fly_legs(self, cx, legs_req, t, e_used, first=None, reuse=None):
         """legs_req 를 순서대로 계획·시뮬레이션. first=(시작노드, 시작시각, 실행된 앞부분 sim, 이륙에너지, 이륙시간)
         이면 첫 구간은 비행 중 재계획 (실행된 부분 뒤에 이어 붙임)."""
         site, d, SP = cx["site"], cx["d"], cx["SP"]
         legs = []
+        tour = cx.get("tour", False)
         for q, (name, a, b, m) in enumerate(legs_req):
             st, gl = site.lowest_free_k(*a), site.lowest_free_k(*b)
+            air_start = tour and q > 0                       # 순회의 중간 구간: 이륙 없이 앞 구간 끝에서 이어 비행
+            air_end = tour and q < len(legs_req) - 1         # 착륙 없이 다음 구간으로
             if q == 0 and first is not None:
                 start, t0, prefix, e_to, t_to = first
                 e_pre = float(prefix["e"][-1]) if len(prefix["e"]) else 0.0
+            elif air_start:
+                e_to, t_to = 0.0, 0.0
+                start, t0, prefix, e_pre = st, t, None, 0.0
             else:
                 e_to, t_to = vertical_energy(site, d, a[0], a[1], st[0], t, m, up=True)
                 start, t0, prefix, e_pre = st, t + t_to, None, 0.0
@@ -220,14 +270,25 @@ class App:
                 leg["feasible"] = False
                 legs.append(leg)
                 break
-            sim = simulate(site, d, r["path"], r["wait_before"], t0 + r.get("ground_delay", 0.0), m)
+            waits = np.array(r["wait_before"], float)
+            gd = float(r.get("ground_delay", 0.0))
+            if air_start:
+                # 공중에서 시작하는 구간: 출발 지연과 경유점 체류는 그 자리에서 호버 (에너지 소모)
+                waits[1] += gd + cx.get("dwell", 0.0)
+                sim = simulate(site, d, r["path"], waits, t0, m)
+            else:
+                sim = simulate(site, d, r["path"], waits, t0 + gd, m)
             if prefix is not None and len(prefix["t"]):
                 sim = {k: np.concatenate([prefix[k], sim[k] + (e_pre if k == "e" else 0.0)]) for k in sim}
-            e_ld, t_ld = vertical_energy(site, d, b[0], b[1], gl[0], sim["t"][-1], m, up=False)
-            leg.update(feasible=True, sim=sim, e_ld=e_ld, t_ld=t_ld, E=e_to + float(sim["e"][-1]) + e_ld)
+            if air_end:
+                e_ld, t_ld = 0.0, 0.0
+            else:
+                e_ld, t_ld = vertical_energy(site, d, b[0], b[1], gl[0], sim["t"][-1], m, up=False)
+            leg.update(feasible=True, sim=sim, e_ld=e_ld, t_ld=t_ld, E=e_to + float(sim["e"][-1]) + e_ld, waits=waits,
+                       air_start=air_start, air_end=air_end)
             legs.append(leg)
             e_used += leg["E"]
-            t = sim["t"][-1] + t_ld + 30.0
+            t = sim["t"][-1] + t_ld + (0.0 if air_end else 30.0)
         return legs
 
     def _render(self, cx, legs, obs, errs, extra=None, base_sims=None):
@@ -265,7 +326,8 @@ class App:
                        wait=float(w)) for p, w in zip(r["path"], r["wait_before"])]
             leg.update(samples=_samples(sim, t_dep, e_offset=e_used + L["e_to"], drone=d), waypoints=wp,
                        E_kJ=float(L["E"] / 1000), soc_leg=float(soc_drop(L["E"], d)),
-                       T=float(sim["t"][-1] + L["t_ld"] - L["t_leg0"]), wait=float(r["wait_before"].sum()),
+                       T=float(sim["t"][-1] + L["t_ld"] - L["t_leg0"]), wait=float(L["waits"].sum()),
+                       air_start=bool(L["air_start"]), air_end=bool(L["air_end"]),
                        L=float(np.sum(np.hypot(np.diff(sim["x"]), np.diff(sim["y"])))), cpu=float(r["cpu_s"]),
                        conflicts=check_path_conflicts(site, sim, obs, t_dep), ground_delay=float(r["ground_delay"]))
             out["legs"].append(leg)
@@ -275,6 +337,7 @@ class App:
         out["feasible"] = all(l["feasible"] for l in out["legs"]) and len(out["legs"]) == len(cx["legs_req"]) \
             and out["soc_end"] >= cx["reserve"] - 1e-6
         out["table_cells"] = int(cx["SP"].table["n_cells"])
+        out["tour"] = bool(cx.get("tour"))
         out["drone"] = dict(key=cx["dkey"], label=DR.LABEL[cx["dkey"]], name=d.name, battery_wh=d.battery_wh,
                             m_empty=d.m_empty, payload=cx["payload"])
         if extra:
@@ -296,6 +359,52 @@ class App:
             out["elapsed"] = time.time() - t_all
             return out
 
+    def example(self):
+        """예시 장애물. 판교는 E8 시나리오 파일, 그 밖의 지역은 기본 순회 경로를 가로지르는 3종을 만든다."""
+        if C.SITE_KEY == "pangyo":
+            p = C.ROOT / "scenarios" / "e8_dynamic.json"
+            return json.loads(p.read_text(encoding="utf-8")) if p.exists() else dict(obstacles=[])
+        if self._example is None:
+            self._example = self._make_example()
+        return self._example
+
+    def _make_example(self):
+        if len(self.tour0) < 4:
+            return dict(obstacles=[])
+        # 장애물 없이 기본 순회를 한 번 계획해, 구간 중간을 지나는 실제 위치·시각을 얻는다
+        keep = getattr(self, "session", None)
+        r = self.plan(dict(drone="x650", payload=0.0, dep_hour=15, tour=self.tour0, dwell=10.0, obstacles=[]))
+        self.session = keep
+        mids = []
+        for L in r["legs"]:
+            if not L.get("feasible"):
+                return dict(obstacles=[])
+            sm = L["samples"]
+            q = len(sm) // 2
+            a, b = sm[max(q - 2, 0)], sm[min(q + 2, len(sm) - 1)]
+            n = math.hypot(b["x"] - a["x"], b["y"] - a["y"]) or 1.0
+            mids.append(dict(x=sm[q]["x"], y=sm[q]["y"], t=sm[q]["t"], ux=-(b["y"] - a["y"]) / n, uy=(b["x"] - a["x"]) / n))
+        W, H = self.site.nx * self.site.dx, self.site.ny * self.site.dx
+        cl = lambda v, hi: float(min(max(v, 60.0), hi - 60.0))  # noqa: E731
+
+        def cross(n, half, dt):                              # n번 구간의 중간점을 직각으로 가로지르는 경로
+            m = mids[n]
+            return [dict(x=cl(m["x"] + m["ux"] * half, W), y=cl(m["y"] + m["uy"] * half, H), t=round(max(m["t"] - dt, 0.0))),
+                    dict(x=cl(m["x"], W), y=cl(m["y"], H), t=round(m["t"])),
+                    dict(x=cl(m["x"] - m["ux"] * half, W), y=cl(m["y"] - m["uy"] * half, H), t=round(m["t"] + dt))]
+
+        t_at = [m["t"] for m in mids]
+        base = dict(half_x=100.0, half_y=100.0, t_start=None, t_end=None, sigma0=0.0, sigma_v=0.0, sigma_t=0.0, t_obs=0.0)
+        m3 = cross(3, 0.0, 0.0)[1]
+        obs = [dict(base, name="타 드론 (경로 횡단)", kind="cylinder", path=cross(0, 450.0, 30.0), radius=30.0, z_min=0.0,
+                    z_max=1000.0, margin=15.0),
+               dict(base, name="응급 헬기 (전 고도)", kind="cylinder", path=cross(2, 900.0, 45.0), radius=120.0, z_min=0.0,
+                    z_max=1000.0, margin=30.0),
+               dict(base, name="행사 임시 비행제한 (정지)", kind="box", path=[dict(x=m3["x"], y=m3["y"], t=0.0)], radius=100.0,
+                    half_x=220.0, half_y=120.0, z_min=0.0, z_max=1000.0, t_start=0.0, t_end=float(round(t_at[3] + 240.0)),
+                    margin=10.0)]
+        return dict(meta=dict(note="기본 순회 경로를 가로지르도록 시각을 맞춘 예시"), obstacles=obs)
+
     # ---------------------------------------------------------------- 3D 지도
     def scene3d(self):
         """3D 지도용 장면: 지형 격자, 건물(바닥 다각형 + 높이), 금지구역, 계획 격자의 비행 가능 하한·상한 고도."""
@@ -306,7 +415,7 @@ class App:
             default_h = {"apartments": 60.0, "residential": 12.0, "house": 8.0, "commercial": 30.0, "office": 40.0,
                          "industrial": 12.0, "school": 15.0}
             bl = []
-            for f in json.loads((C.RAW / "overture_buildings.json").read_text()):
+            for f in json.loads((C.RAW / C.SITE["buildings"]).read_text()):
                 h = float(f["h"]) if f["h"] else (float(f["nf"]) * 3.3 if f["nf"] else default_h.get(f["cls"] or "", 10.0))
                 g = swkt.loads(f["wkt"])
                 for poly in getattr(g, "geoms", [g]):
@@ -330,7 +439,8 @@ class App:
                 floor=[None if not np.isfinite(v) else float(v) for v in lo.ravel()],
                 ceil=[None if not np.isfinite(v) else float(v) for v in hi.ravel()],
                 nfz2d=[int(v) for v in s.nfz2d.ravel()],
-                buildings=bl, nfz=[NFZ], hub=DEFAULT_HUB, dst=DEFAULT_DST, agl=[C.AGL_MIN, C.AGL_MAX],
+                buildings=bl, nfz=self.nfz, hub=self.hub0, dst=self.dst0, tour=self.tour0, agl=[C.AGL_MIN, C.AGL_MAX],
+                site=dict(key=C.SITE_KEY, label=C.SITE["label"], hub_name=C.SITE["hub_name"]),
                 clearance=C.BUILDING_CLEARANCE, frame=dict(lon0=C.LON_MIN, lat0=C.LAT_MIN, mlon=fr["mlon"], mlat=fr["mlat"]),
                 hours=[int(h + KST) for h in range(len(s.t_axis) - 1)])), ensure_ascii=False).encode("utf-8")
         return self._scene3d
@@ -357,7 +467,7 @@ class App:
             if not ms:
                 raise ValueError("내보낼 수 있는 경로가 없습니다")
             return dict(drone=DR.LABEL[cx["dkey"]], dep_hour=cx["dep_hour"],
-                        legs=[dict(name=m["name"], wpl=m["wpl"], csv=m["csv"], summary=m["summary"]) for m in ms])
+                        legs=[dict(name=m["name"], legs=m["legs"], wpl=m["wpl"], csv=m["csv"], summary=m["summary"]) for m in ms])
 
     # ---------------------------------------------------------------- 비행 중 장애물 변경 → 재계획
     def replan(self, req, latency=3.0):
@@ -370,6 +480,8 @@ class App:
             if ss is None:
                 raise ValueError("먼저 '경로 계획 실행'으로 초기 계획을 만드세요")
             cx = ss["cx"]
+            if cx.get("tour"):
+                raise ValueError("순회 임무는 비행 중 재계획을 지원하지 않습니다. 장애물을 고친 뒤 경로를 다시 생성하세요")
             site, t_dep = cx["site"], cx["t_dep"]
             t_now = float(req.get("t_now", 0.0))
             if t_now < ss["revisions"][-1][0]:
@@ -575,8 +687,7 @@ def make_handler(app):
             if path == "/api/site":
                 return self._send(200, app.site_info())
             if path == "/api/example":
-                p = C.ROOT / "scenarios" / "e8_dynamic.json"
-                return self._send(200, json.loads(p.read_text(encoding="utf-8")) if p.exists() else dict(obstacles=[]))
+                return self._send(200, app.example())
             self._send(404, dict(error="not found"))
 
         def _stream(self):
@@ -648,7 +759,10 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--site", default=C.SITE_KEY, choices=list(C.SITES), help="대상 지역 (기본: 환경변수 DPO_SITE 또는 pangyo)")
     a = ap.parse_args(argv)
+    C.use_site(a.site)
+    print(f"[platform] 지역: {C.SITE['label']}")
     app = App()
     srv = ThreadingHTTPServer((a.host, a.port), make_handler(app))
     srv.daemon_threads = True

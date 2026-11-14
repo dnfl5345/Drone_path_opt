@@ -3,7 +3,7 @@ __pycache__/
 .pytest_cache/
 # 대용량/제3자 원자료 (스크립트로 재다운로드)
 data/raw/*.tif
-data/raw/overture_buildings.json
+data/raw/overture_buildings*.json
 data/raw/cmu_m100_flight_level.csv
 *.pdf
 results/*_partial.pkl

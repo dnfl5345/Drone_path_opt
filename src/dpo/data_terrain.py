@@ -45,7 +45,7 @@ def xy2ll(x, y, fr=None):
 
 # ---------------------------------------------------------------- DSM
 def fetch_dsm():
-    out = C.RAW / "cop_dsm_N37_E127.tif"
+    out = C.RAW / C.SITE["dsm_file"]
     if not out.exists():
         r = requests.get(C.COP_URL, timeout=300)
         r.raise_for_status()
@@ -116,7 +116,7 @@ def _row_groups_in_bbox(key, bbox):
 
 def fetch_buildings():
     """bbox 안 건물 footprint/높이를 parquet 원격 range read로 추출."""
-    out = C.RAW / "overture_buildings.json"
+    out = C.RAW / C.SITE["buildings"]
     if out.exists():
         return json.loads(out.read_text())
     import fsspec
@@ -195,7 +195,7 @@ def building_height_grid(feats, fr):
 
 
 def build_site_grid(force=False):
-    out = C.PROC / "site_grid.npz"
+    out = C.PROC / C.SITE["grid"]
     if out.exists() and not force:
         return dict(np.load(out))
     from scipy.ndimage import grey_opening, gaussian_filter

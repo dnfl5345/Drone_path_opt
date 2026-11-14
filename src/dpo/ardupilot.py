@@ -198,15 +198,31 @@ def to_csv(rows) -> str:
 
 
 def mission_from_legs(site, drone, legs, t_dep, fr=None):
-    """webapp 의 leg 목록(App._fly_legs 결과) → 구간별 미션."""
-    out = []
+    """webapp 의 leg 목록(App._fly_legs 결과) → 미션 목록.
+
+    이륙~착륙 한 번이 미션 하나다. 왕복은 구간마다 하나씩, 순회(중간 착륙 없음)는 전체가 하나의 미션이 된다."""
+    groups = []
     for L in legs:
         if not L.get("feasible"):
             break
-        r = L["r"]
-        t_c0 = L["t_leg0"] + L["t_to"] + float(r.get("ground_delay", 0.0))
-        m = leg_items(site, drone, r["path"], r["wait_before"], t_c0, L["m"], ground_delay=float(r.get("ground_delay", 0.0)),
-                      e_before=L["e_before"], e_takeoff=L["e_to"], t_takeoff=L["t_to"], t_land=L["t_ld"], e_land=L["e_ld"],
-                      t_ref=t_dep, fr=fr)
-        out.append(dict(name=L["name"], wpl=to_wpl(m["items"]), csv=to_csv(m["rows"]), **m))
+        if L.get("air_start") and groups:
+            groups[-1].append(L)
+        else:
+            groups.append([L])
+    out = []
+    for G in groups:
+        if G[-1].get("air_end"):          # 착륙까지 이어지지 않은 묶음(중간에 계획 실패)은 내보내지 않는다
+            continue
+        L0, Ln = G[0], G[-1]
+        gd = float(L0["r"].get("ground_delay", 0.0))
+        path = [tuple(int(v) for v in p) for p in L0["r"]["path"]]
+        waits = [float(w) for w in L0.get("waits", L0["r"]["wait_before"])]
+        for L in G[1:]:                   # 이어 붙이기: 다음 구간의 첫 노드는 앞 구간의 끝 노드와 같다
+            path += [tuple(int(v) for v in p) for p in L["r"]["path"]][1:]
+            waits += [float(w) for w in L["waits"]][1:]
+        m = leg_items(site, drone, path, waits, L0["t_leg0"] + L0["t_to"] + gd, L0["m"], ground_delay=gd,
+                      e_before=L0["e_before"], e_takeoff=L0["e_to"], t_takeoff=L0["t_to"], t_land=Ln["t_ld"],
+                      e_land=Ln["e_ld"], t_ref=t_dep, fr=fr)
+        name = L0["name"] if len(G) == 1 else "tour"
+        out.append(dict(name=name, legs=[L["name"] for L in G], wpl=to_wpl(m["items"]), csv=to_csv(m["rows"]), **m))
     return out

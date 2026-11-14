@@ -425,7 +425,7 @@ async function init() {
   S.site = await api("/api/site");
   S.hub = S.site.hub.slice(); S.dst = S.site.dst.slice();
   S.img.onload = draw; S.img.src = "/basemap.png";
-  $("siteinfo").textContent = `성남 판교·분당 ${(S.site.W / 1000).toFixed(1)}×${(S.site.H / 1000).toFixed(1)} km · 실제 지형/건물 · ${S.site.date} · ${S.site.drone.name}`;
+  $("siteinfo").textContent = `${S.site.site?.label ?? "성남 판교·분당"} ${(S.site.W / 1000).toFixed(1)}×${(S.site.H / 1000).toFixed(1)} km · 실제 지형/건물 · ${S.site.date} · ${S.site.drone.name}`;
   S.site.wind.slice(0, -1).forEach(w => { const o = document.createElement("option"); o.value = w.hour;
     o.textContent = `${w.hour}:00 (100 m ${w.speed.toFixed(1)} m/s, ${Math.round(w.dir_from)}°)`; $("dep").appendChild(o); });
   $("dep").value = 15;

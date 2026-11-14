@@ -57,6 +57,17 @@
   .kv { font-size:12px; display:grid; grid-template-columns:auto 1fr; gap:2px 10px; }
   .kv span:nth-child(odd) { color:var(--gray); }
   .warnbox { font-size:11.5px; background:#FFF4E8; border:1px solid #F2C79A; border-radius:5px; padding:6px 8px; line-height:1.5; }
+  #obslist, #vialist { list-style:none; padding:0; margin:4px 0; max-height:132px; overflow:auto; }
+  #obslist li, #vialist li { font-size:12px; padding:4px 6px; border-radius:4px; cursor:pointer; display:flex; justify-content:space-between; gap:6px; align-items:center; }
+  #obslist li.sel { background:var(--light); font-weight:bold; }
+  #vialist li { cursor:default; }
+  #vialist li button, table.pts button { padding:1px 6px; font-size:11px; }
+  table.pts { font-size:11px; border-collapse:collapse; width:100%; }
+  table.pts td, table.pts th { border-bottom:1px solid #eee; padding:2px 3px; text-align:center; }
+  table.pts input { width:58px; }
+  input[type=text] { font-size:12px; padding:3px 5px; border:1px solid #C9D3DB; border-radius:4px; width:180px; }
+  button.warn { border-color:var(--red); color:var(--red); }
+  #dirty { display:none; font-size:12px; background:#FFF4E8; border:1px solid #F2C79A; border-radius:5px; padding:6px 8px; margin-top:6px; }
   @media (max-width: 900px) { main { grid-template-columns:1fr; } aside { overflow:visible; } body { height:auto; } #view { min-height:420px; } }
 </style>
 <script type="importmap">{ "imports": { "three": "/vendor/three.module.min.js" } }</script>
@@ -77,20 +88,20 @@
         <label><input type="checkbox" id="l_floor"> 비행 가능 하한면</label>
         <label><input type="checkbox" id="l_wind"> 바람 벡터</label>
         <label><input type="checkbox" id="l_base" checked> 장애물 무시 경로</label>
-        <label><input type="checkbox" id="l_obs" checked> 이동 장애물</label>
+        <label><input type="checkbox" id="l_obs" checked> 장애물</label>
         <label>높이 과장 <select id="zs"><option value="1">1배</option><option value="2" selected>2배</option><option value="3">3배</option></select></label>
         <label>바람 고도 <select id="wk"></select></label>
         <button id="fit" style="margin-top:3px;padding:3px 8px">경로에 맞춰 보기</button>
       </div>
       <div id="hud"></div>
-      <div id="hint">왼쪽 끌기: 회전 · 오른쪽 끌기: 이동 · 휠: 확대</div>
+      <div id="hint">왼쪽 끌기: 회전 · 오른쪽 끌기: 이동 · 휠: 확대 · 표식(구슬)을 끌면 위치 이동</div>
       <div id="webglerr">이 브라우저에서 WebGL을 쓸 수 없어 3D 지도를 표시하지 못했습니다.</div>
     </div>
     <div id="bottom">
       <div class="row">
-        <button id="play" disabled>▶ 재생</button>
-        <input type="range" id="tl" min="0" max="1" step="1" value="0" disabled>
-        <span id="tlab" style="font-size:12px;color:var(--gray);min-width:150px">경로를 생성하면 재생할 수 있습니다</span>
+        <button id="play">▶ 재생</button>
+        <input type="range" id="tl" min="0" max="300" step="1" value="0">
+        <span id="tlab" style="font-size:12px;color:var(--gray);min-width:150px">출발 후 0 s</span>
       </div>
       <canvas id="profile"></canvas>
     </div>
@@ -102,21 +113,52 @@
       <div class="kv" id="droneinfo"></div>
       <div class="warnbox" id="dronewarn" style="display:none;margin-top:6px"></div>
       <div class="row"><label>탑재중량</label><input type="number" id="payload" min="0" step="0.1" value="0.5"> kg <span class="hint" id="pmax"></span></div>
-      <div class="row"><label>임무</label><select id="kind"><option value="delivery">배송 (갈 때 적재)</option><option value="pickup">회수 (올 때 적재)</option></select>
+      <div class="row"><label>임무 형태</label><select id="mtype"><option value="tour">순회 (경유점을 돌고 복귀)</option><option value="ab">배송·회수 (출발지 ↔ 도착지)</option></select></div>
+      <div class="row" id="r_ab"><label>임무</label><select id="kind"><option value="delivery">배송 (갈 때 적재)</option><option value="pickup">회수 (올 때 적재)</option></select>
         <label class="inl"><input type="checkbox" id="rt" checked> 왕복</label></div>
+      <div id="r_tour">
+        <div class="row"><label>경유점</label><button id="addvia">+ 경유점 (지도 클릭)</button><button id="viadef">기본값</button><button id="viaclr" class="warn">모두 삭제</button></div>
+        <ul id="vialist"></ul>
+        <div class="row"><label>경유점 체류</label><input type="number" id="dwell" min="0" max="300" step="5" value="10"> s <span class="hint">(그 자리에서 호버)</span></div>
+      </div>
       <div class="row"><label>출발 시각</label><select id="hour"></select><span class="hint" id="windinfo"></span></div>
       <div class="row"><label>예비 SOC</label><input type="number" id="reserve" min="0" max="50" step="5" value="20"> %
         <label class="inl" style="margin-left:8px">바람 <select id="wind"><option value="full">3D 예보</option><option value="linear">고도별 선형</option></select></label></div>
-      <div class="row"><label>이동 장애물</label><label class="inl"><input type="checkbox" id="useobs"> 예시 3종 (타 드론·헬기·행사 제한)</label></div>
+      <div class="row"><label>위험 한도 ε</label><select id="eps"><option value="">쓰지 않음 (예측 그대로)</option><option value="0.05">0.05</option><option value="0.01">0.01</option></select>
+        <span class="hint">장애물 위치 오차를 고려한 팽창</span></div>
       <div class="row"><label>위치</label><button id="pickhub">출발지 찍기</button><button id="pickdst">도착지 찍기</button>
         <span class="hint" id="ptinfo"></span></div>
       <div class="row"><button id="plan" class="primary">경로 생성</button><span id="status"></span></div>
+      <div id="dirty">임무나 장애물이 바뀌었습니다. <b>경로 생성</b>을 다시 눌러 주세요.</div>
       <div id="errors"></div>
+    </div>
+    <div class="card">
+      <h2>장애물 편집 <span id="obscount" style="color:var(--gray);font-weight:normal"></span></h2>
+      <div class="row">
+        <button data-add="cylinder">+ 원기둥</button><button data-add="sphere">+ 구</button><button data-add="box">+ 박스</button>
+        <button id="example">예시</button><button id="clear" class="warn">전체 삭제</button>
+      </div>
+      <div class="row"><button id="export">JSON 내보내기</button><label class="inl"><input type="file" id="import" accept=".json" style="width:170px;font-size:11px"></label></div>
+      <ul id="obslist"></ul>
+      <div id="editor" style="display:none">
+        <div class="row"><label>이름</label><input type="text" id="e_name"></div>
+        <div class="row"><label>종류</label><select id="e_kind"><option value="cylinder">원기둥</option><option value="sphere">구</option><option value="box">박스</option></select>
+          <label class="inl">안전 이격 <input type="number" id="e_margin" min="0" max="200" step="5" style="width:60px"> m</label></div>
+        <div class="row" id="r_radius"><label>반경</label><input type="number" id="e_radius" min="5" max="1500" step="5"> m</div>
+        <div class="row" id="r_box"><label>반폭 X / Y</label><input type="number" id="e_hx" min="5" max="1500" step="10"><input type="number" id="e_hy" min="5" max="1500" step="10"> m</div>
+        <div class="row" id="r_z"><label>고도 범위</label><input type="number" id="e_zmin" step="10"> ~ <input type="number" id="e_zmax" step="10"> m 해발</div>
+        <div class="row" title="위치 오차 σ(t) = σ0 + σv·(t − 관측 시각), 도달 시각 오차 σt"><label>불확실성</label>σ0<input type="number" id="e_s0" min="0" max="500" step="1" style="width:50px">m σv<input type="number" id="e_sv" min="0" max="20" step="0.1" style="width:50px">m/s σt<input type="number" id="e_st" min="0" max="120" step="1" style="width:44px">s</div>
+        <div class="row"><label>존재 시간</label><input type="number" id="e_t0" step="5" placeholder="자동"> ~ <input type="number" id="e_t1" step="5" placeholder="자동"> s</div>
+        <div class="row"><b style="font-size:12px">이동 경로</b><button id="addpt">+ 경로점 (지도 클릭)</button><button id="delobs" class="warn">장애물 삭제</button></div>
+        <table class="pts"><thead><tr><th>#</th><th>x [m]</th><th>y [m]</th><th id="th_z">z [m]</th><th>t [s]</th><th>속도</th><th></th></tr></thead><tbody id="pts"></tbody></table>
+        <div class="hint">지도에서 장애물을 누르면 선택됩니다. 경로점 구슬을 끌면 위치가 바뀝니다.<br>경로점 1개 = 정지, 2개 이상 = 구간별 등속 이동 (t는 출발 기준 초). 옅은 바깥 껍질 = 안전 이격 + 불확실성 팽창.</div>
+      </div>
+      <div class="row"><button id="validate">검증</button><span id="vstatus" class="hint"></span></div>
     </div>
     <div class="card" id="rescard" style="display:none">
       <h2>결과</h2>
       <div class="row"><span>도착 SOC</span><span class="big" id="r_soc"></span><span id="r_feas"></span></div>
-      <table class="res"><thead><tr><th>구간</th><th>에너지</th><th>SOC</th><th>시간</th><th>거리</th><th>고도(해발)</th><th>계산</th></tr></thead><tbody id="r_legs"></tbody></table>
+      <table class="res"><thead><tr><th>구간</th><th>에너지</th><th>SOC</th><th>시간</th><th>거리</th><th>고도(해발)</th><th>장애물 최소 이격</th></tr></thead><tbody id="r_legs"></tbody></table>
       <div class="hint" id="r_note" style="margin-top:6px"></div>
     </div>
     <div class="card" id="miscard" style="display:none">
@@ -124,7 +166,7 @@
       <div class="row"><button id="dl_wpl" class="primary">미션 파일 (.waypoints)</button><button id="dl_csv">경로표 (.csv)</button></div>
       <table class="res" id="m_tab" style="display:none"><thead><tr><th>구간</th><th>항목</th><th>경로점</th><th>속도 변경</th><th>상대 고도</th><th>대지속도</th></tr></thead><tbody id="m_rows"></tbody></table>
       <div class="hint" style="margin-top:6px">
-        Mission Planner·QGroundControl에서 읽는 형식(QGC WPL 110)입니다. 구간마다 파일이 하나씩 나옵니다(왕복이면 가는 편·오는 편).<br>
+        Mission Planner·QGroundControl에서 읽는 형식(QGC WPL 110)입니다. 이륙~착륙 한 번이 파일 하나입니다(순회는 1개, 왕복은 가는 편·오는 편 2개).<br>
         고도는 <b>출발지 지면 기준 상대 고도</b>입니다. 계획기는 상승 <span id="m_up"></span> m/s, 하강 <span id="m_dn"></span> m/s를 가정했으므로
         기체의 WP_SPD_UP·WP_SPD_DN(구버전 WPNAV_SPEED_UP·DN)을 이 값 이상으로 맞추세요.<br>
         이동 장애물을 피하려고 넣은 대기·출발 지연은 시각에 맞춰 비행해야 유효합니다. 실제 비행 전에는 반드시 현장 확인과 비행승인이 필요합니다.
