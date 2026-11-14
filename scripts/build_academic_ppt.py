@@ -23,6 +23,8 @@ from build_ppt import (BOX, FIG, GRAY, INK, LIGHT, NAVY, ORANGE, ROOT, TEAL, TIT
 DJ = json.loads((ROOT / "results" / "dji_conditions.json").read_text())
 _X = ROOT / "results" / "x650.json"
 X6 = json.loads(_X.read_text()) if _X.exists() else None
+_CW = ROOT / "results" / "changwon.json"
+CW = json.loads(_CW.read_text()) if _CW.exists() else None
 X0, W = 0.6, 12.15          # 본문 좌우 범위 [in]
 SRC_Y = 7.02                # 출처 줄 위치 (오른쪽 아래 로고와 겹치지 않게 폭 제한)
 
@@ -104,7 +106,7 @@ def build(template, out):
              ("02", "Background", "왜 SOC·왜 바람·왜 경로인가, DJI 드론 조건 전수 검토, 전력 모델, 시공간 계획"),
              ("03", "Related Works", "최신 연구와의 비교, 남은 공백"),
              ("04", "Proposed Method", "문제 정식화, WE-SIPP-Theta*, 해석적 위험구간, 실시간 운용, 대상 기체 X650·3D 지도"),
-             ("05", "Results", "실측 데이터 기반 실험 E0–E12, 실시간 벤치"),
+             ("05", "Results", "실측 데이터 기반 실험 E0–E12, 실시간 벤치, 대상 기체, 창원 순회 시뮬레이션"),
              ("06", "Conclusion", "핵심 결론, 한계, 향후 연구")]
     for i, (no, t, d) in enumerate(cards):
         x, y = X0 + (i % 3) * 4.1, 1.5 + (i // 3) * 2.45
@@ -561,28 +563,27 @@ def build(template, out):
                  "기록으로 보정해야 합니다. 두 첨부 문서의 무게 표기가 달라(프레임 2.0 kg, 자체무게 4.1 kg) 4.1 kg을 무탑재 이륙 "
                  "중량으로 보았습니다.")
 
-        s = D.content("3D 지도에서 경로 생성 → ArduPilot 미션")
+        s = D.content("3D 지도에서 임무·장애물 편집 → ArduPilot 미션")
         section(s, SEC[3])
-        picture(s, FIG / "platform_3d.png", X0, 1.1, 8.3, 5.75)
+        shot = FIG / ("platform_3d_changwon.png" if CW else "platform_3d.png")
+        picture(s, shot, X0, 1.1, 8.3, 5.75)
         head(s, 9.1, 1.15, "3D 지도 화면 (/3d)", w=3.7)
-        items(s, 9.1, 1.6, 3.65, 2.5, ["지형·건물 7천여 동·금지구역·바람", "지도를 눌러 출발·도착 지정",
-                                       "경로, 고도 단면, 시간 재생", "기체 선택 (X650 / M100)"], size=13, gap=5)
-        head(s, 9.1, 3.75, "미션 내보내기", w=3.7)
-        ex = X6["mission_export"]
-        items(s, 9.1, 4.2, 3.65, 2.7, [
-            "QGC WPL 110 (.waypoints) + 경로표",
-            "이륙·경로점·속도 변경·대기·착륙",
-            "고도는 출발지 지면 기준 상대 고도",
-            f"예: 가는 편 {ex['out']['n_items']}개, 오는 편 {ex['back']['n_items']}개 항목",
-            "시간·SOC가 시뮬레이션과 일치"], size=13, gap=5)
-        source(s, "pymavlink 미션 로더로 형식 확인 · SITL·실기체 비행은 하지 않음")
-        notes(s, "계획기는 처음부터 3D 격자에서 경로를 찾았습니다. 이번에 더한 것은 그 3D 공간을 그대로 보면서 임무를 정하는 "
-                 "화면입니다. 지형과 건물, 비행금지구역, 고도별 바람을 3D로 보고, 지도를 눌러 출발지와 도착지를 정하면 경로와 "
-                 "고도 단면이 나옵니다. 만든 경로는 ArduCopter의 AUTO 모드가 읽는 미션 파일로 내보냅니다. 이륙, 경로점, 구간 "
+        items(s, 9.1, 1.6, 3.65, 1.75, ["지형·건물·바람·경로·고도 단면", "지도를 눌러 출발지·경유점 지정",
+                                        "지역 전환 (판교 / 창원)"], size=13, gap=4)
+        head(s, 9.1, 3.05, "장애물 편집", w=3.7)
+        items(s, 9.1, 3.5, 3.65, 1.75, ["지도를 눌러 원기둥·구·박스 추가", "경로점 구슬을 끌어 이동 경로 수정",
+                                        "크기·고도·시각·불확실성 입력"], size=13, gap=4)
+        head(s, 9.1, 4.95, "순회 임무와 미션 내보내기", w=3.7)
+        items(s, 9.1, 5.4, 3.65, 1.55, ["경유점을 착륙 없이 돌고 복귀", "미션 파일 1개 (QGC WPL 110)",
+                                        "시간·SOC가 시뮬레이션과 일치"], size=13, gap=4)
+        source(s, "pymavlink 미션 로더로 형식 확인 · SITL·실기체 비행은 하지 않음 · 화면: 창원 창이대로 71 주변")
+        notes(s, "계획기는 처음부터 3D 격자에서 경로를 찾았습니다. 여기에 그 3D 공간을 그대로 보면서 임무와 장애물을 편집하는 "
+                 "화면을 더했습니다. 지도를 눌러 출발지와 경유점을 정하고, 장애물은 지도를 눌러 놓은 뒤 경로점 구슬을 끌어 이동 "
+                 "경로를 고칩니다. 크기, 고도 범위, 존재 시각, 위치 불확실성은 숫자로 넣습니다. 순회 임무는 출발지에서 경유점을 "
+                 "착륙 없이 돌고 돌아오는 임무이고, ArduCopter의 AUTO 모드가 읽는 미션 파일 하나로 나옵니다. 이륙, 경로점, 구간 "
                  "대지속도, 호버 대기, 착륙 명령으로 바꾸며, 고도는 출발지 지면 기준 상대 고도입니다. 미션의 예상 시간과 SOC는 "
-                 "전체 시뮬레이션과 일치하고 pymavlink 로더가 파일을 읽는 것까지 확인했습니다. 모의 비행(SITL)과 실기체 "
-                 "비행은 아직 하지 않았습니다. 이 기체는 주변 비행체를 스스로 탐지하지 못하므로, 동적 장애물 정보는 지상에서 "
-                 "받아 넣어야 합니다.")
+                 "전체 시뮬레이션과 일치하고 pymavlink 로더가 파일을 읽는 것까지 확인했습니다. 모의 비행(SITL)과 실기체 비행은 "
+                 "아직 하지 않았습니다. 비행 중 재계획은 이 화면이 아니라 실시간 운용 화면에 있습니다.")
 
     # ================================================================= 05 Results
     s = D.content("실험 설정: 실측 데이터만 사용")
@@ -718,6 +719,67 @@ def build(template, out):
                  "남는 SOC는 더 먼 배송지나 더 무거운 화물에 쓸 수 있습니다. 오른쪽 그림처럼 모델 가정에 따라 절댓값이 "
                  "달라지므로, 이 수치는 비행 기록으로 보정하기 전의 추정입니다.")
 
+    if CW:
+        cs, cm, st = CW["cases"], CW["methods"], CW["site"]
+        c0, c1, c2 = cs["none"], cs["obs"], cs["unc"]
+        wd = [x["wind"] for x in CW["sweep"]]
+        s = D.content("창원 창이대로 71 주변 순회 시뮬레이션")
+        section(s, SEC[4])
+        picture(s, FIG / "F27_changwon_tour.png", X0, 1.1, 8.55, 3.65)
+        head(s, 9.35, 1.15, "설정", w=3.4)
+        items(s, 9.35, 1.6, 3.4, 3.2, [
+            ("지도  ", f"기준 지점 주변 {st['W'] / 1000:.1f} × {st['H'] / 1000:.1f} km, 건물 {st['n_buildings']:,}동"),
+            ("임무  ", f"경유점 {len(CW['tour'])}곳을 돌고 복귀, 경유점마다 {CW['dwell']:.0f} s 체류"),
+            ("기체  ", f"X650 (추정 모델), 탑재 {CW['payload']:g} kg, {CW['hour']}시 출발"),
+            ("바람  ", f"GFS 예보, 지면 위 100 m {min(wd):.1f}–{max(wd):.1f} m/s"),
+        ], size=13, gap=5)
+        stat(s, X0, 4.95, 3.95, 1.5, "순회 SOC 소모 (장애물 3종 회피)", f"{c1['soc_used']:.1f} %p",
+             f"{c1['L'] / 1000:.1f} km · {c1['T']:.0f} s · 도착 SOC {c1['soc_end']:.1f} %", dark=True)
+        stat(s, X0 + 4.1, 4.95, 3.95, 1.5, "장애물을 무시한 경로 → 계획 경로",
+             f"{len(c1['baseline_hit_legs'])}개 구간 충돌 → 0", f"최소 이격 {c1['min_clearance']:.0f} m · 회피 대기 {c1['wait']:.0f} s", vsize=22)
+        stat(s, X0 + 8.2, 4.95, 3.95, 1.5, "최단 + 정속 10 m/s → 제안 (장애물 없음)",
+             f"{cm['shortest_v10']['soc']:.1f} → {cm['proposed_static']['soc']:.1f} %p",
+             f"{cm['shortest_v10']['T']:.0f} → {cm['proposed_static']['T']:.0f} s", vsize=22)
+        source(s, "모의 결과 · 기준 좌표는 지도 자료의 창원시농업기술센터 위치 · 장애물은 가상 · 공역 제한은 확인하지 않음")
+        notes(s, f"실증 지역 후보인 창원 창이대로 71 주변으로 지도를 바꿔 시뮬레이션했습니다. 창이대로 71은 창원시농업기술센터이고, "
+                 f"그 지점을 가운데 둔 {st['W'] / 1000:.1f} × {st['H'] / 1000:.1f} km 지도에 실제 지형과 건물, 같은 날의 예보 바람을 "
+                 f"넣었습니다. 임무는 기준 지점에서 이륙해 약 1 km 떨어진 경유점 다섯 곳을 돌고 돌아오는 순회입니다. 왼쪽 그림의 "
+                 f"실선이 장애물을 피한 경로, 점선이 장애물이 없을 때의 경로입니다. 가상 장애물 세 가지, 곧 경로를 가로지르는 다른 "
+                 f"드론, 응급 헬기, 행사 임시 제한 구역을 넣었을 때 장애물을 무시한 경로는 여섯 구간 중 "
+                 f"{len(c1['baseline_hit_legs'])}개에서 충돌하지만 계획한 경로는 충돌이 없었습니다. SOC는 {c1['soc_used']:.1f} %p를 "
+                 f"썼습니다. 이 수치는 X650의 추정 모델에 따른 모의 결과이고, 창원의 실제 공역 제한은 확인하지 않았습니다.")
+
+        s = D.content("창원 순회 – 장애물 회피 비용과 방법 비교")
+        section(s, SEC[4])
+        head(s, X0, 1.15, "세 경우의 결과", w=6.0)
+        rows = [["경우", "SOC 소모", "비행 시간", "거리", "회피 대기", "최소 이격", "충돌"]]
+        for c in (c0, c1, c2):
+            rows.append([c["name"], f"{c['soc_used']:.1f} %p", f"{c['T']:.0f} s", f"{c['L'] / 1000:.2f} km", f"{c['wait']:.0f} s",
+                         "–" if c["min_clearance"] is None else f"{c['min_clearance']:.0f} m", "없음"])
+        table(s, X0, 1.62, W, rows, [4.0, 1.4, 1.4, 1.4, 1.35, 1.35, 1.25], row_h=0.5, head_size=13, body_size=13,
+              highlight=(2,), first_col_center=False, aligns=[PP_ALIGN.LEFT] + [PP_ALIGN.CENTER] * 6)
+        head(s, X0, 3.95, "방법 비교 (장애물 없음)", w=6.0)
+        rows = [["방법", "SOC 소모", "비행 시간", "거리"]]
+        for k, lb in (("shortest_v10", "최단 경로 + 정속 10 m/s"), ("shortest_vopt", "최단 경로 + 속도 최적화"),
+                      ("proposed_static", "제안 방법")):
+            rows.append([lb, f"{cm[k]['soc']:.1f} %p", f"{cm[k]['T']:.0f} s", f"{cm[k]['L'] / 1000:.2f} km"])
+        table(s, X0, 4.42, 6.3, rows, [2.9, 1.15, 1.15, 1.1], row_h=0.5, head_size=13, body_size=13, highlight=(3,),
+              first_col_center=False, aligns=[PP_ALIGN.LEFT] + [PP_ALIGN.CENTER] * 3)
+        pr = [x["proposed"]["soc"] for x in CW["sweep"]]
+        items(s, 7.25, 4.0, 5.5, 2.9, [
+            ("회피 비용은 작습니다. ", f"SOC {c1['soc_used'] - c0['soc_used']:.1f} %p, 시간 {c1['T'] - c0['T']:.0f} s. "
+                               "드론과 헬기는 지나갈 때까지 기다리고 제한 구역은 돌아갑니다."),
+            ("위치 불확실성을 넣으면 ", f"SOC {c2['soc_used'] - c1['soc_used']:.1f} %p, 시간 {c2['T'] - c1['T']:.0f} s가 더 듭니다."),
+            ("출발 시각 09–20시 ", f"제안 방법 {min(pr):.1f}–{max(pr):.1f} %p. 바람이 센 시각에 가장 많이 듭니다."),
+        ], size=13.5, gap=7)
+        source(s, "X650 추정 모델 · 불확실성: σ0 10 m, σv 0.5 m/s, ε 0.05 · 순회 미션 파일 76개 항목, 도착 SOC가 계획과 일치")
+        notes(s, f"세 경우를 비교합니다. 장애물이 없을 때 순회에 SOC {c0['soc_used']:.1f} %p, {c0['T']:.0f}초가 듭니다. 장애물 세 "
+                 f"가지를 피하면 {c1['soc_used']:.1f} %p, {c1['T']:.0f}초로, 회피 비용은 SOC {c1['soc_used'] - c0['soc_used']:.1f} %p입니다. "
+                 f"장애물 위치의 불확실성까지 넣으면 더 일찍, 더 멀리 피하므로 {c2['soc_used']:.1f} %p가 됩니다. 세 경우 모두 예비 "
+                 f"20 %를 크게 남깁니다. 아래 표는 장애물이 없는 같은 순회를 세 방법으로 계산한 것입니다. 정속 최단 경로는 "
+                 f"{cm['shortest_v10']['soc']:.1f} %p, 제안 방법은 {cm['proposed_static']['soc']:.1f} %p입니다. 경유점 순서는 정한 "
+                 f"대로이며 최적화하지 않았습니다. 순회 임무는 비행 중 재계획을 아직 지원하지 않습니다.")
+
     # ================================================================= 06 Conclusion
     s = D.content("결론")
     section(s, SEC[5])
@@ -728,22 +790,31 @@ def build(template, out):
            ("실측 오차는 꼬리가 두껍고 τ^1.5로 성장", "데이터 모양이 시점별 위험을 보정하지만, 폐루프 안전은 탐지 시각과 반응 시간 "
                                            "여유가 좌우합니다."),
            ("비동기 실시간 운용", "비상 정지·즉시 계획 후 개선으로 10배속 5/5 무침범 완주했습니다.")]
+    if CW:
+        c1 = CW["cases"]["obs"]
+        con.append(("대상 기체와 실증 지역으로 옮김",
+                    f"X650 추정 모델로 창원 창이대로 71 주변 {c1['L'] / 1000:.1f} km 순회를 계획했고, 가상 장애물 3종을 피해 SOC "
+                    f"{c1['soc_used']:.1f} %p를 썼습니다 (모의 결과)."))
+    step = 1.13 if len(con) <= 5 else 0.95
     for i, (t, d) in enumerate(con):
-        y = 1.2 + i * 1.13
-        sp = box(s, X0, y, 0.7, 0.95, fill=NAVY, shadow=False)
+        y = 1.2 + i * step
+        sp = box(s, X0, y, 0.7, min(0.95, step - 0.14), fill=NAVY, shadow=False)
         box_text(sp, [[(str(i + 1), {"size": 20, "bold": True, "color": WHITE})]], align=PP_ALIGN.CENTER)
-        textbox(s, X0 + 0.9, y, 11.2, 0.95, [[(t, {"size": 16, "bold": True, "color": NAVY})],
-                                            [(d, {"size": 14, "bold": False, "color": INK})]], space_after=2)
-    notes(s, "다섯 가지로 정리합니다. 첫째, SOC와 바람은 임의로 고른 것이 아니라 DJI 드론이 내놓는 조건 전체를 검토해 고른 "
+        textbox(s, X0 + 0.9, y - (0.0 if step > 1 else 0.04), 11.2, 0.9,
+                [[(t, {"size": 16 if step > 1 else 15, "bold": True, "color": NAVY})],
+                 [(d, {"size": 14 if step > 1 else 13, "bold": False, "color": INK})]], space_after=1)
+    notes(s, "여섯 가지로 정리합니다. 첫째, SOC와 바람은 임의로 고른 것이 아니라 DJI 드론이 내놓는 조건 전체를 검토해 고른 "
              "것입니다. 둘째, 바람 속 에너지 최적화에서는 속도 결정과 에너지 비교 지름길이 결정적입니다. 셋째, 팽창 반경이 구간별 "
              "선형이면 위험구간을 해석적으로 구할 수 있습니다. 넷째, 실측 오차는 꼬리와 성장 모양이 가우시안과 달랐고, 이 부정적 "
-             "결과도 기여로 봅니다. 다섯째, 실시간 운용 플랫폼으로 구현해 검증했습니다.")
+             "결과도 기여로 봅니다. 다섯째, 실시간 운용 플랫폼으로 구현해 검증했습니다. 여섯째, 대상 기체 X650과 창원 지도로 옮겨 "
+             "순회 임무를 계획하고 ArduPilot 미션으로 내보냈습니다. 여섯째는 실비행 전의 모의 결과이고 전력 모델이 추정이라는 "
+             "점을 함께 말씀드립니다.")
 
     s = D.content("한계와 향후 연구")
     section(s, SEC[5])
     head(s, X0, 1.2, "한계")
     items(s, X0, 1.7, 5.9, 3.6, [
-        "한 지역·하루·한 기체(DJI M100)의 결과입니다.",
+        "두 지역(판교·창원)·하루의 모의 결과이며, 창원의 공역 제한은 확인하지 않았습니다.",
         "GFS 0.25°는 성글고, '실제' 바람은 관측이 아닌 갱신 예보입니다.",
         "실측 비행 자료에는 풍향이 없어 방향 효과를 직접 검증하지 못했습니다.",
         "DJI 풍속·풍향 키의 지원 기체와 정확도를 확인하지 못했습니다.",
