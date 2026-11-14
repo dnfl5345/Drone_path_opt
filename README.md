@@ -8,6 +8,10 @@
 - 최신 연구 대비 정식화 비교: [`docs/algorithm_comparison.md`](docs/algorithm_comparison.md) (문제 (P) 정의, 문헌별 정식화, 가정 축소 실험)
 - 확장안 (8방향 탐색 + 고도별 균일·선형 바람, LUT): [`docs/extension_8way_linear_wind.md`](docs/extension_8way_linear_wind.md)
 - 3D 시공간 확장 (동적 장애물) + 장애물 편집 플랫폼 + 장애물 변경 시 이벤트 기반 재계획: [`docs/spatiotemporal_dynamic_obstacles.md`](docs/spatiotemporal_dynamic_obstacles.md)
+- **창원 창이대로 71 주변 순회 시뮬레이션과 3D 장애물 편집**: [`docs/changwon_tour.md`](docs/changwon_tour.md)
+  - 지역 전환: `python -m dpo.webapp --site changwon` (또는 환경변수 `DPO_SITE`), 자료 수집 `scripts/build_site.py`
+  - 3D 화면(`/3d`)에서 장애물 추가·끌어 옮기기·속성 편집, 순회 임무(경유점), 단일 ArduPilot 미션
+  - 결과 `scripts/run_changwon.py` → `results/changwon.json`, 그림 F27
 - **실증 대상 기체(Holybro X650, ArduPilot) 반영과 3D 지도 경로 생성**: [`docs/target_x650.md`](docs/target_x650.md)
   - 기체 프리셋 `src/dpo/drones.py` (전력 모델은 제원·제조사 호버 시간 기반 추정), 결과 `scripts/run_x650.py` → `results/x650.json`, 그림 F26
   - 3D 지도 화면 `http://127.0.0.1:8765/3d` (지형·건물·바람·경로·이동 장애물, 지도에서 출발·도착 지정)

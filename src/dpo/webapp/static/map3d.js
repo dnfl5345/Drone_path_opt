@@ -463,6 +463,9 @@ function buildTrack(res) {
   return tr;
 }
 function tube(pts, color, radius) {
+  // 호버 대기 구간은 같은 점이 여러 번 나온다. 겹친 점을 그대로 두면 곡선 계산이 깨지므로 걸러 낸다.
+  pts = pts.filter((p, q) => q === 0 || p.distanceTo(pts[q - 1]) > 0.5);
+  if (pts.length < 2) return new THREE.Group();
   const curve = new THREE.CatmullRomCurve3(pts, false, "catmullrom", 0.0);
   return new THREE.Mesh(new THREE.TubeGeometry(curve, Math.max(pts.length * 2, 8), radius, 8, false), new THREE.MeshLambertMaterial({ color }));
 }
@@ -492,10 +495,13 @@ function drawPlan() {
     if (!L.air_start) pts.unshift(new THREE.Vector3(a.x, a.y, groundAt(a.x, a.y)));
     if (!L.air_end) pts.push(new THREE.Vector3(b.x, b.y, groundAt(b.x, b.y)));
     if (pts.length > 1) {
-      // 건물 뒤에 가린 부분도 보이도록, 깊이 검사를 끈 옅은 선을 한 겹 더 그린다
-      const ghost = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
-                                   new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.55, depthTest: false }));
-      ghost.renderOrder = 5;
+      // 건물 뒤에 가린 부분도 보이도록, 깊이 검사를 끈 반투명 관을 한 겹 더 그린다
+      const ghost = tube(pts, color, 14);
+      if (ghost.isMesh) {
+        ghost.material.dispose();
+        ghost.material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, depthTest: false, depthWrite: false });
+        ghost.renderOrder = 5;
+      }
       G.path.add(tube(pts, color, 14), curtain(s, color), ghost);
     }
   }
