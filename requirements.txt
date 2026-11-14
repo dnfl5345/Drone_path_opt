@@ -1,0 +1,17 @@
+numpy
+scipy
+numba
+matplotlib
+pandas
+requests
+rasterio
+pygrib
+pyarrow
+fsspec
+aiohttp
+shapely
+imageio
+pillow
+python-pptx
+lxml
+pytest
