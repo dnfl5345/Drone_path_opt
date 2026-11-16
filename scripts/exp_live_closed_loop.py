@@ -164,9 +164,13 @@ def figure(R):
     lab = {"real": "실제\n예보 오차", "rot30": "풍향\n30°", "rot60": "풍향\n60°", "rot90": "풍향\n90°", "spd0.6": "풍속\n0.6배"}
     pol = [("P1", "안전장치만", "#9E9E9E"), ("P2", "+ 속도 갱신 60 s", "#9CC3E4"), ("P3", "+ 속도 갱신 30 s (기본)", "#1B6CA8"),
            ("P4", "+ 속도 갱신 15 s", "#0B3C5D")]
-    fig, axs = plt.subplots(1, len(R), figsize=(7.6 * len(R), 4.8), squeeze=False, gridspec_kw=dict(wspace=0.22))
+    ncol = 2 if len(R) > 1 else 1
+    nrow = int(math.ceil(len(R) / ncol))
+    fig, axs = plt.subplots(nrow, ncol, figsize=(6.9 * ncol, 4.5 * nrow), squeeze=False, gridspec_kw=dict(wspace=0.24, hspace=0.5))
+    for ax in axs.ravel()[len(R):]:
+        ax.axis("off")
     for c, (sname, S) in enumerate(R.items()):
-        ax = axs[0, c]
+        ax = axs[c // ncol, c % ncol]
         names = [n for n, _ in CASES if n in S["cases"] and S["cases"][n]["n_ok"]]
         x = np.arange(len(names))
         w = 0.8 / len(pol)
@@ -183,7 +187,12 @@ def figure(R):
         ax.set_title(f"{SETLAB.get(sname, sname)}: 실시간 엔진 폐루프 (편도, 경우마다 {S['cases'][names[0]]['n_ok']}건)\n괄호: 기체가 추정한 바람 편차",
                      fontsize=10.5)
         if c == 0:
-            ax.legend(frameon=False, fontsize=9, loc="lower left")
+            if len(R) < nrow * ncol:              # 빈 칸이 있으면 범례를 그리로 보낸다
+                h, l = ax.get_legend_handles_labels()
+                axs.ravel()[-1].legend(h, l, frameon=False, fontsize=11, loc="center", title="설정 (연결 전 = 안전장치 끔, 속도 갱신 끔)",
+                                       title_fontsize=10.5)
+            else:
+                ax.legend(frameon=False, fontsize=9, loc="lower left")
     fig.savefig(C.FIG / "F30_live_closed_loop.png")
     plt.close(fig)
 
