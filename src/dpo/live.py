@@ -157,12 +157,18 @@ class LiveEngine:
         self.SP = STPlanner(site, drone)          # 재계획(긴급) 전용
         self.SPr = STPlanner(site, drone)         # 백그라운드 개선 전용 (긴급 재계획을 막지 않도록 분리)
         self.truth = site                         # 실제 바람 (모의 운용에서만 예보와 다르게 둘 수 있다)
+        self.link = None                          # MAVLink 연결 (mavlink_bridge.MavBridge) – 있으면 속도 명령을 보낸다
         self._tracks = None
         if not sync:                              # 실측 항적 미리 읽기 (첫 침입기 투입 지연 방지)
             threading.Thread(target=self._load_pool, daemon=True).start()
         self.state = "idle"
         self.session = 0
         self._threads = []
+
+    def attach_link(self, link):
+        """MAVLink 연결을 붙인다 (None 이면 뗀다). 순항 중 속도 변경 지점마다 DO_CHANGE_SPEED 를 보낸다."""
+        with self.lock:
+            self.link = link
 
     # -------------------------------------------------------------- 시작/제어
     def start(self, cfg, user_obstacles=(), truth=None):
@@ -210,6 +216,9 @@ class LiveEngine:
             self.wind_last = None
             self._rng = np.random.default_rng(int(c["wind_seed"]))
             self.sg = dict(energy=0, shortest=0, last=None)
+            self._cmd_queue, self._cmd_out = [], []       # 보낼 속도 명령 (계획 교체 때마다 다시 채움)
+            self.link_stats = dict(sent=0, acked=0, failed=0, last=None)
+            c.setdefault("wind_from_link", False)
             self.cfg = c
             self.t_dep = (int(c["dep_hour"]) - KST) * 3600.0
             m0 = d.m_empty
@@ -497,6 +506,8 @@ class LiveEngine:
             self._push(dict(kind="sim", sim=plan["track"], t0=self.t, t1=sim["t"][-1] - self.t_dep))
         self.plan = plan
         self.plan_ver += 1
+        if self.link is not None:                 # 새 계획의 속도 변경 지점을 명령 대기열로
+            self._cmd_queue = SU.speed_schedule(sim, plan["t0"], self.t_dep)
         if self.phase in ("이륙", "대기"):
             self.phase = "순항"
 
@@ -942,6 +953,12 @@ class LiveEngine:
         ③ 새 속도의 궤적이 위험 시간구간과 겹치지 않는다 (속도를 바꾸면 장애물과 만나는 시각이 달라지기 때문).
         경로 재계획이 진행 중이거나 예약돼 있으면 건너뛴다. 계산은 lock 밖에서 한다."""
         s, d = self.site, self.drone
+        lw = None
+        if self.link is not None and self.cfg.get("wind_from_link"):
+            try:
+                lw = self.link.read_wind(0.3)                    # 기체가 추정한 바람 (MAVLink WIND)
+            except Exception:  # noqa
+                lw = None
         with self.lock:
             self.spd_due = False
             c = self.cfg
@@ -950,7 +967,7 @@ class LiveEngine:
             plan = self.plan
             T = self.t_dep + self.t
             x, y, z = self._drone_at(self.t)
-            meas = SU.wind_at_xyz(self.truth, T, x, y, z)        # 실기체에서는 MAVLink WIND 메시지로 받는 값
+            meas = lw if lw is not None else SU.wind_at_xyz(self.truth, T, x, y, z)   # 모의 운용: 실제 바람장에서 읽음
             if c["wind_noise"] > 0:
                 meas = (meas[0] + self._rng.normal(0.0, c["wind_noise"]), meas[1] + self._rng.normal(0.0, c["wind_noise"]))
             fc = SU.wind_at_xyz(s, T, x, y, z)
@@ -1005,6 +1022,26 @@ class LiveEngine:
                               f"−{p['gain'] * 100:.1f}% · t={t_sw:.0f} s 부터 {v0:.1f} m/s · 계산 {cpu * 1000:.0f} ms",
                      gain=round(p["gain"] * 100, 2))
             return True
+
+    def _flush_cmds(self):
+        """대기열에서 때가 된 속도 명령을 MAVLink 로 보낸다 (lock 밖에서 통신)."""
+        with self.lock:
+            out, self._cmd_out = self._cmd_out, []
+            link = self.link
+        for c in out:
+            ok, err = False, None
+            if link is not None:
+                try:
+                    ok = bool(link.send_change_speed(c["v"]))
+                    err = None if ok else getattr(link, "last_error", None)
+                except Exception as ex:  # noqa
+                    err = f"{type(ex).__name__}: {ex}"
+            with self.lock:
+                self.link_stats["sent"] += 1
+                self.link_stats["acked" if ok else "failed"] += 1
+                self.link_stats["last"] = dict(t=round(self.t, 1), v=c["v"], ok=ok)
+                if not ok:
+                    self._ev("warn", f"속도 명령 {c['v']:.1f} m/s 전송 실패: {err or '응답 없음'}")
 
     def v_cmd(self, t=None):
         """시각 t 의 명령 대지속도 [m/s] (순항 중이 아니면 None)."""
@@ -1084,6 +1121,11 @@ class LiveEngine:
             else:
                 self.next_spd = math.inf
             spd = self.spd_due
+            while self._cmd_queue and self._cmd_queue[0]["t"] <= self.t:
+                c = self._cmd_queue.pop(0)
+                if self.phase == "순항" and self.link is not None:
+                    self._cmd_out.append(c)
+            cmd = bool(self._cmd_out)
         if self.sync:
             if due:
                 self._sur_due = False
@@ -1091,7 +1133,9 @@ class LiveEngine:
                 self._refine()
             if spd:
                 self.speed_update()
-        return due or spd
+            if cmd:
+                self._flush_cmds()
+        return due or spd or cmd
 
     def _tick_loop(self, sid):
         last = time.perf_counter()
@@ -1124,6 +1168,12 @@ class LiveEngine:
                 except Exception as ex:  # noqa
                     with self.lock:
                         self._ev("warn", f"감시 오류: {type(ex).__name__}: {ex}")
+            if self._cmd_out:
+                try:
+                    self._flush_cmds()
+                except Exception as ex:  # noqa
+                    with self.lock:
+                        self._ev("warn", f"속도 명령 전송 오류: {type(ex).__name__}: {ex}")
             if self.spd_due:
                 try:
                     self.speed_update()
@@ -1208,6 +1258,7 @@ class LiveEngine:
                        safeguard=dict(on=self.cfg["safeguard"], energy=self.sg["energy"], shortest=self.sg["shortest"],
                                       last=self.sg["last"]),
                        wind_truth=self.cfg["wind_truth"],
+                       link=None if self.link is None else dict(self.link_stats, queued=len(self._cmd_queue)),
                        sep=None if not math.isfinite(sep) else sep, sep_id=sep_id,
                        min_sep=None if not math.isfinite(self.min_sep) else self.min_sep,
                        obstacles=obs, predictions=pred, replanning=self.replanning,
@@ -1252,6 +1303,7 @@ class LiveEngine:
                         speed_gain=float(np.sum(self.stats["speed_gain"])) if self.stats["speed_gain"] else 0.0,
                         speed_cpu_ms=float(np.median(self.stats["speed_cpu"]) * 1000) if self.stats["speed_cpu"] else None,
                         bias=self.bias.magnitude, sg_energy=self.sg["energy"], sg_shortest=self.sg["shortest"],
+                        cmd_sent=self.link_stats["sent"], cmd_acked=self.link_stats["acked"],
                         refine_gain=float(np.sum(self.stats["refine_gain"])) if self.stats["refine_gain"] else 0.0,
                         refine_cpu_median=float(np.median(self.stats["refine_cpu"])) if self.stats["refine_cpu"] else None,
                         tick_ms_p95=float(np.percentile(self.stats["tick_gap"], 95)) if self.stats["tick_gap"] else None,

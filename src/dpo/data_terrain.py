@@ -15,7 +15,10 @@ import json
 import math
 
 import numpy as np
-import requests
+try:                                   # 자료를 내려받을 때만 필요 (pip install "drone-path-opt[data]")
+    import requests
+except ImportError:                    # pragma: no cover
+    requests = None
 
 from . import config as C
 

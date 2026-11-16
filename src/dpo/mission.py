@@ -228,7 +228,7 @@ def run_rolling(planner_fcst, site_truth, drone, a, b, t0, mass, dt_replan=60.0,
 
 
 def st_safeguard(SP, start, goal, t0, mass, r_energy, budget=np.inf, max_wait=180.0, margin=0.002, bias=None,
-                 air_start=False):
+                 air_start=False, ignore_obstacles=False):
     """안전장치 (시공간 계획용): 에너지 탐색 결과와 '최단 경로 + 구간 속도 최적화'를 같은 예보에서 비교한다.
 
     에너지 탐색은 근사 해법이라 드물게 최단 경로보다 나쁜 경로를 낸다 (E13: 15–19 %). 최단 경로를 후보에 넣되,
@@ -237,6 +237,7 @@ def st_safeguard(SP, start, goal, t0, mass, r_energy, budget=np.inf, max_wait=18
 
     SP        : 장애물 표를 이미 세운 STPlanner
     r_energy  : SP.plan(mode=1) 의 결과 (None 이면 최단 후보만 본다)
+    ignore_obstacles : 장애물을 무시한 비교용 경로를 만들 때 (화면의 '장애물 무시' 기준선)
     반환: (r, info) – r 은 고른 계획(dict, chosen 키 포함) 또는 None, info = dict(chosen, cand={이름: 예상 에너지 J})
     """
     from .st_rolling import remaining_conflict
@@ -256,7 +257,8 @@ def st_safeguard(SP, start, goal, t0, mass, r_energy, budget=np.inf, max_wait=18
         sim, _ = ev(r_energy["path"], r_energy["wait_before"], float(r_energy.get("ground_delay", 0.0)))
         if sim is not None:
             cand["energy"] = float(sim["e"][-1])
-    r0 = SP.plan(tuple(start), tuple(goal), t_start=t0, mass=mass, mode=0, max_wait=max_wait)
+    r0 = SP.plan(tuple(start), tuple(goal), t_start=t0, mass=mass, mode=0, max_wait=max_wait,
+                 ignore_obstacles=ignore_obstacles)
     r_short = None
     if r0 is not None and len(r0["path"]) >= 2:
         fixed = make_flyable(site, d, r0["path"], r0["wait_before"])
@@ -265,7 +267,7 @@ def st_safeguard(SP, start, goal, t0, mass, r_energy, budget=np.inf, max_wait=18
             gd0 = float(r0.get("ground_delay", 0.0))
             sim0, ts0 = ev(p0, w0, gd0)
             ok = sim0 is not None and float(sim0["e"][-1]) <= budget
-            if ok and SP.table is not None:
+            if ok and SP.table is not None and not ignore_obstacles:
                 ok = remaining_conflict(site, SP.table, sim0, ts0) is None
             if ok:
                 cand["shortest"] = float(sim0["e"][-1])

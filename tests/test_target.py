@@ -98,7 +98,8 @@ def test_platform_3d_scene_plan_and_mission():
     sc = json.loads(app.scene3d())
     n = sc["nx"] * sc["ny"]
     assert len(sc["ground"]) == n == len(sc["floor"]) == len(sc["bh"])
-    assert len(sc["buildings"]) > 5000 and all(len(b["p"]) >= 3 and b["h"] > 0 for b in sc["buildings"][:200])
+    # 건물 원자료가 있으면 건물 다각형(7천여 동), 없으면 격자 높이로 만든 상자(4천여 개)
+    assert len(sc["buildings"]) > 3000 and all(len(b["p"]) >= 3 and b["h"] > 0 for b in sc["buildings"][:200])
     assert {d["key"] for d in app.site_info()["drones"]} == {"m100", "x650"}
     w = app.wind3d(15)
     assert len(w["u"]) == len(sc["z"]) and len(w["u"][0]) > 5

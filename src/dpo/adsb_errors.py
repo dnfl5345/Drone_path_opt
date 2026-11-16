@@ -29,14 +29,31 @@ AIRLINE = re.compile(r"^[A-Z]{3}\d")               # 항공사 편명 (저고도
 
 
 def _read(path):
-    import pandas as pd
-    d = pd.read_json(path)
-    col = lambda k: d[k].to_numpy() if k in d else np.full(len(d), np.nan)
-    ts = pd.to_datetime(d["timestamp"], utc=True)
-    return dict(t=(ts - pd.Timestamp(0, tz="UTC")).dt.total_seconds().to_numpy(), icao=d["icao24"].astype(str).to_numpy(),
-                cs=d["callsign"].fillna("").astype(str).str.strip().to_numpy() if "callsign" in d else np.full(len(d), ""),
-                lat=col("latitude").astype(float), lon=col("longitude").astype(float),
-                gs=col("groundspeed").astype(float) * KT, trk=col("track").astype(float), alt=col("altitude").astype(float) * FT)
+    """항적 파일(JSON 레코드 목록, gzip) → 열 배열. 표준 라이브러리만 쓴다 (운용 설치에 pandas 가 필요 없도록)."""
+    import gzip
+    import json
+    with (gzip.open(path, "rt", encoding="utf-8") if str(path).endswith(".gz") else open(path, encoding="utf-8")) as f:
+        rows = json.load(f)
+    if isinstance(rows, dict):                   # 열 방향 {"열": {"행번호": 값}} → 레코드 목록
+        idx = list(next(iter(rows.values())).keys()) if rows else []
+        rows = [{k: col.get(i) for k, col in rows.items()} for i in idx]
+
+    def num(k, scale=1.0):
+        return np.array([np.nan if r.get(k) is None else float(r[k]) * scale for r in rows], float)
+
+    def ts(v):                                   # epoch [ms] 숫자 또는 ISO 문자열
+        if v is None:
+            return np.nan
+        if isinstance(v, (int, float)):
+            return float(v) / 1000.0
+        from datetime import datetime, timezone
+        d = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        return (d if d.tzinfo else d.replace(tzinfo=timezone.utc)).timestamp()
+
+    return dict(t=np.array([ts(r.get("timestamp")) for r in rows], float),
+                icao=np.array([str(r.get("icao24")) for r in rows]),
+                cs=np.array([("" if r.get("callsign") is None else str(r["callsign"]).strip()) for r in rows]),
+                lat=num("latitude"), lon=num("longitude"), gs=num("groundspeed", KT), trk=num("track"), alt=num("altitude", FT))
 
 
 def load_tracks(max_gap=15.0, min_len=60.0, alt_max=6000 * FT, exclude=("collections/switzerland",), rate="1hz"):

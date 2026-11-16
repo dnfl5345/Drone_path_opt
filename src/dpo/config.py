@@ -1,13 +1,38 @@
 """공통 설정: 대상 지역, 격자, 데이터 경로."""
+import os as _os
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+
+def _find_root():
+    """자료 폴더의 위치. 우선순위: 환경변수 DPO_HOME → 소스 저장소(개발 설치) → 현재 폴더.
+
+    그 아래에 data/processed (지형 격자), data/raw (예보 바람), results (실측 오차 모델 등), scenarios 가 있어야 한다."""
+    env = _os.environ.get("DPO_HOME")
+    if env:
+        return Path(env).expanduser().resolve()
+    repo = Path(__file__).resolve().parents[2]
+    if (repo / "data" / "processed").is_dir():
+        return repo
+    return Path.cwd()
+
+
+ROOT = _find_root()
 RAW = ROOT / "data" / "raw"
 PROC = ROOT / "data" / "processed"
 FIG = ROOT / "results" / "figures"
 RES = ROOT / "results"
 for _p in (RAW, PROC, FIG, RES):
-    _p.mkdir(parents=True, exist_ok=True)
+    try:
+        _p.mkdir(parents=True, exist_ok=True)
+    except OSError:                    # 읽기 전용 설치 위치 – 읽기만 하는 운용에는 문제없다
+        pass
+
+
+def check_data(site_key=None):
+    """대상 지역의 필수 자료가 있는지 확인한다. 반환: 없는 파일 목록 (비어 있으면 정상)."""
+    S = SITES[site_key or SITE_KEY]
+    need = [PROC / S["grid"], RAW / S["gfs"]]
+    return [str(p) for p in need if not p.exists()]
 
 # ---------------------------------------------------------------- 대상 지역
 # 지역을 바꾸려면 환경변수 DPO_SITE=changwon 또는 use_site("changwon") (플랫폼: python -m dpo.webapp --site changwon)
@@ -66,7 +91,5 @@ GFS_LEVELS_P = [975, 950]   # hPa (~300 m, ~500 m)
 # Overture Maps buildings
 OVERTURE_RELEASE = "2026-10-21.0"
 OVERTURE_BASE = "https://overturemaps-us-west-2.s3.amazonaws.com"
-
-import os as _os  # noqa: E402
 
 use_site(_os.environ.get("DPO_SITE", "pangyo"))

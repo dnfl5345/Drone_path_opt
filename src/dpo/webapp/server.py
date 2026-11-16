@@ -28,6 +28,7 @@ API
 from __future__ import annotations
 
 import io
+import os
 import json
 import math
 import sys
@@ -55,6 +56,11 @@ MAX_TOUR = 12            # 순회 경유점 최대 개수
 class App:
     def __init__(self):
         S = C.SITE
+        missing = C.check_data()
+        if missing:
+            raise FileNotFoundError(
+                "필수 자료가 없습니다: " + ", ".join(missing) + f"\n자료 폴더(DPO_HOME)는 지금 {C.ROOT} 입니다. "
+                "저장소의 data/ 를 복사하거나 scripts/build_site.py 로 만드십시오 (docs/deployment.md).")
         g = dict(np.load(C.PROC / S["grid"]))
         f0 = dict(np.load(C.RAW / S["gfs"], allow_pickle=True))
         self.g = g
@@ -78,6 +84,7 @@ class App:
         self.live = LiveEngine(self.site, self.drone, self._adsb_live)
         self.lives = {"m100": self.live}          # 기체별 실시간 엔진 (계획기를 기체마다 따로 둔다)
         self._truth = None
+        self.link = None                          # MAVLink 연결 (--mavlink 로 지정했을 때)
         # JIT 예열
         t = time.time()
         self.plan(dict(obstacles=[], dep_hour=15, payload=0.5, kind="delivery", round_trip=False))
@@ -195,6 +202,7 @@ class App:
         if self.live is not self.lives[dkey]:
             self.live.stop()
             self.live = self.lives[dkey]
+        self.live.attach_link(self.link)
         out = self.live.start(req, obs, truth=truth)
         out["drone_key"] = dkey
         return out
@@ -204,11 +212,33 @@ class App:
         m.pop("items", None); m.pop("rows", None)
         return m
 
+    def connect_link(self, url, timeout=5.0):
+        """MAVLink 연결. 실패하면 ValueError."""
+        from ..mavlink_bridge import MavBridge
+        link = MavBridge(url, timeout=timeout)
+        if not link.connect():
+            link.close()
+            raise ValueError(f"MAVLink 연결 실패 ({url}): 기체의 HEARTBEAT 를 받지 못했습니다")
+        self.link = link
+        for e in self.lives.values():
+            e.attach_link(link)
+        return link.status()
+
+    def live_upload(self):
+        """남은 구간 미션을 MAVLink 로 기체에 올린다 (파일 방식). 운용자가 명시적으로 부를 때만 실행한다."""
+        if self.link is None:
+            raise ValueError("MAVLink 연결이 없습니다 (--mavlink 로 서버를 시작하세요)")
+        m = self.live.mission()
+        if not m.get("available"):
+            raise ValueError(m.get("reason", "미션 없음"))
+        ok = self.link.upload_mission(m["items"])
+        return dict(ok=bool(ok), n_items=len(m["items"]), error=None if ok else self.link.last_error)
+
     def health(self):
         from .. import __version__
         return dict(status="ok", version=__version__, site=C.SITE_KEY, site_label=C.SITE["label"],
                     drones=list(self.drones), live=self.live.state, grid=[int(v) for v in self.site.free.shape],
-                    wind_hours=len(self.site.t_axis))
+                    wind_hours=len(self.site.t_axis), mavlink=None if self.link is None else self.link.status())
 
     def _parse(self, req):
         obs = [DynObstacle.from_dict(o) for o in req.get("obstacles", [])]
@@ -361,10 +391,16 @@ class App:
             for L in legs:
                 name, a, b, m, st, gl = L["name"], L["a"], L["b"], L["m"], L["st"], L["gl"]
                 t_c0 = L["t_leg0"] + L["t_to"]
-                bkey = (cx["wind"], cx["dkey"], name, tuple(a), tuple(b), round(m, 3), round(t_c0, 1), cx["weight"])
+                bkey = (cx["wind"], cx["dkey"], name, tuple(a), tuple(b), round(m, 3), round(t_c0, 1), cx["weight"],
+                        bool(cx.get("safeguard", True)))
                 if bkey not in self.base_cache:      # 장애물 무시 기준 경로는 장애물과 무관 → 캐시
-                    self.base_cache[bkey] = cx["SP"].plan(st, gl, t_start=t_c0, mass=m, ignore_obstacles=True,
-                                                          weight=cx["weight"])
+                    rb = cx["SP"].plan(st, gl, t_start=t_c0, mass=m, ignore_obstacles=True, weight=cx["weight"])
+                    if rb is not None and cx.get("safeguard", True):       # 계획과 같은 규칙(안전장치)으로 만든다
+                        from ..mission import st_safeguard
+                        rb2, _ = st_safeguard(cx["SP"], st, gl, t_c0, m, rb, max_wait=cx["max_wait"],
+                                              air_start=bool(L.get("air_start")), ignore_obstacles=True)
+                        rb = rb2 if rb2 is not None else rb
+                    self.base_cache[bkey] = rb
                 r0 = self.base_cache[bkey]
                 if r0 is not None:
                     base_sims.append((name, simulate(site, d, r0["path"], r0["wait_before"], t_c0, m)))
@@ -472,13 +508,34 @@ class App:
     def scene3d(self):
         """3D 지도용 장면: 지형 격자, 건물(바닥 다각형 + 높이), 금지구역, 계획 격자의 비행 가능 하한·상한 고도."""
         if self._scene3d is None:
-            from shapely import wkt as swkt
             from ..data_terrain import site_frame, ll2xy
             s, fr = self.site, site_frame()
             default_h = {"apartments": 60.0, "residential": 12.0, "house": 8.0, "commercial": 30.0, "office": 40.0,
                          "industrial": 12.0, "school": 15.0}
             bl = []
-            for f in json.loads((C.RAW / C.SITE["buildings"]).read_text()):
+            bfile = C.RAW / C.SITE["buildings"]
+            try:
+                from shapely import wkt as swkt
+            except ImportError:
+                swkt = None
+            if swkt is None or not bfile.exists():
+                # 건물 원자료(또는 shapely)가 없는 설치: 계획 격자의 건물 높이로 칸 단위 상자를 만든다 (같은 줄의 이웃 칸은 합침)
+                bh = np.round(s.bldg_h / 3.0) * 3.0
+                for j in range(s.ny):
+                    i = 0
+                    while i < s.nx:
+                        if bh[j, i] <= 0:
+                            i += 1
+                            continue
+                        i1 = i
+                        while i1 + 1 < s.nx and bh[j, i1 + 1] == bh[j, i]:
+                            i1 += 1
+                        gz = s.ground[j, i:i1 + 1]
+                        x0, x1, y0, y1 = i * s.dx, (i1 + 1) * s.dx, j * s.dx, (j + 1) * s.dx
+                        bl.append(dict(p=[[x0, y0], [x1, y0], [x1, y1], [x0, y1]], b=round(float(gz.min()), 1),
+                                       h=round(float(bh[j, i]) + float(gz.max() - gz.min()), 1)))
+                        i = i1 + 1
+            for f in (json.loads(bfile.read_text()) if (swkt is not None and bfile.exists()) else []):
                 h = float(f["h"]) if f["h"] else (float(f["nf"]) * 3.3 if f["nf"] else default_h.get(f["cls"] or "", 10.0))
                 g = swkt.loads(f["wkt"])
                 for poly in getattr(g, "geoms", [g]):
@@ -810,6 +867,8 @@ def make_handler(app):
                 if self.path == "/api/live/start":
                     obs = req.pop("obstacles", [])
                     return self._send(200, app.live_start(req, obs))
+                if self.path == "/api/live/upload":
+                    return self._send(200, app.live_upload())
                 if self.path == "/api/live/control":
                     return self._send(200, app.live.control(req))
                 if self.path == "/api/live/obstacle":
@@ -832,23 +891,45 @@ def make_handler(app):
 
 def main(argv=None):
     import argparse
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--port", type=int, default=8765)
-    ap.add_argument("--host", default="127.0.0.1")
+    from .. import __version__
+    ap = argparse.ArgumentParser(prog="dpo-server", description="드론 SoC 경로계획 플랫폼 서버 (계획·3D 지도·실시간 운용)")
+    ap.add_argument("--version", action="version", version=f"drone-path-opt {__version__}")
+    ap.add_argument("--port", type=int, default=int(os.environ.get("DPO_PORT", 8765)), help="포트 (환경변수 DPO_PORT)")
+    ap.add_argument("--host", default=os.environ.get("DPO_HOST", "127.0.0.1"),
+                    help="바인드 주소 (환경변수 DPO_HOST). 외부에 열려면 0.0.0.0 – 인증이 없으므로 신뢰하는 망에서만")
     ap.add_argument("--site", default=C.SITE_KEY, choices=list(C.SITES), help="대상 지역 (기본: 환경변수 DPO_SITE 또는 pangyo)")
+    ap.add_argument("--mavlink", default=os.environ.get("DPO_MAVLINK"), metavar="URL",
+                    help="기체 MAVLink 연결 (예: udpin:0.0.0.0:14550). 주면 속도 명령을 기체로 보낸다")
     a = ap.parse_args(argv)
     C.use_site(a.site)
     print(f"[platform] 지역: {C.SITE['label']}")
     app = App()
+    if a.mavlink:
+        try:
+            print(f"[platform] MAVLink: {app.connect_link(a.mavlink)}")
+        except Exception as ex:  # noqa
+            print(f"[platform] MAVLink 연결 실패 – 연결 없이 계속합니다: {ex}")
     srv = ThreadingHTTPServer((a.host, a.port), make_handler(app))
     srv.daemon_threads = True
     print(f"[platform] 3D 지도:    http://{a.host}:{a.port}/3d")
     print(f"[platform] 실시간 운용: http://{a.host}:{a.port}/live")
     print(f"[platform] http://{a.host}:{a.port}  (Ctrl+C 종료)")
+    import signal
+    try:
+        signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=srv.shutdown, daemon=True).start())
+    except ValueError:                 # 주 스레드가 아니면 신호 처리기를 달 수 없다
+        pass
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
         pass
+    finally:
+        for e in app.lives.values():
+            e.stop()
+        if app.link is not None:
+            app.link.close()
+        srv.server_close()
+        print("[platform] 종료")
 
 
 if __name__ == "__main__":

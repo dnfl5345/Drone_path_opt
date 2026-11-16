@@ -1,0 +1,15 @@
+.git
+**/__pycache__
+*.pyc
+.pytest_cache
+docs
+results/figures
+results/*.json
+!results/adsb_error_model.json
+results/missions
+data/raw/*.tif
+data/raw/overture_buildings*.json
+data/raw/dji_sdk
+dist
+build
+*.egg-info
