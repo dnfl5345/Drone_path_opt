@@ -401,7 +401,10 @@ def analyze():
         S = dict(n=len(rows), n_days=len({r["day"] for r in rows}), wind=[float(min(r["wind"] for r in rows)), float(max(r["wind"] for r in rows))],
                  infeasible={k: int(sum(1 for r in rows if r.get(k) is None)) for k in ("EX", "EXv", "P0", "PO")},
                  EX_P0=compare(rows, "EX", "P0"), EXv_P0=compare(rows, "EXv", "P0"), P0_PO=compare(rows, "P0", "PO"),
-                 EX_EXv=compare(rows, "EX", "EXv"))
+                 EX_EXv=compare(rows, "EX", "EXv"),
+                 EX_P0s=compare(rows, "EX", "P0s") if any(r.get("P0s") for r in rows) else None,
+                 EXv_P0s=compare(rows, "EXv", "P0s") if any(r.get("P0s") for r in rows) else None,
+                 n_shortest_chosen=int(sum(1 for r in rows if r.get("P0s") and r["P0s"].get("chosen") == "shortest")))
         by_day = {}
         for d in DAYS:
             rr = [r for r in rows if r["day"] == d]
@@ -422,8 +425,10 @@ def analyze():
         S["rolling"]["T_mean"] = float(np.mean([r["R_inf"]["T"] for r in roll])) if roll else None
         R["sets"][name] = S
         print(f"== {name}: {S['n']}건, 바람 {S['wind'][0]:.1f}–{S['wind'][1]:.1f} m/s, 불가 {S['infeasible']}")
-        for k in ("EX_P0", "EXv_P0", "P0_PO"):
+        for k in ("EX_P0", "EXv_P0", "EX_P0s", "EXv_P0s", "P0_PO"):
             c = S[k]
+            if c is None:
+                continue
             print(f"   {k}: 평균 {c['mean_pct']:+.1f} % [{c['ci'][0]:+.1f}, {c['ci'][1]:+.1f}], 중앙 {c['median_pct']:+.1f} %, 승 {c['win'] * 100:.0f} % 패 {c['lose'] * 100:.0f} %, "
                   f"최악 {c['worst_pct']:+.1f} %, 시간 {c['time_pct']:+.1f} %, 날짜별 Wilcoxon p={c['wilcoxon_days_p']}")
         for k in ("R_300", "R_120", "R_60", "R_mid", "R_120_nobias", "R_oracle"):
@@ -449,9 +454,11 @@ def figure(R, sets):
                          "savefig.dpi": 200, "savefig.bbox": "tight", "axes.titleweight": "bold"})
     COL = {"changwon_x650": "#E46C0A", "pangyo_x650": "#1B6CA8", "pangyo_m100": "#2CA58D"}
     LAB = {"changwon_x650": "창원 · X650", "pangyo_x650": "판교 · X650", "pangyo_m100": "판교 · M100"}
-    fig, axs = plt.subplots(1, 3, figsize=(17.5, 4.9), gridspec_kw=dict(width_ratios=[1.0, 1.05, 1.15], wspace=0.3))
+    from matplotlib.lines import Line2D
+    fig, axs = plt.subplots(2, 2, figsize=(13.6, 10.2), gridspec_kw=dict(wspace=0.26, hspace=0.34))
+    names_all = list(sets)
 
-    ax = axs[0]
+    ax = axs[0, 0]
     lim = 0
     for name, rows in sets.items():
         ok = [r for r in rows if r["EX"] and r["P0"]]
@@ -459,29 +466,53 @@ def figure(R, sets):
         ax.scatter(x, y, s=14, alpha=0.55, color=COL.get(name, "#555"), label=f"{LAB.get(name, name)} ({len(ok)}건)", lw=0)
         lim = max(lim, max(x + y))
     ax.plot([0, lim * 1.05], [0, lim * 1.05], color="#555", lw=1, ls="--")
-    ax.text(lim * 0.62, lim * 0.68, "같은 값", color="#555", fontsize=9, rotation=40)
+    ax.text(lim * 0.80, lim * 0.86, "같은 값", color="#555", fontsize=9, rotation=42, ha="center", va="center")
     ax.set_xlim(0, lim * 1.05); ax.set_ylim(0, lim * 1.05)
-    ax.set_xlabel("기존 경로의 SOC 소모 [%p] (최단 + 정속 10 m/s)"); ax.set_ylabel("제안 경로의 SOC 소모 [%p]")
-    ax.set_title("(a) 경우별 비교: 점이 선 아래면 제안이 우수")
+    ax.set_xlabel("기존 경로의 SOC 소모 [%p] (최단 경로 + 정속 10 m/s)"); ax.set_ylabel("제안 경로의 SOC 소모 [%p]")
+    ax.set_title("(a) 경우별 비교: 점이 점선 아래면 제안이 덜 씀")
     ax.legend(frameon=False, fontsize=9, loc="upper left")
 
-    ax = axs[1]
+    ax = axs[0, 1]
+    comps = [("EX_P0", "기존 대비\n제안 (전체)"), ("EX_EXv", "그중 속도만\n바꾼 효과"), ("EXv_P0", "그중 경로\n모양의 효과"),
+             ("EXv_P0s", "경로 효과\n(안전장치 포함)"), ("P0_PO", "더 새 예보로\n계획했다면")]
+    wbar = 0.8 / max(len(names_all), 1)
+    for q, name in enumerate(names_all):
+        S = R["sets"][name]
+        v = np.array([S[k]["mean_pct"] if S.get(k) else np.nan for k, _ in comps])
+        lo = np.array([S[k]["ci"][0] if S.get(k) else np.nan for k, _ in comps])
+        hi = np.array([S[k]["ci"][1] if S.get(k) else np.nan for k, _ in comps])
+        x = np.arange(len(comps)) + (q - (len(names_all) - 1) / 2) * wbar
+        ax.bar(x, v, wbar * 0.92, color=COL.get(name, "#555"), label=LAB.get(name, name),
+               yerr=[v - lo, hi - v], error_kw=dict(ecolor="#333", lw=1, capsize=2))
+        for xx, vv in zip(x, v):
+            if np.isfinite(vv):
+                ax.text(xx, 0.35, f"{vv:+.1f}", ha="center", va="bottom", fontsize=7.5, color="#333", rotation=90)
+    ax.axhline(0, color="#555", lw=0.8)
+    ax.set_xticks(range(len(comps))); ax.set_xticklabels([c[1] for c in comps], fontsize=8.5)
+    ax.set_ylim(top=4.2)
+    ax.set_ylabel("SOC 소모 변화 [%] (음수 = 절감)")
+    ax.set_title("(b) 절감이 어디서 나오나 (평균, 95 % 구간)")
+    ax.legend(frameon=False, fontsize=9, loc="lower right")
+
+    ax = axs[1, 0]
     for name in sets:
         bd = R["sets"][name]["by_day"]
         w = [bd[d]["wind"] for d in R["days"]]
         o = np.argsort(w)
-        ax.plot(np.array(w)[o], np.array([bd[d]["EX_P0"] for d in R["days"]])[o], "o-", color=COL.get(name, "#555"), lw=2,
-                label=f"{LAB.get(name, name)}: 기존 대비")
-        ax.plot(np.array(w)[o], np.array([bd[d]["EXv_P0"] for d in R["days"]])[o], "s--", color=COL.get(name, "#555"), lw=1.2, alpha=0.8,
-                label="  속도까지 최적화한 기존 경로 대비")
+        ax.plot(np.array(w)[o], np.array([bd[d]["EX_P0"] for d in R["days"]])[o], "o-", color=COL.get(name, "#555"), lw=2)
+        ax.plot(np.array(w)[o], np.array([bd[d]["EXv_P0"] for d in R["days"]])[o], "s--", color=COL.get(name, "#555"), lw=1.2, alpha=0.85)
     ax.axhline(0, color="#555", lw=0.8)
     ax.set_xlabel("그날의 지면 위 100 m 평균 풍속 [m/s]"); ax.set_ylabel("제안 경로의 SOC 변화 [%] (음수 = 절감)")
-    ax.set_title("(b) 날짜별 평균 절감: 바람이 셀수록 커짐")
-    ax.legend(frameon=False, fontsize=8.5, loc="lower left")
+    ax.set_title("(c) 날짜별 평균: 바람 세기에 따른 절감")
+    h = [Line2D([], [], color=COL.get(n, "#555"), lw=2, label=LAB.get(n, n)) for n in sets]
+    h += [Line2D([], [], color="#444", lw=2, marker="o", label="기존(최단 + 10 m/s) 대비"),
+          Line2D([], [], color="#444", lw=1.2, ls="--", marker="s", label="속도까지 최적화한 최단 경로 대비")]
+    ax.set_ylim(top=6)
+    ax.legend(handles=h, frameon=False, fontsize=8.5, loc="upper center", ncol=2, bbox_to_anchor=(0.5, 1.0))
 
-    ax = axs[2]
-    keys = [("R_mid", "중간에 1회"), ("R_300", "5분마다"), ("R_120", "2분마다"), ("R_60", "1분마다"), ("R_120_nobias", "2분마다, 새 바람\n정보 없이 (대조)"),
-            ("R_oracle", "실제 바람을 미리\n안다면 (상한)")]
+    ax = axs[1, 1]
+    keys = [("R_mid", "경로 중간에\n1회"), ("R_120", "2분마다"), ("R_60", "1분마다"), ("R_120_nobias", "2분마다,\n새 정보 없이\n(대조)"),
+            ("R_oracle", "실제 바람을\n미리 안다면\n(상한)")]
     names = [n for n in sets if R["sets"][n]["rolling"]["n"]]
     wbar = 0.8 / max(len(names), 1)
     for q, name in enumerate(names):
@@ -494,9 +525,10 @@ def figure(R, sets):
                yerr=[np.array(v) - np.array(lo), np.array(hi) - np.array(v)], error_kw=dict(ecolor="#444", lw=1, capsize=2))
     ax.axhline(0, color="#555", lw=0.8)
     ax.set_xticks(range(len(keys))); ax.set_xticklabels([k[1] for k in keys], fontsize=8.5)
-    ax.set_ylabel("갱신하지 않을 때 대비 SOC 변화 [%]")
-    ax.set_title("(c) 비행 중 기상 정보 갱신 주기의 효과")
-    ax.legend(frameon=False, fontsize=9, loc="lower left")
+    ax.set_ylabel("다시 계획하지 않을 때 대비 SOC 변화 [%]")
+    ax.set_title("(d) 비행 중 다시 계획하는 주기의 효과 (양수 = 손해)")
+    ax.set_ylim(top=1.55)
+    ax.legend(frameon=False, fontsize=8.5, loc="upper center", ncol=3, columnspacing=1.0, handlelength=1.2)
     fig.savefig(C.FIG / "F28_superiority.png")
     plt.close(fig)
 
