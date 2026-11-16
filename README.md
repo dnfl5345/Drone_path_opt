@@ -8,6 +8,11 @@
 - 최신 연구 대비 정식화 비교: [`docs/algorithm_comparison.md`](docs/algorithm_comparison.md) (문제 (P) 정의, 문헌별 정식화, 가정 축소 실험)
 - 확장안 (8방향 탐색 + 고도별 균일·선형 바람, LUT): [`docs/extension_8way_linear_wind.md`](docs/extension_8way_linear_wind.md)
 - 3D 시공간 확장 (동적 장애물) + 장애물 편집 플랫폼 + 장애물 변경 시 이벤트 기반 재계획: [`docs/spatiotemporal_dynamic_obstacles.md`](docs/spatiotemporal_dynamic_obstacles.md)
+- **배포판 v1.0.0: 속도 갱신·안전장치를 실시간 플랫폼과 미션 파일에 연결**: [`docs/deployment.md`](docs/deployment.md), 보고서 [`docs/drone_soc_deployment_report.docx`](docs/drone_soc_deployment_report.docx), 인수인계 [`HANDOVER.md`](HANDOVER.md)
+  - 설치 `pip install -e ".[dev]"` → 점검 `dpo-plan --check` → 서버 `dpo-server` → 미션 파일 `dpo-plan --drone x650 --out missions/`
+  - 실시간 화면(`/live`): 안전장치, 속도 갱신 주기, 모의 실제 바람, 속도 명령 표, 남은 구간 미션 내려받기. 기체 연결 `dpo-server --mavlink udpin:0.0.0.0:14550`
+  - 폐루프 검증 E15 (`scripts/exp_live_closed_loop.py`, 그림 F30): 연결 전 대비 SOC 소모 −1.2 – −7.9 %, 장애물 144건 침범 0
+  - 검증 범위: 시험 41개, 새 가상환경 설치, 화면 자동 시험, MAVLink 루프백. Docker 이미지 빌드와 SITL·실기체는 미검증
 - **검토: 기존 경로 대비 우수성과 남은 점검 항목 (E13 · E14)**: [`docs/review_gaps.md`](docs/review_gaps.md)
   - 7일 × 2개 지역 × 2개 기체 630건: 기존 경로(최단 + 정속 10 m/s) 대비 SOC 소모 −17.5 – −21.2 %, 626건에서 우수. 그중 경로 모양의 몫은 1.8–4.9 %
   - 기상 정보 갱신 주기 실험, 최단 경로를 후보에 넣는 안전장치(`plan_best_of_two`), 실비행 반복 횟수, 추가 검토 항목 10가지
