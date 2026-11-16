@@ -328,8 +328,8 @@ def figure(R):
                          "mathtext.fontset": "dejavusans", "axes.spines.top": False, "axes.spines.right": False,
                          "savefig.dpi": 200, "savefig.bbox": "tight", "axes.titleweight": "bold"})
     SETLAB = {"changwon_x650": "창원 · X650", "pangyo_x650": "판교 · X650", "pangyo_m100": "판교 · M100"}
-    lab = {"real": "실제 예보 오차\n(00Z ↔ 06Z)", "rot30": "풍향 30°", "rot60": "풍향 60°", "rot90": "풍향 90°", "rot180": "풍향 180°",
-           "spd0.6": "풍속 0.6배", "spd1.4": "풍속 1.4배"}
+    lab = {"real": "실제\n예보 오차", "rot30": "풍향\n30°", "rot60": "풍향\n60°", "rot90": "풍향\n90°", "rot180": "풍향\n180°",
+           "spd0.6": "풍속\n0.6배", "spd1.4": "풍속\n1.4배"}
     pol = [("S_120", "속도만, 2분마다", "#9CC3E4"), ("S_60", "속도만, 1분마다", "#4F94CD"), ("S_30", "속도만, 30초마다", "#1B6CA8"),
            ("R_60", "경로+속도, 1분마다 (무조건 교체)", "#E46C0A"), ("K_60", "경로+속도, 1분마다 (더 나을 때만 교체)", "#7B3FA0"),
            ("ADAPT", "속도를 매 순간 맞춤", "#2CA58D"), ("ORACLE", "실제 바람을 미리 앎 (상한)", "#555555")]
