@@ -80,6 +80,51 @@ def run_round_trip(planner, mission: Mission, mode=1, speed_policy="opt", vconst
                 L=out["length"] + back["length"])
 
 
+# ------------------------------------------------------------------ 후보 경로 비교 (안전장치)
+def make_flyable(site, drone, path):
+    """거리만 보고 만든 경로에 기체의 상승·하강률로는 못 나는 급경사 구간이 있으면, 높은 쪽 고도에서 수평으로 간 뒤
+    수직으로 오르내리도록 바꾼다. 바꿀 수 없으면 None."""
+    out = [tuple(int(v) for v in path[0])]
+    for p in path[1:]:
+        a, b = out[-1], tuple(int(v) for v in p)
+        dz = (b[0] - a[0]) * site.dz
+        lh = math.hypot(b[1] - a[1], b[2] - a[2]) * site.dx
+        lim = (drone.vz_up if dz > 0 else drone.vz_dn) / 3.0     # 최저 대지속도 3 m/s 에서 날 수 있는 기울기
+        if lh > 1e-6 and abs(dz) / lh > lim:
+            mid = (a[0], b[1], b[2]) if dz < 0 else (b[0], a[1], a[2])   # 하강: 수평 먼저 / 상승: 수직 먼저
+            if not site.free[mid]:
+                return None
+            out.append(mid)
+        out.append(b)
+    return np.array(out)
+
+
+def plan_best_of_two(planner, start, goal, t_start, mass, **pkw):
+    """에너지 탐색 경로와 '최단 경로 + 구간 속도 최적화'를 같은 예보 바람에서 비교해 에너지가 적은 쪽을 고른다.
+
+    에너지 탐색은 근사 해법이라 드물게 최단 경로보다 나쁜 경로를 낸다. 최단 경로도 후보에 넣으면
+    예보 기준으로는 기존 경로보다 나빠지지 않는다. 반환: dict(path, wait_before, pred_e, chosen, cand)"""
+    sp, d = planner.site, planner.drone
+    cand = {}
+    r1 = planner.plan(start, goal, t_start=t_start, mass=mass, mode=1, **pkw)
+    if r1 is not None:
+        s1 = simulate(sp, d, r1["path"], r1["wait_before"], t_start, mass)
+        if s1 is not None:
+            cand["energy"] = (r1["path"], np.asarray(r1["wait_before"], float), float(s1["e"][-1]))
+    r0 = planner.plan(start, goal, t_start=t_start, mass=mass, mode=0)
+    if r0 is not None:
+        p0 = make_flyable(sp, d, r0["path"])
+        if p0 is not None:
+            s0 = simulate(sp, d, p0, np.zeros(len(p0)), t_start, mass)
+            if s0 is not None:
+                cand["shortest"] = (p0, np.zeros(len(p0)), float(s0["e"][-1]))
+    if not cand:
+        return None
+    k = min(cand, key=lambda c: cand[c][2])
+    return dict(path=cand[k][0], wait_before=cand[k][1], pred_e=cand[k][2], chosen=k,
+                cand={c: v[2] for c, v in cand.items()})
+
+
 # ------------------------------------------------------------------ 롤링 호라이즌 재계획
 def run_rolling(planner_fcst, site_truth, drone, a, b, t0, mass, dt_replan=60.0, events=(), bias_update=True,
                 max_iter=60, weight=1.0):
@@ -116,6 +161,8 @@ def run_rolling(planner_fcst, site_truth, drone, a, b, t0, mass, dt_replan=60.0,
         # 실제 바람에서 비행
         sim = simulate(site_truth, drone, r["path"], r["wait_before"], t, mass, "opt",
                        U=site_truth.U, V=site_truth.V, tax=site_truth.t_axis)
+        if sim is None:                 # 계획한 경로가 실제 바람에서는 비행 불가 (대기속도 한계 초과 등) → 중단
+            break
         # 다음 재계획 시각: 주기 or 다음 이벤트 발표 시각
         t_next = t + dt_replan
         for n, (ta, fn) in enumerate(ev):

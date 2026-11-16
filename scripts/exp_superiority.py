@@ -54,6 +54,122 @@ def od_pairs(site, n, seed=7):
     return out
 
 
+from dpo.mission import make_flyable  # noqa: E402
+
+
+def baseline_leg(P, tr, d, a, b, t0, m, policy):
+    """기존 경로(최단 경로) 한 구간: 계획 → 비행 가능하게 보정 → 실제 바람에서 비행."""
+    from dpo.energy import soc_drop
+    from dpo.planner import path_length, simulate, vertical_energy
+    sp = P.site
+    st, gl = sp.lowest_free_k(*a), sp.lowest_free_k(*b)
+    r = P.plan(st, gl, t_start=t0, mass=m, mode=0, vconst=10.0)
+    if r is None:
+        return None
+    path = make_flyable(sp, d, r["path"])
+    if path is None:
+        return None
+    sim = simulate(tr, d, path, np.zeros(len(path)), t0, m, policy, 10.0, U=tr.U, V=tr.V, tax=tr.t_axis)
+    if sim is None:
+        return None
+    e_to, t_to = vertical_energy(tr, d, a[0], a[1], st[0], t0, m, up=True)
+    e_ld, t_ld = vertical_energy(tr, d, b[0], b[1], gl[0], sim["t"][-1], m, up=False)
+    return dict(soc=float(soc_drop(e_to + sim["e"][-1] + e_ld, d)), T=float(sim["t"][-1] + t_ld + t_to - t0),
+                L=float(path_length(sp, path)), fixed=bool(len(path) != len(r["path"])))
+
+
+def _load_day(site_key, ymd, dkey):
+    from dpo import config as C
+    C.use_site(site_key)
+    sys.path.insert(0, "scripts")
+    from fetch_gfs_days import gfs_name
+    from dpo import drones as DR
+    from dpo.planner import Planner
+    from dpo.wind_field import Site3D
+    g = dict(np.load(C.PROC / C.SITE["grid"]))
+    T0 = np.datetime64(f"{ymd[:4]}-{ymd[4:6]}-{ymd[6:]}T00:00")
+    fc = Site3D(g, dict(np.load(C.RAW / gfs_name(site_key, ymd, "00"), allow_pickle=True)), T0)
+    tr = Site3D(g, dict(np.load(C.RAW / gfs_name(site_key, ymd, "06"), allow_pickle=True)), T0)
+    for s_ in (fc, tr):
+        for z in C.SITE["nfz"]:
+            s_.add_static_nfz_circle(*z)
+    d = DR.get(dkey)
+    return fc, tr, d, Planner(fc, d)
+
+
+def safeguard_worker(args):
+    """P0s: 에너지 탐색 경로와 최단 경로(속도 최적화)를 예보에서 비교해 고른 뒤, 실제 바람에서 평가."""
+    from dpo.energy import soc_drop
+    from dpo.mission import plan_best_of_two
+    from dpo.planner import simulate, vertical_energy
+    site_key, ymd, dkey = args
+    fc, tr, d, P = _load_day(site_key, ymd, dkey)
+    pairs = od_pairs(fc, N_PAIRS)
+    m = d.m_empty + PAYLOAD
+    out = []
+    for h in HOURS:
+        t0 = (h - KST) * 3600.0
+        for q, (a, b) in enumerate(pairs):
+            st, gl = fc.lowest_free_k(*a), fc.lowest_free_k(*b)
+            r = plan_best_of_two(P, st, gl, t0, m)
+            res = None
+            if r is not None:
+                sim = simulate(tr, d, r["path"], r["wait_before"], t0, m, "opt", U=tr.U, V=tr.V, tax=tr.t_axis)
+                if sim is not None:
+                    e_to, t_to = vertical_energy(tr, d, a[0], a[1], st[0], t0, m, up=True)
+                    e_ld, t_ld = vertical_energy(tr, d, b[0], b[1], gl[0], sim["t"][-1], m, up=False)
+                    res = dict(soc=float(soc_drop(e_to + sim["e"][-1] + e_ld, d)), T=float(sim["t"][-1] + t_ld + t_to - t0),
+                               chosen=r["chosen"])
+            out.append((h, q, res))
+    return ymd, out
+
+
+def safeguard(site_key, dkey="x650"):
+    from dpo import config as C
+    f = C.RES / f"E13_{site_key}_{dkey}.json"
+    rows = json.loads(f.read_text())
+    with cf.ProcessPoolExecutor(4) as ex:
+        for ymd, out in ex.map(safeguard_worker, [(site_key, d_, dkey) for d_ in DAYS]):
+            for h, q, res in out:
+                next(x for x in rows if x["day"] == ymd and x["hour"] == h and x["pair"] == q)["P0s"] = res
+    f.write_text(json.dumps(rows, ensure_ascii=False))
+    n = sum(1 for r in rows if r.get("P0s") and r["P0s"]["chosen"] == "shortest")
+    print(f"[safeguard {site_key} {dkey}] {len(rows)}건 중 최단 경로를 고른 경우 {n}건", flush=True)
+
+
+def repair_worker(args):
+    """이미 계산한 결과에서 기존 경로가 비어 있는 경우만 보정해 다시 계산."""
+    site_key, ymd, dkey, todo = args
+    fc, tr, d, P = _load_day(site_key, ymd, dkey)
+    pairs = od_pairs(fc, N_PAIRS)
+    m = d.m_empty + PAYLOAD
+    out = []
+    for h, q in todo:
+        a, b = pairs[q]
+        t0 = (h - KST) * 3600.0
+        out.append((h, q, baseline_leg(P, tr, d, a, b, t0, m, "const"), baseline_leg(P, tr, d, a, b, t0, m, "opt")))
+    return ymd, out
+
+
+def repair(site_key, dkey="x650"):
+    from dpo import config as C
+    f = C.RES / f"E13_{site_key}_{dkey}.json"
+    rows = json.loads(f.read_text())
+    jobs = {}
+    for r in rows:
+        if r["EX"] is None or r["EXv"] is None:
+            jobs.setdefault(r["day"], []).append((r["hour"], r["pair"]))
+    n = 0
+    with cf.ProcessPoolExecutor(4) as ex:
+        for ymd, out in ex.map(repair_worker, [(site_key, d_, dkey, t) for d_, t in jobs.items()]):
+            for h, q, ex_, exv in out:
+                r = next(x for x in rows if x["day"] == ymd and x["hour"] == h and x["pair"] == q)
+                r["EX"], r["EXv"] = ex_, exv
+                n += ex_ is not None
+    f.write_text(json.dumps(rows, ensure_ascii=False))
+    print(f"[repair {site_key} {dkey}] 대상 {sum(len(v) for v in jobs.values())}건 중 {n}건 보정", flush=True)
+
+
 def day_worker(args):
     site_key, ymd, dkey = args
     from dpo import config as C
@@ -97,8 +213,8 @@ def day_worker(args):
                     return None
                 return dict(soc=float(soc_drop(r["e_total"], d)), T=float(r["t_end"] - t0), L=float(r["length"]))
 
-            row["EX"] = static(P, 0, "const")
-            row["EXv"] = static(P, 0, "opt")
+            row["EX"] = baseline_leg(P, tr, d, a, b, t0, m, "const")
+            row["EXv"] = baseline_leg(P, tr, d, a, b, t0, m, "opt")
             row["P0"] = static(P, 1, "opt")
             row["PO"] = static(PO, 1, "opt")
             if q < N_PAIRS_ROLL and h in HOURS_ROLL:
@@ -190,7 +306,7 @@ def err_worker(args):
             ri = roll(P, 1e9)
             row["R_inf"] = ri
             if ri is not None:
-                for nm, dt in (("R_120", 120.0), ("R_60", 60.0), ("R_30", 30.0), ("R_mid", max(ri["T"] / 2, 20.0))):
+                for nm, dt in (("R_120", 120.0), ("R_60", 60.0), ("R_mid", max(ri["T"] / 2, 20.0))):
                     row[nm] = roll(P, dt)
                 row["R_oracle"] = roll(PO, 1e9, bias=False)
             rows.append(row)
@@ -220,7 +336,7 @@ def analyze_err(R):
             e = dict(n=len(rr), err=float(np.mean([r["err"] for r in rr])), wind=float(np.mean([r["wind"] for r in rr])),
                      n_fail=int(sum(1 for r in rows if r["case"] == name and not r.get("R_inf"))),
                      penalty_pct=float(np.mean([(r["R_inf"]["soc"] / r["R_oracle"]["soc"] - 1) * 100 for r in rr])))
-            for k in ("R_mid", "R_120", "R_60", "R_30"):
+            for k in ("R_mid", "R_120", "R_60"):
                 ok = [r for r in rr if r.get(k)]
                 if ok:
                     days = np.array([r["day"] for r in ok])
@@ -232,7 +348,7 @@ def analyze_err(R):
                                 n_plans=float(np.mean([r[k]["n_plans"] for r in ok])), n=len(ok))
             S[name] = e
             print(f"   [예보 오차 {name}] 오차 {e['err']:.1f} m/s, 갱신 없으면 상한 대비 {e['penalty_pct']:+.1f} % | " +
-                  " | ".join(f"{k} {e[k]['mean_pct']:+.1f} % (회복 {0 if e[k]['recovered'] is None else e[k]['recovered'] * 100:.0f} %)" for k in ("R_mid", "R_120", "R_60", "R_30") if k in e))
+                  " | ".join(f"{k} {e[k]['mean_pct']:+.1f} % (회복 {0 if e[k]['recovered'] is None else e[k]['recovered'] * 100:.0f} %)" for k in ("R_mid", "R_120", "R_60") if k in e))
         out[f.stem[7:]] = S
     R["forecast_error"] = out
     return out
@@ -388,6 +504,10 @@ def figure(R, sets):
 if __name__ == "__main__":
     if sys.argv[1] == "run":
         run(sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else "x650")
+    elif sys.argv[1] == "safeguard":
+        safeguard(sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else "x650")
+    elif sys.argv[1] == "repair":
+        repair(sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else "x650")
     elif sys.argv[1] == "runerr":
         run_err(sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else "x650")
     else:
