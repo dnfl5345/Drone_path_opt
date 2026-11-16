@@ -8,6 +8,10 @@
 - 최신 연구 대비 정식화 비교: [`docs/algorithm_comparison.md`](docs/algorithm_comparison.md) (문제 (P) 정의, 문헌별 정식화, 가정 축소 실험)
 - 확장안 (8방향 탐색 + 고도별 균일·선형 바람, LUT): [`docs/extension_8way_linear_wind.md`](docs/extension_8way_linear_wind.md)
 - 3D 시공간 확장 (동적 장애물) + 장애물 편집 플랫폼 + 장애물 변경 시 이벤트 기반 재계획: [`docs/spatiotemporal_dynamic_obstacles.md`](docs/spatiotemporal_dynamic_obstacles.md)
+- **검토: 기존 경로 대비 우수성과 남은 점검 항목 (E13 · E14)**: [`docs/review_gaps.md`](docs/review_gaps.md)
+  - 7일 × 2개 지역 × 2개 기체 630건: 기존 경로(최단 + 정속 10 m/s) 대비 SOC 소모 −17.5 – −21.2 %, 626건에서 우수. 그중 경로 모양의 몫은 1.8–4.9 %
+  - 기상 정보 갱신 주기 실험, 최단 경로를 후보에 넣는 안전장치(`plan_best_of_two`), 실비행 반복 횟수, 추가 검토 항목 10가지
+  - `scripts/exp_superiority.py`, `scripts/exp_update_period.py` → `results/E13_stats.json`, `results/E14_stats.json`, 그림 F28·F29
 - **창원 창이대로 71 주변 순회 시뮬레이션과 3D 장애물 편집**: [`docs/changwon_tour.md`](docs/changwon_tour.md)
   - 지역 전환: `python -m dpo.webapp --site changwon` (또는 환경변수 `DPO_SITE`), 자료 수집 `scripts/build_site.py`
   - 3D 화면(`/3d`)에서 장애물 추가·끌어 옮기기·속성 편집, 순회 임무(경유점), 단일 ArduPilot 미션

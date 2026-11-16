@@ -327,37 +327,45 @@ def figure(R):
     plt.rcParams.update({"font.family": ["NanumGothic", "DejaVu Sans"], "axes.unicode_minus": False, "font.size": 10,
                          "mathtext.fontset": "dejavusans", "axes.spines.top": False, "axes.spines.right": False,
                          "savefig.dpi": 200, "savefig.bbox": "tight", "axes.titleweight": "bold"})
-    S = next(iter(R.values()))
-    names = [n for n, _, _ in ERR_CASES if n in S]
+    SETLAB = {"changwon_x650": "창원 · X650", "pangyo_x650": "판교 · X650", "pangyo_m100": "판교 · M100"}
     lab = {"real": "실제 예보 오차\n(00Z ↔ 06Z)", "rot30": "풍향 30°", "rot60": "풍향 60°", "rot90": "풍향 90°", "rot180": "풍향 180°",
            "spd0.6": "풍속 0.6배", "spd1.4": "풍속 1.4배"}
-    fig, axs = plt.subplots(1, 2, figsize=(15.5, 4.8), gridspec_kw=dict(width_ratios=[1.0, 1.25], wspace=0.25))
-    ax = axs[0]
-    x = np.arange(len(names))
-    pen = [S[n]["penalty_pct"] for n in names]
-    lo = [S[n]["penalty_ci"][0] for n in names]
-    hi = [S[n]["penalty_ci"][1] for n in names]
-    ax.bar(x, pen, 0.62, color=["#9E9E9E"] + ["#D7263D"] * (len(names) - 1),
-           yerr=[np.array(pen) - np.array(lo), np.array(hi) - np.array(pen)], error_kw=dict(ecolor="#444", lw=1, capsize=3))
-    for xx, v, n in zip(x, pen, names):
-        ax.text(xx, max(v, 0) + 0.6, f"{v:+.1f} %\n(오차 {S[n]['err']:.1f} m/s)", ha="center", fontsize=8.5)
-    ax.set_xticks(x); ax.set_xticklabels([lab[n] for n in names], fontsize=8.5)
-    ax.set_ylabel("실제 바람을 미리 알 때 대비 SOC 증가 [%]")
-    ax.set_ylim(min(0, min(lo)) - 0.5, max(hi) * 1.35 + 1)
-    ax.set_title("(a) 갱신 없이 계획대로 날 때의 손해")
-    ax = axs[1]
     pol = [("S_120", "속도만, 2분마다", "#9CC3E4"), ("S_60", "속도만, 1분마다", "#4F94CD"), ("S_30", "속도만, 30초마다", "#1B6CA8"),
-           ("R_60", "경로+속도, 1분마다", "#E46C0A"), ("ADAPT", "속도를 매 순간 맞춤", "#2CA58D")]
-    w = 0.8 / len(pol)
-    for q, (k, lb, c) in enumerate(pol):
-        v = [100 * S[n][k]["recovered"] if k in S[n] and S[n][k]["recovered"] is not None else np.nan for n in names]
-        ax.bar(x + (q - (len(pol) - 1) / 2) * w, v, w * 0.92, color=c, label=lb)
-    ax.axhline(100, color="#555", lw=0.8, ls="--"); ax.axhline(0, color="#555", lw=0.8)
-    ax.set_xticks(x); ax.set_xticklabels([lab[n] for n in names], fontsize=8.5)
-    ax.set_ylabel("손해 중 되찾은 비율 [%] (100 = 상한)")
-    ax.set_ylim(-60, 125)
-    ax.set_title("(b) 비행 중 갱신으로 되찾는 정도")
-    ax.legend(frameon=False, fontsize=8.5, ncol=2, loc="lower right")
+           ("R_60", "경로+속도, 1분마다 (무조건 교체)", "#E46C0A"), ("K_60", "경로+속도, 1분마다 (더 나을 때만 교체)", "#7B3FA0"),
+           ("ADAPT", "속도를 매 순간 맞춤", "#2CA58D"), ("ORACLE", "실제 바람을 미리 앎 (상한)", "#555555")]
+    fig, axs = plt.subplots(len(R), 2, figsize=(16.5, 4.9 * len(R)), squeeze=False,
+                            gridspec_kw=dict(width_ratios=[1.0, 1.9], wspace=0.16, hspace=0.42))
+    for row, (sname, S) in enumerate(R.items()):
+        names = [n for n, _, _ in ERR_CASES if n in S]
+        x = np.arange(len(names))
+        ax = axs[row, 0]
+        pen = np.array([S[n]["penalty_pct"] for n in names])
+        lo = np.array([S[n]["penalty_ci"][0] for n in names])
+        hi = np.array([S[n]["penalty_ci"][1] for n in names])
+        ax.bar(x, pen, 0.62, color=["#9E9E9E"] + ["#D7263D"] * (len(names) - 1),
+               yerr=[np.maximum(pen - lo, 0), np.maximum(hi - pen, 0)], error_kw=dict(ecolor="#444", lw=1, capsize=3))
+        top = max(float(hi.max()), 1.0)
+        for xx, v, h, n in zip(x, pen, hi, names):
+            ax.text(xx, max(h, 0) + top * 0.04, f"{v:+.1f} %\n({S[n]['err']:.1f} m/s)", ha="center", va="bottom", fontsize=8)
+        ax.axhline(0, color="#555", lw=0.8)
+        ax.set_xticks(x); ax.set_xticklabels([lab[n] for n in names], fontsize=8)
+        ax.set_ylabel("실제 바람을 미리 알 때 대비 SOC 증가 [%]")
+        ax.set_ylim(min(0.0, float(lo.min())) - top * 0.05, top * 1.42)
+        ax.set_title(f"{SETLAB.get(sname, sname)} (a) 갱신 없이 계획대로 날 때의 손해\n괄호: 예보와 실제 바람의 차이", fontsize=10.5)
+        ax = axs[row, 1]
+        w = 0.84 / len(pol)
+        for q, (k, lb, c) in enumerate(pol):
+            v = np.array([S[n][k]["mean_pct"] if k in S[n] else np.nan for n in names])
+            l2 = np.array([S[n][k]["ci"][0] if k in S[n] else np.nan for n in names])
+            h2 = np.array([S[n][k]["ci"][1] if k in S[n] else np.nan for n in names])
+            ax.bar(x + (q - (len(pol) - 1) / 2) * w, v, w * 0.92, color=c, label=lb,
+                   yerr=[np.maximum(v - l2, 0), np.maximum(h2 - v, 0)], error_kw=dict(ecolor="#333", lw=0.7, capsize=1.5))
+        ax.axhline(0, color="#555", lw=0.8)
+        ax.set_xticks(x); ax.set_xticklabels([lab[n] for n in names], fontsize=8.5)
+        ax.set_ylabel("갱신 없는 비행 대비 SOC 변화 [%] (음수 = 절감)")
+        ax.set_title(f"{SETLAB.get(sname, sname)} (b) 비행 중 갱신 방식별 효과 (평균, 95 % 구간)", fontsize=10.5)
+        if row == 0:
+            ax.legend(frameon=False, fontsize=8.5, ncol=4, loc="lower center", bbox_to_anchor=(0.36, 1.12), columnspacing=1.2)
     fig.savefig(C.FIG / "F29_update_period.png")
     plt.close(fig)
 
