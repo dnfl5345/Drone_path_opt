@@ -97,7 +97,8 @@ function drawChart() {
 // ------------------------------------------------------------ 상태 반영
 function fmt(x, d = 0) { return x == null ? "–" : Number(x).toFixed(d); }
 function apply(s) {
-  if (s.session !== L.session) { L.session = s.session; L.trail = []; L.tel = []; L.plan = []; L.pending = []; $("events").innerHTML = ""; }
+  if (s.session !== L.session) { L.session = s.session; L.trail = []; L.tel = []; L.plan = []; L.pending = []; $("events").innerHTML = "";
+    L.cmdT = null; $("cmds").innerHTML = ""; $("cmd_info").textContent = "속도 갱신을 채택하면 보낼 속도 명령(DO_CHANGE_SPEED)이 여기에 나옵니다."; }
   L.snap = s;
   const running = s.state === "running";
   $("pause").disabled = !running; $("stop").disabled = !running;
@@ -124,6 +125,19 @@ function apply(s) {
   $("g_rp").innerHTML = `${s.stats.replans} / ${s.stats.refined}`;
   $("g_cpu").innerHTML = s.stats.cpu_last == null ? "–" : `${fmt(s.stats.cpu_last, 2)} <small>s</small>`;
   $("g_chk").innerHTML = s.stats.check_ms == null ? "–" : `${fmt(s.stats.check_ms, 1)} <small>ms</small>`;
+  const su = s.speed_update || {}, sg = s.safeguard || {};
+  $("g_vcmd").innerHTML = d.v_cmd == null ? "–" : `${fmt(d.v_cmd, 1)} <small>m/s</small>`;
+  $("g_bias").innerHTML = !su.period ? "<small>갱신 끔</small>" : s.wind ? `${fmt(su.bias, 1)} <small>m/s</small>` : "–";
+  $("g_spd").innerHTML = !su.period ? "<small>갱신 끔</small>" : `${su.n} / ${su.checks}<small>${su.gain ? ` · −${fmt(su.gain, 1)}%` : ""}</small>`;
+  const cruising = s.state === "running" && s.phase === "순항";
+  $("dl_wpl").classList.toggle("off", !cruising); $("dl_csv").classList.toggle("off", !cruising);
+  $("sg_info").textContent = sg.on ? `안전장치: 에너지 탐색 ${sg.energy}회 · 최단 경로 ${sg.shortest}회 채택` : "안전장치 끔";
+  if (su.last && su.last.t !== L.cmdT) {
+    L.cmdT = su.last.t;
+    $("cmd_info").textContent = `t=${fmt(su.last.t)} s 갱신 · 바람 편차 (${fmt(su.last.bias[0], 1)}, ${fmt(su.last.bias[1], 1)}) m/s · 남은 구간 예상 에너지 −${fmt(su.last.gain, 1)}%`;
+    $("cmds").innerHTML = "<tr><th>시각 [s]</th><th>x [m]</th><th>y [m]</th><th>고도 [m]</th><th>대지속도 [m/s]</th></tr>" +
+      su.last.cmds.slice(0, 8).map(c => `<tr><td>${fmt(c.t)}</td><td>${fmt(c.x)}</td><td>${fmt(c.y)}</td><td>${fmt(c.z)}</td><td><b>${fmt(c.v, 1)}</b></td></tr>`).join("");
+  }
   $("g_state").textContent = (s.replanning ? "재계획 계산 중… " : "") + (s.pending != null ? `경로 교체 예약 t=${s.pending} s · ` : "")
     + `예상 계산 ${fmt(s.est_cpu, 2)} s × ${s.speed}배속 · 감시 ${s.stats.checks}회 · 늦은 계산 ${s.stats.late} · 완화 ${s.stats.degraded} · 실패 ${s.stats.fail}`
     + ` · 화면 ${L.fps.toFixed(0)} fps · 시계 주기 p95 ${fmt(s.stats.tick_p95)} ms (최대 ${fmt(s.stats.tick_max)} ms)`;
@@ -154,7 +168,15 @@ function request() {
   return { dep_hour: Number($("dep").value), payload: Number($("payload").value), kind: $("kind").value,
            round_trip: $("round").checked, eps: $("eps").value === "" ? null : Number($("eps").value), shape: $("shape").value,
            period: Number($("period").value), latency: Number($("latency").value), speed: Number($("speed").value),
-           refine: $("refine").checked, obstacles: [] };
+           refine: $("refine").checked, obstacles: [], drone: $("drone").value, safeguard: $("safeguard").checked,
+           speed_update: Number($("spdupd").value), wind_noise: Number($("wnoise").value), wind_truth: windTruth() };
+}
+function windTruth() {
+  const v = $("wtruth").value;
+  if (!v) return null;
+  if (v === "06z") return "06z";
+  const [k, x] = v.split(":");
+  return k === "rot" ? { rot: Number(x), scale: 1 } : { rot: 0, scale: Number(x) };
 }
 function setMode(m, hint) {
   L.mode = L.mode === m ? null : m; L.clickA = null;
@@ -198,6 +220,12 @@ async function init() {
   L.site.wind.forEach(w => { const o = document.createElement("option"); o.value = w.hour;
     o.textContent = `${w.hour}:00 (100 m ${w.speed.toFixed(1)} m/s)`; dep.appendChild(o); });
   dep.value = 15;
+  $("drone").onchange = () => {            // 기체별 탑재 한도
+    const d = (L.site.drones || []).find(x => x.key === $("drone").value);
+    if (!d) return;
+    $("payload").max = d.payload_max; $("payload").step = d.payload_max > 1 ? 0.1 : 0.05;
+    if (Number($("payload").value) > d.payload_max) $("payload").value = d.payload_max;
+  };
   L.img.onload = draw; L.img.src = "/basemap.png";
   bind(); connect(); draw();
 }

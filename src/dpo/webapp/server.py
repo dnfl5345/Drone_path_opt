@@ -74,8 +74,10 @@ class App:
         self.basemap = self._render_basemap()
         from ..live import LiveEngine
         m = ADSB_FULL
-        self.live = LiveEngine(self.site, self.drone,
-                               None if m is None else dict(knots=m["knots"], q=m["model_all"]["q"], s1=m["model_all"]["s1"]))
+        self._adsb_live = None if m is None else dict(knots=m["knots"], q=m["model_all"]["q"], s1=m["model_all"]["s1"])
+        self.live = LiveEngine(self.site, self.drone, self._adsb_live)
+        self.lives = {"m100": self.live}          # 기체별 실시간 엔진 (계획기를 기체마다 따로 둔다)
+        self._truth = None
         # JIT 예열
         t = time.time()
         self.plan(dict(obstacles=[], dep_hour=15, payload=0.5, kind="delivery", round_trip=False))
@@ -159,6 +161,55 @@ class App:
                                  vz_dn=d.vz_dn) for k, d in self.drones.items()],
                     date=C.SITE["date"], adsb=ADSB)
 
+    def truth_site(self):
+        """평가용 '실제 바람': 같은 날 더 늦게 발표된 예보 (지역 등록표의 gfs_truth)."""
+        if self._truth is None:
+            f = C.RAW / C.SITE["gfs_truth"]
+            if not f.exists():
+                raise ValueError(f"실제 바람 자료가 없습니다: {f.name}")
+            self._truth = Site3D(self.g, dict(np.load(f, allow_pickle=True)), np.datetime64(C.SITE["t0"]))
+            self._truth.free = self.site.free           # 금지구역을 포함한 같은 점유 격자
+        return self._truth
+
+    def live_start(self, req, obs):
+        """실시간 운용 시작. drone: m100 | x650, wind_truth: None | {rot, scale} | "06z"."""
+        from ..live import LiveEngine
+        dkey = req.pop("drone", None) or "m100"
+        if dkey not in self.drones:
+            raise ValueError("기체는 m100 또는 x650")
+        pl = float(req.get("payload", 0.5) if req.get("payload") is not None else 0.5)
+        if not (0 <= pl <= DR.PAYLOAD_MAX[dkey] + 1e-9):
+            raise ValueError(f"탑재중량은 0~{DR.PAYLOAD_MAX[dkey]:g} kg")
+        for k in ("hub", "dst"):
+            if req.get(k) is not None:
+                req[k] = self._valid_point(req[k], k)
+        req.setdefault("hub", self.hub0)
+        req.setdefault("dst", self.dst0)
+        truth = None
+        if req.get("wind_truth") == "06z":
+            truth = self.truth_site()
+        elif req.get("wind_truth") is not None and not isinstance(req["wind_truth"], dict):
+            raise ValueError('wind_truth 는 {"rot": 도, "scale": 배율} 또는 "06z"')
+        if dkey not in self.lives:
+            self.lives[dkey] = LiveEngine(self.site, self.drones[dkey], self._adsb_live)
+        if self.live is not self.lives[dkey]:
+            self.live.stop()
+            self.live = self.lives[dkey]
+        out = self.live.start(req, obs, truth=truth)
+        out["drone_key"] = dkey
+        return out
+
+    def live_mission(self):
+        m = self.live.mission()
+        m.pop("items", None); m.pop("rows", None)
+        return m
+
+    def health(self):
+        from .. import __version__
+        return dict(status="ok", version=__version__, site=C.SITE_KEY, site_label=C.SITE["label"],
+                    drones=list(self.drones), live=self.live.state, grid=[int(v) for v in self.site.free.shape],
+                    wind_hours=len(self.site.t_axis))
+
     def _parse(self, req):
         obs = [DynObstacle.from_dict(o) for o in req.get("obstacles", [])]
         return validate(obs, self.site)
@@ -198,6 +249,7 @@ class App:
         max_wait = float(req.get("max_wait", 180.0)) if req.get("allow_wait", True) else 0.0
         wind = "linear" if req.get("wind") == "linear" else "full"
         site = self.site_lin() if wind == "linear" else self.site
+        safeguard = bool(req.get("safeguard", True))
         weight = float(req.get("weight", 1.2))
         if not (1.0 <= weight <= 2.0):
             raise ValueError("탐색 가중치는 1.0~2.0")
@@ -231,7 +283,7 @@ class App:
         return dict(site=site, wind=wind, d=d, t_dep=(dep_hour - KST) * 3600.0, dep_hour=dep_hour, legs_req=legs_req,
                     E_usable=d.battery_wh * 3600 * (1 - reserve / 100.0), reserve=reserve, max_wait=max_wait,
                     weight=weight, eps=eps, shape=shape, SP=self.planners[pkey], dkey=dkey, payload=payload,
-                    tour=bool(tour), dwell=dwell, tour_pts=tour)
+                    tour=bool(tour), dwell=dwell, tour_pts=tour, safeguard=safeguard)
 
     def _fly_legs(self, cx, legs_req, t, e_used, first=None, reuse=None):
         """legs_req 를 순서대로 계획·시뮬레이션. first=(시작노드, 시작시각, 실행된 앞부분 sim, 이륙에너지, 이륙시간)
@@ -261,11 +313,18 @@ class App:
                 sim_try = simulate(site, d, ro["path"], ro["wait_before"], t0, m)
                 if remaining_conflict(site, SP.table, sim_try, t0) is None and sim_try["e"][-1] <= budget:
                     r = dict(ro, cpu_s=0.0, reused=True)
+            sg = None
             if r is None:
                 r = SP.plan(start, gl, t_start=t0, mass=m, budget=budget, max_wait=cx["max_wait"], weight=cx["weight"])
+                if r is not None and cx.get("safeguard", True):
+                    # 안전장치: 최단 경로 + 속도 최적화가 더 싸고 충돌이 없으면 그쪽을 쓴다
+                    from ..mission import st_safeguard
+                    r2, sg = st_safeguard(SP, start, gl, t0, m, r, budget=budget, max_wait=cx["max_wait"],
+                                          air_start=air_start)
+                    r = r2 if r2 is not None else r
             # t_leg0: 이 구간의 이륙 시작 시각 (재계획 구간은 호출 측에서 원래 값으로 덮어씀)
             leg = dict(name=name, a=a, b=b, m=m, st=st, gl=gl, e_to=e_to, t_to=t_to, e_before=e_used,
-                       t_leg0=t0 - t_to, r=r)
+                       t_leg0=t0 - t_to, r=r, sg=sg)
             if r is None:
                 leg["feasible"] = False
                 legs.append(leg)
@@ -329,7 +388,9 @@ class App:
                        T=float(sim["t"][-1] + L["t_ld"] - L["t_leg0"]), wait=float(L["waits"].sum()),
                        air_start=bool(L["air_start"]), air_end=bool(L["air_end"]),
                        L=float(np.sum(np.hypot(np.diff(sim["x"]), np.diff(sim["y"])))), cpu=float(r["cpu_s"]),
-                       conflicts=check_path_conflicts(site, sim, obs, t_dep), ground_delay=float(r["ground_delay"]))
+                       conflicts=check_path_conflicts(site, sim, obs, t_dep), ground_delay=float(r["ground_delay"]),
+                       chosen=r.get("chosen"),
+                       cand_kJ=None if not L.get("sg") else {k: float(v / 1000) for k, v in L["sg"]["cand"].items()})
             out["legs"].append(leg)
             e_used += L["E"]
         out["soc_used"] = float(soc_drop(e_used, d))
@@ -338,6 +399,8 @@ class App:
             and out["soc_end"] >= cx["reserve"] - 1e-6
         out["table_cells"] = int(cx["SP"].table["n_cells"])
         out["tour"] = bool(cx.get("tour"))
+        ch = [l.get("chosen") for l in out["legs"] if l.get("feasible")]
+        out["safeguard"] = dict(on=bool(cx.get("safeguard", True)), shortest=ch.count("shortest"), energy=ch.count("energy"))
         out["drone"] = dict(key=cx["dkey"], label=DR.LABEL[cx["dkey"]], name=d.name, battery_wh=d.battery_wh,
                             m_empty=d.m_empty, payload=cx["payload"])
         if extra:
@@ -657,6 +720,22 @@ def make_handler(app):
             if path == "/api/live/state":
                 q = dict(x.split("=") for x in self.path.split("?")[1].split("&")) if "?" in self.path else {}
                 return self._send(200, app.live.snapshot(int(q.get("since", 0)), int(q.get("plan_ver", -1))))
+            if path == "/api/health":
+                return self._send(200, app.health())
+            if path == "/api/live/mission":
+                return self._send(200, app.live_mission())
+            if path in ("/api/live/mission.waypoints", "/api/live/mission.csv"):
+                m = app.live.mission()
+                if not m.get("available"):
+                    return self._send(409, dict(error=m.get("reason", "미션 없음")))
+                body = (m["wpl"] if path.endswith(".waypoints") else m["csv"]).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Content-Disposition", f'attachment; filename="remaining_{m["leg"]}{path[path.rindex("."):]}"')
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if path == "/api/live/log":
                 body = json.dumps(_jsonable(app.live.log() if app.live.state != "idle" else {}), ensure_ascii=False)
                 self.send_response(200)
@@ -730,10 +809,7 @@ def make_handler(app):
                     return self._send(200, app.replan(req))
                 if self.path == "/api/live/start":
                     obs = req.pop("obstacles", [])
-                    for k in ("hub", "dst"):
-                        if req.get(k) is not None:
-                            req[k] = app._valid_point(req[k], k)
-                    return self._send(200, app.live.start(req, obs))
+                    return self._send(200, app.live_start(req, obs))
                 if self.path == "/api/live/control":
                     return self._send(200, app.live.control(req))
                 if self.path == "/api/live/obstacle":

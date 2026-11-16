@@ -20,7 +20,9 @@ import time
 
 import numpy as np
 
+from . import speed_update as SU
 from .energy import power_w, soc_drop
+from .mission import st_safeguard
 from .obstacles import DynObstacle, build_interval_table, validate
 from .planner import simulate, vertical_energy
 from .st_planner import STPlanner
@@ -51,6 +53,24 @@ def _seg_speed(o, t):
     k = int(np.clip(np.searchsorted(ts, t, side="right") - 1, 0, len(ts) - 2))
     p0, p1 = o.path[k], o.path[k + 1]
     return math.hypot(p1["x"] - p0["x"], p1["y"] - p0["y"]) / max(p1["t"] - p0["t"], 1e-9)
+
+
+def perturbed_site(site, rot=0.0, scale=1.0):
+    """예보 바람의 풍향을 rot [deg] 만큼 돌리고 풍속에 scale 을 곱한 '실제 바람' 사이트 (모의 운용용)."""
+    tr = copy.copy(site)
+    th = math.radians(float(rot))
+    tr.U = ((site.U * math.cos(th) - site.V * math.sin(th)) * float(scale)).astype(site.U.dtype)
+    tr.V = ((site.U * math.sin(th) + site.V * math.cos(th)) * float(scale)).astype(site.V.dtype)
+    return tr
+
+
+def _track(sim, t0, path, site):
+    """위치·에너지 보간용 궤적: simulate 기록 앞에 출발점 (t0, 에너지 0) 을 붙인다."""
+    p = np.asarray(path[0], float)
+    x0, y0, z0 = (p[2] + .5) * site.dx, (p[1] + .5) * site.dx, float(site.z[0] + p[0] * site.dz)
+    return dict(t=np.concatenate([[t0], sim["t"]]), e=np.concatenate([[0.0], sim["e"]]),
+                x=np.concatenate([[x0], sim["x"]]), y=np.concatenate([[y0], sim["y"]]),
+                z=np.concatenate([[z0], sim["z"]]))
 
 
 # ------------------------------------------------------------------ 침입기 (실측 항적 재생 / 외부 보고)
@@ -136,6 +156,7 @@ class LiveEngine:
         self.lock = threading.RLock()
         self.SP = STPlanner(site, drone)          # 재계획(긴급) 전용
         self.SPr = STPlanner(site, drone)         # 백그라운드 개선 전용 (긴급 재계획을 막지 않도록 분리)
+        self.truth = site                         # 실제 바람 (모의 운용에서만 예보와 다르게 둘 수 있다)
         self._tracks = None
         if not sync:                              # 실측 항적 미리 읽기 (첫 침입기 투입 지연 방지)
             threading.Thread(target=self._load_pool, daemon=True).start()
@@ -144,9 +165,12 @@ class LiveEngine:
         self._threads = []
 
     # -------------------------------------------------------------- 시작/제어
-    def start(self, cfg, user_obstacles=()):
+    def start(self, cfg, user_obstacles=(), truth=None):
         """cfg: hub, dst, dep_hour, payload, kind, round_trip, eps, shape, speed, period, latency, horizon,
-        weight, replan_weight, reserve, service_s, max_wait."""
+        weight, replan_weight, reserve, service_s, max_wait,
+        safeguard (최단 경로 후보 비교), speed_update (속도 갱신 주기 [s], 0 = 끔), speed_margin,
+        wind_truth ({rot, scale}: 모의 운용에서 실제 바람을 예보와 다르게), wind_noise (기체 바람 측정 잡음 σ [m/s]).
+        truth: 실제 바람 사이트를 직접 넘길 때 (예: 더 새 예보)."""
         self.stop()
         with self.lock:
             self.session += 1
@@ -155,11 +179,37 @@ class LiveEngine:
                      round_trip=True, eps=0.05, shape="gauss", speed=5.0, period=2.0, latency=3.0, horizon=20.0,
                      weight=2.0, replan_weight=2.0, refine_weight=1.2, refine=True, reserve=20.0, service_s=20.0,
                      hold=True,       # False = 기체가 스스로 멈추지 못함(원격 판단만 가정, 배경 실험용)
-                     max_wait=120.0)
+                     max_wait=120.0,
+                     safeguard=True, speed_update=SU.DEFAULTS["period"], speed_margin=SU.DEFAULTS["margin"],
+                     wind_truth=None, wind_noise=0.0, wind_seed=0)
             c.update({k: v for k, v in cfg.items() if v is not None})
             c["hub"], c["dst"] = tuple(c["hub"]), tuple(c["dst"])
             c["eps"] = float(c["eps"]) if c["eps"] not in (None, "", 0, "0") else None
             c["speed"] = float(np.clip(float(c["speed"]), 0.25, 30.0))
+            c["speed_update"] = float(np.clip(float(c["speed_update"] or 0.0), 0.0, 600.0))
+            c["speed_margin"] = float(np.clip(float(c["speed_margin"]), 0.0, 0.2))
+            c["wind_noise"] = float(np.clip(float(c["wind_noise"] or 0.0), 0.0, 5.0))
+            c["safeguard"] = bool(c["safeguard"])
+            wt = c.get("wind_truth") or None
+            if isinstance(wt, dict):
+                wt = dict(rot=float(np.clip(float(wt.get("rot", 0.0)), -180.0, 180.0)),
+                          scale=float(np.clip(float(wt.get("scale", 1.0)), 0.0, 3.0)))
+                if wt["rot"] == 0.0 and wt["scale"] == 1.0:
+                    wt = None
+            if truth is not None:                 # 실제 바람 사이트를 직접 받음 (예: 더 늦게 발표된 예보)
+                self.truth, c["wind_truth"] = truth, (wt if isinstance(wt, (dict, str)) else "external")
+            elif isinstance(wt, dict):
+                self.truth, c["wind_truth"] = perturbed_site(self.site, **wt), wt
+            else:
+                self.truth, c["wind_truth"] = self.site, None
+            self.bias = SU.WindBias()
+            self.speed_log = []               # 채택한 속도 갱신 [dict(t, bias, gain, cmds=[...])]
+            self.next_spd = math.inf
+            self.spd_due = False
+            self._sur_due = False
+            self.wind_last = None
+            self._rng = np.random.default_rng(int(c["wind_seed"]))
+            self.sg = dict(energy=0, shortest=0, last=None)
             self.cfg = c
             self.t_dep = (int(c["dep_hour"]) - KST) * 3600.0
             m0 = d.m_empty
@@ -199,7 +249,8 @@ class LiveEngine:
             self.known = []
             self.table = None
             self.stats = dict(replans=0, late=0, degraded=0, checks=0, check_ms=[], cpu=[], fail=0, refined=0,
-                              refine_gain=[], refine_cpu=[], tick_gap=[])
+                              refine_gain=[], refine_cpu=[], tick_gap=[], speed_updates=0, speed_rejected=0,
+                              speed_gain=[], speed_cpu=[], speed_checks=0)
             self.state = "running"
             self.paused = False
             if errs:
@@ -207,6 +258,9 @@ class LiveEngine:
             self._ev("info", f"임무 시작 – {'배송' if c['kind'] == 'delivery' else '회수'} "
                              f"{'왕복' if c['round_trip'] else '편도'}, {c['dep_hour']}시, ×{c['speed']:g}, "
                              f"ε={c['eps'] if c['eps'] else '무시'} ({'실측 ADS-B 모양' if c['shape'] == 'adsb' else '가우시안'})")
+            self._ev("info", f"안전장치 {'켬' if c['safeguard'] else '끔'} · 속도 갱신 "
+                             + (f"{c['speed_update']:g} s 주기" if c["speed_update"] > 0 else "끔")
+                             + ("" if self.truth is self.site else " · 실제 바람 ≠ 예보 (모의)"))
             self._start_leg(0)
         if not self.sync:
             sid = self.session
@@ -349,7 +403,7 @@ class LiveEngine:
         L = self.legs[q]
         L["st"], L["gl"] = s.lowest_free_k(*L["a"]), s.lowest_free_k(*L["b"])
         T = self.t_dep + self.t
-        e_to, t_to = vertical_energy(s, d, L["a"][0], L["a"][1], L["st"][0], T, L["m"], up=True)
+        e_to, t_to = vertical_energy(self.truth, d, L["a"][0], L["a"][1], L["st"][0], T, L["m"], up=True)
         z0 = float(s.ground[int(L["a"][1] // s.dx), int(L["a"][0] // s.dx)])
         L.update(e_to=e_to, t_to=t_to, z0=z0, z1=float(s.z[L["st"][0]]))
         # 계획이 준비될 때까지 지상 대기 (공중 호버로 배터리를 쓰지 않음) → 준비되면 이륙
@@ -399,7 +453,7 @@ class LiveEngine:
         s = self.site
         i, j = int(x // s.dx), int(y // s.dx)
         k = int(np.clip(round((z - s.z[0]) / s.dz), 0, s.nz - 1))
-        e_ld, t_ld = vertical_energy(s, self.drone, x, y, k, self.t_dep + self.t, self.legs[self.leg_i]["m"], up=False)
+        e_ld, t_ld = vertical_energy(self.truth, self.drone, x, y, k, self.t_dep + self.t, self.legs[self.leg_i]["m"], up=False)
         self._push(dict(kind="vert", x=x, y=y, z0=z, z1=float(s.ground[j, i]), t0=self.t, t1=self.t + t_ld, E=e_ld))
         self.plan = None; self.pending = None; self.retry = None; self.plan_ver += 1
         self.phase = "비상 착륙"
@@ -427,20 +481,20 @@ class LiveEngine:
         T = self.t_dep + self.t
         i, j = int(x // s.dx), int(y // s.dx)
         k = k if k is not None else int(round((z - s.z[0]) / s.dz))
-        wu, wv = s.wind_at(T, int(np.clip(k, 0, s.nz - 1)), j, i)
+        wu, wv = self.truth.wind_at(T, int(np.clip(k, 0, s.nz - 1)), j, i)
         return dict(kind="hover", x=x, y=y, z=z, t0=self.t, t1=math.inf,
                     P=power_w(math.hypot(wu, wv), 0.0, L["m"], 1.2, self.drone.params()))
 
     def _install(self, plan):
         """예약된 계획으로 교체 (지상 지연·출발 전 공백은 호버로 채움)."""
         sim = plan["sim"]
-        t_sim0 = sim["t"][0] - self.t_dep
+        t_sim0 = plan["t0"] - self.t_dep
         if t_sim0 > self.t + 0.5:
             x, y, z = self._drone_at(self.t)
             self._push(self._hover_piece(x, y, z))
             plan["hover_until"] = t_sim0
         else:
-            self._push(dict(kind="sim", sim=sim, t0=self.t, t1=sim["t"][-1] - self.t_dep))
+            self._push(dict(kind="sim", sim=plan["track"], t0=self.t, t1=sim["t"][-1] - self.t_dep))
         self.plan = plan
         self.plan_ver += 1
         if self.phase in ("이륙", "대기"):
@@ -473,7 +527,7 @@ class LiveEngine:
                 self.t = self.plan["hover_until"]
                 self.plan["hover_until"] = None
                 sim = self.plan["sim"]
-                self._push(dict(kind="sim", sim=sim, t0=self.t, t1=sim["t"][-1] - self.t_dep))
+                self._push(dict(kind="sim", sim=self.plan["track"], t0=self.t, t1=sim["t"][-1] - self.t_dep))
                 self.phase = "순항"
                 continue
             # 이륙 끝 → 계획 없으면 호버 대기
@@ -490,8 +544,8 @@ class LiveEngine:
                 L = self.legs[self.leg_i]
                 x, y, z = self._piece_pos(p, self.t)
                 s = self.site
-                e_ld, t_ld = vertical_energy(s, self.drone, L["b"][0], L["b"][1], L["gl"][0], self.t_dep + self.t,
-                                             L["m"], up=False)
+                e_ld, t_ld = vertical_energy(self.truth, self.drone, L["b"][0], L["b"][1], L["gl"][0],
+                                             self.t_dep + self.t, L["m"], up=False)
                 zg = float(s.ground[int(L["b"][1] // s.dx), int(L["b"][0] // s.dx)])
                 self._push(dict(kind="vert", x=x, y=y, z0=z, z1=zg, t0=self.t, t1=self.t + t_ld, E=e_ld))
                 self.phase = "착륙"
@@ -649,7 +703,7 @@ class LiveEngine:
                     self.pending = None
                     self.replanning = False
                     self._request_replan("비상 정지 위치에서 재계획", known=known)
-                elif not self.replanning and self.pending is None:
+                elif not self.replanning and (self.pending is None or self.pending[1].get("kind") == "speed"):
                     self._request_replan(f"충돌 예상 (t={t_hit:.0f} s) – 재계획", known=known)
 
     # -------------------------------------------------------------- 재계획
@@ -668,8 +722,39 @@ class LiveEngine:
         self.stats["holds"] = self.stats.get("holds", 0) + 1
         self._ev("alert", reason)
 
+    def _bias(self):
+        """계획에 쓸 예보 보정값. 속도 갱신이 꺼져 있거나 아직 잰 적이 없으면 None."""
+        if self.cfg["speed_update"] <= 0 or self.bias.n == 0 or self.bias.magnitude < 0.05:
+            return None
+        return self.bias.value
+
+    def _make_plan(self, path, waits, T0, m, bias=None):
+        """예보(+보정)로 구간 속도 명령을 정하고, 실제 바람에서 그 명령대로 비행한 결과를 붙인다."""
+        s, d = self.site, self.drone
+        waits = np.asarray(waits, float)
+        pred = simulate(s, d, path, waits, T0, m, bias=bias)
+        if pred is None or len(pred["t"]) < 2:
+            return None
+        cmd = np.array(pred["vg"], float)
+        sim = pred if (self.truth is s and bias is None) else SU.execute(self.truth, d, path, waits, T0, m, cmd)
+        if sim is None or len(sim["t"]) < 2:
+            return None
+        return dict(sim=sim, track=_track(sim, T0, path, s), path=np.array(path, float), waits=waits, cmd=cmd,
+                    t0=float(T0), e_pred=float(pred["e"][-1]))
+
+    @staticmethod
+    def _shift(plan, dt):
+        """호버 중 늦게 끝난 계획을 dt 만큼 뒤로 옮긴다."""
+        out = dict(plan)
+        out["sim"] = dict(plan["sim"]); out["sim"]["t"] = plan["sim"]["t"] + dt
+        out["track"] = dict(plan["track"]); out["track"]["t"] = plan["track"]["t"] + dt
+        out["t0"] = plan["t0"] + dt
+        return out
+
     def _request_replan(self, reason, t_sw=None, start_node=None, known=None):
         c = self.cfg
+        if self.pending is not None and self.pending[1].get("kind") == "speed":
+            self.pending = None                   # 경로 재계획이 속도 갱신보다 먼저다
         margin = self._margin()
         self.replan_req = dict(reason=reason, t_sw=max(t_sw if t_sw is not None else self.t + margin, self.t + 0.5),
                                start_node=start_node, known=known, leg=self.leg_i, sess=self.session)
@@ -721,9 +806,15 @@ class LiveEngine:
             r_inf = self.SP.plan(tuple(req["start_node"]), L["gl"], t_start=T_sw, mass=m, budget=np.inf,
                                  max_wait=c["max_wait"], weight=2.5)
             diag.append("배터리부족(무제한이면 가능)" if r_inf is not None else "장애물로 막힘")
-        sim = None
+        sim, new, sg = None, None, None
         if r is not None:
-            sim = simulate(s, d, r["path"], r["wait_before"], T_sw + r.get("ground_delay", 0.0), m)
+            bias = self._bias()
+            if c["safeguard"]:
+                r2, sg = st_safeguard(self.SP, tuple(cur), L["gl"], T_sw, m, r, budget=self.E_usable - used,
+                                      max_wait=c["max_wait"], bias=bias)
+                r = r2 if r2 is not None else r
+            new = self._make_plan(r["path"], r["wait_before"], T_sw + r.get("ground_delay", 0.0), m, bias)
+            sim = None if new is None else new["sim"]
         cpu = time.perf_counter() - t0
         with self.lock:
             self.replanning = False
@@ -763,7 +854,8 @@ class LiveEngine:
                     and req["start_node"] is None:
                 # 호버 중: 위치가 그대로이므로 늦게 끝난 계획을 지금 시각으로 옮겨 쓴다
                 dt_shift = self.t + 0.5 - t_sw
-                sim = dict(sim); sim["t"] = sim["t"] + dt_shift
+                new = self._shift(new, dt_shift)
+                sim = new["sim"]
                 t_sw = self.t + 0.5
             if not self.sync and self.t > t_sw:
                 self.stats["late"] += 1
@@ -776,12 +868,21 @@ class LiveEngine:
             self.hold_fail = 0
             if level > 0:
                 self.stats["degraded"] += 1
-            plan = dict(sim=sim, path=r["path"], ver=self.plan_ver + 1, level=level, reason=req["reason"])
+            chosen = None if sg is None else sg["chosen"]
+            plan = dict(new, ver=self.plan_ver + 1, level=level, reason=req["reason"], chosen=chosen)
             self.pending = (t_sw, plan)
             if req["start_node"] is None:
                 self.stats["replans"] += 1
             lv = ["", " (완화: ε 0.2)", " (완화: 팽창 없음)"][level]
-            self._ev("replan", f"{req['reason']} → t={t_sw:.0f} s 에 경로 교체 예약{lv} · 계산 {cpu:.2f} s",
+            sgm = ""
+            if chosen is not None:
+                self.sg[chosen] += 1
+                self.sg["last"] = dict(t=round(self.t, 1), chosen=chosen, cand={k: round(v / 1000, 2) for k, v in sg["cand"].items()})
+                if chosen == "shortest":
+                    ce = sg["cand"]
+                    sgm = (f" · 안전장치: 최단 경로 채택 ({ce['shortest'] / 1000:.1f} kJ < 에너지 탐색 "
+                           f"{ce['energy'] / 1000:.1f} kJ)" if "energy" in ce else " · 안전장치: 최단 경로 채택")
+            self._ev("replan", f"{req['reason']} → t={t_sw:.0f} s 에 경로 교체 예약{lv}{sgm} · 계산 {cpu:.2f} s",
                      cpu=round(cpu, 3), level=level)
 
     def _refine(self):
@@ -811,8 +912,9 @@ class LiveEngine:
         r = None if cur is None else SP.plan(tuple(cur), L["gl"], t_start=T_sw, mass=L["m"],
                                              budget=self.E_usable - used, max_wait=c["max_wait"],
                                              weight=c["refine_weight"])
-        sim = None if r is None or len(r["path"]) < 2 else \
-            simulate(s, d, r["path"], r["wait_before"], T_sw + r.get("ground_delay", 0.0), L["m"])
+        new = None if r is None or len(r["path"]) < 2 else \
+            self._make_plan(r["path"], r["wait_before"], T_sw + r.get("ground_delay", 0.0), L["m"], self._bias())
+        sim = None if new is None else new["sim"]
         cpu = time.perf_counter() - t0
         with self.lock:
             self.est_fine = 0.7 * self.est_fine + 0.3 * cpu
@@ -826,11 +928,106 @@ class LiveEngine:
                 gain = (1 - e_new / e_old) * 100
                 self.stats["refined"] += 1
                 self.stats["refine_gain"].append(gain)
-                self.pending = (t_sw, dict(sim=sim, path=r["path"], ver=self.plan_ver + 1, level=0,
-                                           reason="백그라운드 개선", refined=True))
+                self.pending = (t_sw, dict(new, ver=self.plan_ver + 1, level=0, reason="백그라운드 개선", refined=True,
+                                           chosen=plan.get("chosen")))
                 self._ev("refine", f"백그라운드 개선: 남은 에너지 −{gain:.1f}% → t={t_sw:.0f} s 에 교체 예약 · 계산 {cpu:.2f} s",
                          cpu=round(cpu, 3))
         return True
+
+    # -------------------------------------------------------------- 속도 갱신
+    def speed_update(self):
+        """속도 갱신 1회: 기체가 잰 바람으로 예보 편차를 추정 → 남은 구간 속도를 다시 정함 → 안전 검사 → 교체 예약.
+
+        채택 조건: ① 보정한 예보에서 남은 구간 예상 에너지가 speed_margin 넘게 줄고 ② 새 속도로 비행할 수 있고
+        ③ 새 속도의 궤적이 위험 시간구간과 겹치지 않는다 (속도를 바꾸면 장애물과 만나는 시각이 달라지기 때문).
+        경로 재계획이 진행 중이거나 예약돼 있으면 건너뛴다. 계산은 lock 밖에서 한다."""
+        s, d = self.site, self.drone
+        with self.lock:
+            self.spd_due = False
+            c = self.cfg
+            if self.state != "running" or self.phase != "순항" or self.plan is None:
+                return False
+            plan = self.plan
+            T = self.t_dep + self.t
+            x, y, z = self._drone_at(self.t)
+            meas = SU.wind_at_xyz(self.truth, T, x, y, z)        # 실기체에서는 MAVLink WIND 메시지로 받는 값
+            if c["wind_noise"] > 0:
+                meas = (meas[0] + self._rng.normal(0.0, c["wind_noise"]), meas[1] + self._rng.normal(0.0, c["wind_noise"]))
+            fc = SU.wind_at_xyz(s, T, x, y, z)
+            self.bias.update(meas, fc, self.t)
+            self.wind_last = dict(t=round(self.t, 1), meas=[float(meas[0]), float(meas[1])], fcst=[float(fc[0]), float(fc[1])],
+                                  bias=[float(self.bias.du), float(self.bias.dv)])
+            self.stats["speed_checks"] += 1
+            if self.pending is not None or self.replanning or self.replan_req is not None:
+                return False
+            bias = self._bias()
+            m = self.legs[self.leg_i]["m"]
+            table = self.table
+            sess, ver = self.session, self.plan_ver
+            t_from = T + c["latency"]
+        tc = time.perf_counter()
+        p = SU.propose(s, d, plan["path"], plan["waits"], plan["sim"], plan["cmd"], plan["t0"], t_from, m,
+                       bias if bias is not None else (0.0, 0.0), margin=c["speed_margin"])
+        new, why = None, None
+        if p is not None:
+            sim = SU.execute(self.truth, d, p["pts"], p["waits"], p["t0"], m, p["cmd"])
+            if sim is None or len(sim["t"]) < 2:
+                why = "새 속도로는 비행할 수 없음"
+            elif table is not None and remaining_conflict(s, table, sim, p["t0"]) is not None:
+                why = "새 속도의 궤적이 위험 시간구간과 겹침"
+            else:
+                new = dict(sim=sim, track=_track(sim, p["t0"], p["pts"], s), path=p["pts"], waits=p["waits"], cmd=p["cmd"],
+                           t0=p["t0"], e_pred=p["e_new"], kind="speed", level=plan.get("level", 0), reason="속도 갱신",
+                           refined=plan.get("refined"), chosen=plan.get("chosen"))
+        cpu = time.perf_counter() - tc
+        with self.lock:
+            self.stats["speed_cpu"].append(cpu)
+            if (sess != self.session or ver != self.plan_ver or self.plan is not plan or self.pending is not None
+                    or self.replanning or self.replan_req is not None or p is None):
+                return False
+            if new is None:
+                self.stats["speed_rejected"] += 1
+                self._ev("warn", f"속도 갱신 보류: {why} – 지금 속도 유지")
+                return False
+            t_sw = p["t0"] - self.t_dep
+            if not self.sync and self.t > t_sw:
+                self.stats["speed_rejected"] += 1
+                return False
+            new["ver"] = self.plan_ver + 1
+            self.pending = (t_sw, new)
+            self.stats["speed_updates"] += 1
+            self.stats["speed_gain"].append(p["gain"] * 100)
+            sched = SU.speed_schedule(new["sim"], p["t0"], self.t_dep)
+            self.speed_log.append(dict(t=round(t_sw, 1), bias=[round(self.bias.du, 2), round(self.bias.dv, 2)],
+                                       gain=round(p["gain"] * 100, 2), cmds=sched))
+            v0 = sched[0]["v"] if sched else float("nan")
+            self._ev("speed", f"속도 갱신: 바람 편차 {self.bias.magnitude:.1f} m/s → 남은 구간 예상 에너지 "
+                              f"−{p['gain'] * 100:.1f}% · t={t_sw:.0f} s 부터 {v0:.1f} m/s · 계산 {cpu * 1000:.0f} ms",
+                     gain=round(p["gain"] * 100, 2))
+            return True
+
+    def v_cmd(self, t=None):
+        """시각 t 의 명령 대지속도 [m/s] (순항 중이 아니면 None)."""
+        plan = self.plan
+        if plan is None or self.phase != "순항":
+            return None
+        T = self.t_dep + (self.t if t is None else t)
+        q = int(np.clip(np.searchsorted(plan["sim"]["t"], T), 0, len(plan["cmd"]) - 1))
+        return float(plan["cmd"][q])
+
+    def mission(self):
+        """지금 위치에서 남은 구간의 ArduPilot 미션 (.waypoints)과 속도 명령 목록. 순항 중에만 낸다."""
+        from .ardupilot import remaining_mission
+        with self.lock:
+            if self.state == "idle" or self.plan is None or self.phase != "순항":
+                return dict(available=False, reason="순항 중이 아닙니다", speed_log=list(getattr(self, "speed_log", [])))
+            plan, L = self.plan, self.legs[self.leg_i]
+            T = self.t_dep + self.t
+            used = self.energy()
+            speed_log = list(self.speed_log)
+        out = remaining_mission(self.site, self.drone, plan, T, L, e_used=used, t_ref=self.t_dep, truth=self.truth)
+        out.update(available=True, speed_log=speed_log, leg=L["name"], t=round(T - self.t_dep, 1))
+        return out
 
     # -------------------------------------------------------------- 시계·감시 갱신
     def step(self, dt):
@@ -857,9 +1054,12 @@ class LiveEngine:
             if self.t >= self.next_tel:
                 x, y, z = self._drone_at(self.t)
                 E = self.energy()
+                vc = self.v_cmd()
                 self.telemetry.append(dict(t=round(self.t, 1), x=round(x, 1), y=round(y, 1), z=round(z, 1),
                                            E=round(E, 1), soc=round(100 - soc_drop(E, self.drone), 2),
-                                           sep=None if not math.isfinite(d) else round(d, 1), phase=self.phase))
+                                           sep=None if not math.isfinite(d) else round(d, 1), phase=self.phase,
+                                           v_cmd=None if vc is None else round(vc, 1),
+                                           bias=round(self.bias.magnitude, 2)))
                 self.next_tel = self.t + 1.0
             if self.retry is not None and self.t >= self.retry[0] and not self.replanning and self.pending is None:
                 reason = self.retry[1]
@@ -873,10 +1073,25 @@ class LiveEngine:
             if due:
                 self.next_obs = self.t + self.cfg["period"]
                 self.obs_dirty = False
-        if due and self.sync:
-            self.surveil()
-            self._refine()
-        return due
+                self._sur_due = True
+            su = self.cfg["speed_update"]
+            if su > 0 and self.phase == "순항":
+                if not math.isfinite(self.next_spd):
+                    self.next_spd = self.t + min(5.0, su)      # 순항에 들어가면 곧 첫 측정
+                elif self.t >= self.next_spd:
+                    self.next_spd = self.t + su
+                    self.spd_due = True
+            else:
+                self.next_spd = math.inf
+            spd = self.spd_due
+        if self.sync:
+            if due:
+                self._sur_due = False
+                self.surveil()
+                self._refine()
+            if spd:
+                self.speed_update()
+        return due or spd
 
     def _tick_loop(self, sid):
         last = time.perf_counter()
@@ -902,11 +1117,20 @@ class LiveEngine:
             self._mon_evt.clear()
             if self.session != sid or self.state != "running":
                 break
-            try:
-                self.surveil()
-            except Exception as ex:  # noqa
-                with self.lock:
-                    self._ev("warn", f"감시 오류: {type(ex).__name__}: {ex}")
+            if self._sur_due:
+                self._sur_due = False
+                try:
+                    self.surveil()
+                except Exception as ex:  # noqa
+                    with self.lock:
+                        self._ev("warn", f"감시 오류: {type(ex).__name__}: {ex}")
+            if self.spd_due:
+                try:
+                    self.speed_update()
+                except Exception as ex:  # noqa
+                    with self.lock:
+                        self.spd_due = False
+                        self._ev("warn", f"속도 갱신 오류: {type(ex).__name__}: {ex}")
 
     def _replan_loop(self, sid):
         while self.session == sid and self.state == "running":
@@ -974,7 +1198,16 @@ class LiveEngine:
                              f"{int(self.t % 60):02d}",
                        phase=self.phase, speed=self.cfg["speed"], leg=self.legs[self.leg_i]["name"] if self.leg_i >= 0 else None,
                        drone=dict(x=x, y=y, z=z, E=E, soc=100 - soc_drop(E, self.drone),
-                                  usable_soc=self.cfg["reserve"]),
+                                  usable_soc=self.cfg["reserve"], v_cmd=self.v_cmd()),
+                       wind=self.wind_last,
+                       speed_update=dict(period=self.cfg["speed_update"], n=self.stats["speed_updates"],
+                                         rejected=self.stats["speed_rejected"], checks=self.stats["speed_checks"],
+                                         gain=float(np.sum(self.stats["speed_gain"])) if self.stats["speed_gain"] else 0.0,
+                                         bias=self.bias.magnitude,
+                                         last=self.speed_log[-1] if self.speed_log else None),
+                       safeguard=dict(on=self.cfg["safeguard"], energy=self.sg["energy"], shortest=self.sg["shortest"],
+                                      last=self.sg["last"]),
+                       wind_truth=self.cfg["wind_truth"],
                        sep=None if not math.isfinite(sep) else sep, sep_id=sep_id,
                        min_sep=None if not math.isfinite(self.min_sep) else self.min_sep,
                        obstacles=obs, predictions=pred, replanning=self.replanning,
@@ -1014,6 +1247,11 @@ class LiveEngine:
                         replans=self.stats["replans"], late=self.stats["late"], degraded=self.stats["degraded"],
                         fail=self.stats["fail"], checks=self.stats["checks"], refined=self.stats["refined"],
                         holds=self.stats.get("holds", 0),
+                        speed_updates=self.stats["speed_updates"], speed_rejected=self.stats["speed_rejected"],
+                        speed_checks=self.stats["speed_checks"],
+                        speed_gain=float(np.sum(self.stats["speed_gain"])) if self.stats["speed_gain"] else 0.0,
+                        speed_cpu_ms=float(np.median(self.stats["speed_cpu"]) * 1000) if self.stats["speed_cpu"] else None,
+                        bias=self.bias.magnitude, sg_energy=self.sg["energy"], sg_shortest=self.sg["shortest"],
                         refine_gain=float(np.sum(self.stats["refine_gain"])) if self.stats["refine_gain"] else 0.0,
                         refine_cpu_median=float(np.median(self.stats["refine_cpu"])) if self.stats["refine_cpu"] else None,
                         tick_ms_p95=float(np.percentile(self.stats["tick_gap"], 95)) if self.stats["tick_gap"] else None,
@@ -1025,6 +1263,6 @@ class LiveEngine:
     def log(self):
         with self.lock:
             return dict(config={k: v for k, v in self.cfg.items()}, summary=self.summary(), events=self.events,
-                        telemetry=self.telemetry,
+                        telemetry=self.telemetry, speed_log=self.speed_log,
                         user_obstacles={k: o.to_dict() for k, o in self.user_obs.items()},
                         intruders={k: dict(name=v.name, kind=v.kind, R=v.R) for k, v in self.intruders.items()})

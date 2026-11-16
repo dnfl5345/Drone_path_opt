@@ -267,11 +267,16 @@ class Planner:
 
 # ---------------------------------------------------------------- 경로 평가(시뮬레이션)
 def simulate(site, drone, path, waits, t_start, mass, speed_policy="opt", vconst=10.0, U=None, V=None,
-             tax=None, step=12.5):
+             tax=None, step=12.5, vcmd=None, bias=None):
     """주어진 웨이포인트 경로를 '실제(또는 예보) 바람'에서 비행했을 때의 에너지/시간 이력.
 
     speed_policy: 'opt' 구간별 미터당 에너지 최소 대지속도 / 'const' 일정 대지속도(vconst)
-    반환: dict(t, e, x, y, z, ws, vg, P)
+    vcmd : 기록 순서대로의 명령 대지속도 [m/s] (같은 경로·대기로 만든 다른 simulate 결과의 vg). 주면 그 속도로 비행하고,
+           대기속도·상승률 한계로 낼 수 없으면 낼 수 있는 속도까지 0.5 m/s 씩 낮춘다 (명령 속도 추종).
+    bias : (du, dv) [m/s] 바람장 전체에 더하는 보정값 (기체가 잰 바람과 예보의 차이).
+    반환: dict(t, e, x, y, z, ws, vg, P, seg, frac, hov)
+          seg = 경로 구간 번호, frac = 기록 끝의 구간 내 진행 비율(호버는 남은 대기 비율), hov = 호버 기록 여부.
+          t·e 는 기록(부분 구간) 끝의 값이고 x·y·z 는 그 부분 구간 가운데의 위치다.
     """
     U = site.U if U is None else U
     V = site.V if V is None else V
@@ -279,6 +284,7 @@ def simulate(site, drone, path, waits, t_start, mass, speed_policy="opt", vconst
     rho = site.rho_layers()
     prm = drone.params()
     spd = drone.speed_candidates() if speed_policy == "opt" else np.array([vconst])
+    bu, bv = (0.0, 0.0) if bias is None else (float(bias[0]), float(bias[1]))
     t, e = t_start, 0.0
     rec = []
     pts = np.array(path, float)
@@ -286,12 +292,14 @@ def simulate(site, drone, path, waits, t_start, mass, speed_policy="opt", vconst
         if waits[n + 1] > 0:  # 부모 노드에서 호버링 대기
             k, j, i = pts[n].astype(int)
             wu, wv = _wind(U, V, tax, t, k, j, i)
+            wu, wv = wu + bu, wv + bv
             P = power_w(math.hypot(wu, wv), 0.0, mass, rho[k], prm)
             ns = max(int(waits[n + 1] // 5), 1)
-            for _ in range(ns):
+            for h in range(ns):
                 dt = waits[n + 1] / ns
                 e += P * dt; t += dt
-                rec.append((t, e, (i + .5) * site.dx, (j + .5) * site.dx, site.z[k], math.hypot(wu, wv), 0.0, P))
+                rec.append((t, e, (pts[n][2] + .5) * site.dx, (pts[n][1] + .5) * site.dx, site.z[0] + pts[n][0] * site.dz,
+                            math.hypot(wu, wv), 0.0, P, n, 1.0 - (h + 1) / ns, 1.0))
         k0, j0, i0 = pts[n]
         k1, j1, i1 = pts[n + 1]
         Dx, Dy, Dz = (i1 - i0) * site.dx, (j1 - j0) * site.dx, (k1 - k0) * site.dz
@@ -302,10 +310,17 @@ def simulate(site, drone, path, waits, t_start, mass, speed_policy="opt", vconst
             f = (s + .5) / ns
             kk, jj, ii = int(round(k0 + (k1 - k0) * f)), int(round(j0 + (j1 - j0) * f)), int(round(i0 + (i1 - i0) * f))
             wu, wv = _wind(U, V, tax, t, kk, jj, ii)
+            wu, wv = wu + bu, wv + bv
             sp = spd
-            if speed_policy == "const":
-                # 일정 대지속도 정책: 대기속도 한계/상승률 한계를 넘으면 가능한 최대 속도로 감속
-                sp = np.arange(min(vconst, 20.0), 2.9, -0.5)
+            if vcmd is not None or speed_policy == "const":
+                # 명령·일정 대지속도: 대기속도 한계/상승률 한계를 넘으면 가능한 최대 속도로 감속
+                if vcmd is not None:
+                    q = len(rec)
+                    vc = float(vcmd[q]) if q < len(vcmd) else float(vcmd[-1])
+                    vc = vc if vc >= 3.0 else 3.0
+                else:
+                    vc = min(vconst, 20.0)
+                sp = np.arange(vc, 2.9, -0.5)
                 for v in sp:
                     epm, vg = edge_energy_per_m(Dx, Dy, Dz, wu, wv, mass, rho[kk], prm, drone.va_max,
                                                 drone.vz_up, drone.vz_dn, np.array([v]))
@@ -321,9 +336,11 @@ def simulate(site, drone, path, waits, t_start, mass, speed_policy="opt", vconst
             dt = lp / v3
             e += epm * lp; t += dt
             rec.append((t, e, (i0 + (i1 - i0) * f + .5) * site.dx, (j0 + (j1 - j0) * f + .5) * site.dx,
-                        site.z[0] + (k0 + (k1 - k0) * f) * site.dz, math.hypot(wu, wv), vg, epm * lp / dt))
+                        site.z[0] + (k0 + (k1 - k0) * f) * site.dz, math.hypot(wu, wv), vg, epm * lp / dt,
+                        n, (s + 1) / ns, 0.0))
     r = np.array(rec)
-    return dict(t=r[:, 0], e=r[:, 1], x=r[:, 2], y=r[:, 3], z=r[:, 4], ws=r[:, 5], vg=r[:, 6], P=r[:, 7])
+    return dict(t=r[:, 0], e=r[:, 1], x=r[:, 2], y=r[:, 3], z=r[:, 4], ws=r[:, 5], vg=r[:, 6], P=r[:, 7],
+                seg=r[:, 8].astype(int), frac=r[:, 9], hov=r[:, 10] > 0.5)
 
 
 def vertical_energy(site, drone, x, y, k, t, mass, up=True):

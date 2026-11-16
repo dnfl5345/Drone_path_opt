@@ -81,22 +81,47 @@ def run_round_trip(planner, mission: Mission, mode=1, speed_policy="opt", vconst
 
 
 # ------------------------------------------------------------------ 후보 경로 비교 (안전장치)
-def make_flyable(site, drone, path):
+def _los_free(site, a, b):
+    """격자 노드 a → b 직선이 지나는 칸이 모두 비행 가능한가 (반 칸 간격 표본)."""
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    nz, ny, nx = site.free.shape
+    n = int(max(abs(b[1] - a[1]), abs(b[2] - a[2]), abs(b[0] - a[0])) * 2) + 1
+    for f in np.linspace(0.0, 1.0, n + 1):
+        k, j, i = (int(round(v)) for v in a + (b - a) * f)
+        if not (0 <= k < nz and 0 <= j < ny and 0 <= i < nx) or not site.free[k, j, i]:
+            return False
+    return True
+
+
+def make_flyable(site, drone, path, waits=None):
     """거리만 보고 만든 경로에 기체의 상승·하강률로는 못 나는 급경사 구간이 있으면, 높은 쪽 고도에서 수평으로 간 뒤
-    수직으로 오르내리도록 바꾼다. 바꿀 수 없으면 None."""
+    수직으로 오르내리도록 바꾼다. 바꿀 수 없으면 None.
+
+    waits (노드별 '그 노드로 떠나기 전 대기')를 주면 (경로, 대기) 를 돌려준다. 끼워 넣은 꺾는 점에서는 대기하지 않고,
+    원래 대기는 떠나는 노드에 그대로 남는다."""
     out = [tuple(int(v) for v in path[0])]
-    for p in path[1:]:
+    w_in = None if waits is None else [float(w) for w in waits]
+    w_out = None if waits is None else [w_in[0]]
+    for n, p in enumerate(path[1:], start=1):
         a, b = out[-1], tuple(int(v) for v in p)
         dz = (b[0] - a[0]) * site.dz
         lh = math.hypot(b[1] - a[1], b[2] - a[2]) * site.dx
         lim = (drone.vz_up if dz > 0 else drone.vz_dn) / 3.0     # 최저 대지속도 3 m/s 에서 날 수 있는 기울기
         if lh > 1e-6 and abs(dz) / lh > lim:
             mid = (a[0], b[1], b[2]) if dz < 0 else (b[0], a[1], a[2])   # 하강: 수평 먼저 / 상승: 수직 먼저
-            if not site.free[mid]:
+            inside = 0 <= mid[0] < site.free.shape[0]
+            if not inside or not site.free[mid] or not _los_free(site, a, mid) or not _los_free(site, mid, b):
                 return None
             out.append(mid)
+            if w_out is not None:
+                w_out.append(w_in[n])                            # 떠나기 전 대기는 a 에서
+                w_in[n] = 0.0
         out.append(b)
-    return np.array(out)
+        if w_out is not None:
+            w_out.append(w_in[n])
+    if waits is None:
+        return np.array(out)
+    return np.array(out), np.array(w_out, float)
 
 
 def plan_best_of_two(planner, start, goal, t_start, mass, **pkw):
@@ -199,3 +224,59 @@ def run_rolling(planner_fcst, site_truth, drone, a, b, t0, mass, dt_replan=60.0,
     e_ld, t_ld = vertical_energy(site_truth, drone, b[0], b[1], goal[0], t, mass, up=False)
     e_total += e_ld
     return dict(trace=trace, plans=plans, E=e_total, soc=soc_drop(e_total, drone), t_end=t + t_ld)
+
+
+
+def st_safeguard(SP, start, goal, t0, mass, r_energy, budget=np.inf, max_wait=180.0, margin=0.002, bias=None,
+                 air_start=False):
+    """안전장치 (시공간 계획용): 에너지 탐색 결과와 '최단 경로 + 구간 속도 최적화'를 같은 예보에서 비교한다.
+
+    에너지 탐색은 근사 해법이라 드물게 최단 경로보다 나쁜 경로를 낸다 (E13: 15–19 %). 최단 경로를 후보에 넣되,
+    ① 기체의 상승·하강률로 날 수 있게 고치고 ② 속도를 다시 정한 궤적이 위험 시간구간(SP.table)과 겹치지 않고
+    ③ 에너지 예산 안이며 ④ 예상 에너지가 margin 넘게 적을 때만 고른다.
+
+    SP        : 장애물 표를 이미 세운 STPlanner
+    r_energy  : SP.plan(mode=1) 의 결과 (None 이면 최단 후보만 본다)
+    반환: (r, info) – r 은 고른 계획(dict, chosen 키 포함) 또는 None, info = dict(chosen, cand={이름: 예상 에너지 J})
+    """
+    from .st_rolling import remaining_conflict
+    site, d = SP.site, SP.drone
+
+    def ev(path, waits, gd):
+        w = np.array(waits, float)
+        ts = t0 + gd
+        if air_start and gd > 0:                 # 공중에서 시작하는 구간의 출발 지연은 그 자리 호버
+            w[1] += gd
+            ts = t0
+        sim = simulate(site, d, path, w, ts, mass, bias=bias)
+        return sim, ts
+
+    cand = {}
+    if r_energy is not None:
+        sim, _ = ev(r_energy["path"], r_energy["wait_before"], float(r_energy.get("ground_delay", 0.0)))
+        if sim is not None:
+            cand["energy"] = float(sim["e"][-1])
+    r0 = SP.plan(tuple(start), tuple(goal), t_start=t0, mass=mass, mode=0, max_wait=max_wait)
+    r_short = None
+    if r0 is not None and len(r0["path"]) >= 2:
+        fixed = make_flyable(site, d, r0["path"], r0["wait_before"])
+        if fixed is not None:
+            p0, w0 = fixed
+            gd0 = float(r0.get("ground_delay", 0.0))
+            sim0, ts0 = ev(p0, w0, gd0)
+            ok = sim0 is not None and float(sim0["e"][-1]) <= budget
+            if ok and SP.table is not None:
+                ok = remaining_conflict(site, SP.table, sim0, ts0) is None
+            if ok:
+                cand["shortest"] = float(sim0["e"][-1])
+                r_short = dict(path=p0, wait_before=w0, ground_delay=gd0, cpu_s=float(r0["cpu_s"]), mode=0, mass=mass,
+                               cost=float(sim0["e"][-1]), t_arrive=float(sim0["t"][-1]))
+    if not cand:
+        return None, dict(chosen=None, cand={})
+    if "shortest" in cand and ("energy" not in cand or cand["shortest"] < cand["energy"] * (1 - margin)):
+        r = dict(r_short, chosen="shortest")
+        if r_energy is not None:
+            r["cpu_s"] += float(r_energy.get("cpu_s", 0.0))
+        return r, dict(chosen="shortest", cand=cand)
+    r = dict(r_energy, chosen="energy")
+    return r, dict(chosen="energy", cand=cand)
