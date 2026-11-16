@@ -25,6 +25,9 @@ _X = ROOT / "results" / "x650.json"
 X6 = json.loads(_X.read_text()) if _X.exists() else None
 _CW = ROOT / "results" / "changwon.json"
 CW = json.loads(_CW.read_text()) if _CW.exists() else None
+_E13, _E14 = ROOT / "results" / "E13_stats.json", ROOT / "results" / "E14_stats.json"
+E13 = json.loads(_E13.read_text()) if _E13.exists() else None
+E14 = json.loads(_E14.read_text()) if _E14.exists() else None
 X0, W = 0.6, 12.15          # 본문 좌우 범위 [in]
 SRC_Y = 7.02                # 출처 줄 위치 (오른쪽 아래 로고와 겹치지 않게 폭 제한)
 
@@ -780,12 +783,75 @@ def build(template, out):
                  f"{cm['shortest_v10']['soc']:.1f} %p, 제안 방법은 {cm['proposed_static']['soc']:.1f} %p입니다. 경유점 순서는 정한 "
                  f"대로이며 최적화하지 않았습니다. 순회 임무는 비행 중 재계획을 아직 지원하지 않습니다.")
 
+    if E13:
+        S3 = E13["sets"]
+        order = [k for k in ("changwon_x650", "pangyo_x650", "pangyo_m100") if k in S3]
+        lab3 = {"changwon_x650": "창원 · X650", "pangyo_x650": "판교 · X650", "pangyo_m100": "판교 · M100"}
+        n_all = sum(S3[k]["EX_P0"]["n"] for k in order)
+        n_win = sum(round(S3[k]["EX_P0"]["win"] * S3[k]["EX_P0"]["n"]) for k in order)
+        ex = [S3[k]["EX_P0"]["mean_pct"] for k in order]
+        pth = [S3[k]["EXv_P0"]["mean_pct"] for k in order]
+        spd = [S3[k]["EX_EXv"]["mean_pct"] for k in order]
+        s = D.content(f"기존 경로 대비 우수성 – {len(E13['days'])}일 · {n_all}건")
+        section(s, SEC[4])
+        picture(s, FIG / "F28_superiority.png", X0, 1.08, 6.75, 5.3)
+        rows = [["조합", "기존 → 제안", "95 % 구간", "속도 몫", "경로 몫"]]
+        for k in order:
+            c, c2, c3 = S3[k]["EX_P0"], S3[k]["EX_EXv"], S3[k]["EXv_P0"]
+            rows.append([lab3[k], f"{c['mean_pct']:.1f} %", f"{c['ci'][0]:.1f} – {c['ci'][1]:.1f}", f"{c2['mean_pct']:.1f} %",
+                         f"{c3['mean_pct']:.1f} %"])
+        table(s, 7.55, 1.2, 5.2, rows, [1.45, 1.05, 1.2, 0.75, 0.75], row_h=0.46, head_size=11.5, body_size=11.5,
+              first_col_center=False, aligns=[PP_ALIGN.LEFT] + [PP_ALIGN.CENTER] * 4)
+        items(s, 7.55, 3.2, 5.2, 2.2, [
+            ("기존 경로  ", "최단 경로 + 정속 10 m/s (ArduCopter 기본 속도)"),
+            ("우수한 경우  ", f"{n_all}건 중 {n_win}건"),
+            ("절감의 대부분은 속도 선택  ", f"속도 {max(spd):.1f} – {min(spd):.1f} %, 경로 모양 {max(pth):.1f} – {min(pth):.1f} %"),
+            ("안전장치  ", "최단 경로도 후보에 넣으면 기존보다 나쁜 경우가 1 % 이하"),
+        ], size=12.5, gap=5)
+        stat(s, 7.55, 5.3, 5.2, 1.1, "SOC 소모 변화 (세 조합 평균의 범위)", f"{max(ex):.1f} – {min(ex):.1f} %",
+             "X650 수치는 항력 가정(CdA 0.08 m²)에 민감 · 실비행 보정 필요", dark=True, vsize=22)
+        source(s, "모의 결과 · 계획 00Z 예보, 평가 06Z 예보 · 1.5–2.8 km, 탑재 1.0 kg · 구간은 날짜 단위 부트스트랩 · 날짜 평균 Wilcoxon p = 0.016")
+        notes(s, f"사례 하나로는 우수하다고 말할 수 없어서, 일곱 날짜와 두 지역, 두 기체로 넓혀 {n_all}건을 비교했습니다. 기존 경로는 "
+                 f"최단 경로를 정속 10 m/s로 나는 것으로 두었습니다. 제안 경로는 SOC를 평균 {abs(max(ex)):.1f}에서 {abs(min(ex)):.1f} % "
+                 f"덜 썼고, {n_all}건 중 {n_win}건에서 우수했습니다. 다만 이 절감의 대부분은 속도 선택에서 나옵니다. 최단 경로에 속도 "
+                 f"최적화만 더해도 {abs(max(spd)):.1f}에서 {abs(min(spd)):.1f} %가 줄고, 경로 모양이 더하는 몫은 {abs(max(pth)):.1f}에서 "
+                 f"{abs(min(pth)):.1f} %입니다. 따라서 기존 경로를 무엇으로 정의하느냐에 따라 주장의 크기가 달라집니다. 또 X650의 "
+                 "수치는 항력 면적 가정에 민감하므로, 실비행 속도 시험으로 전력 곡선을 보정해야 합니다.")
+
+    if E14:
+        k14 = "pangyo_m100" if "pangyo_m100" in E14 else next(iter(E14))
+        allc = [E14[k][c] for k in E14 for c in ("rot30", "rot60", "rot90", "rot180", "spd0.6") if c in E14[k]]
+        rec = {q: [100 * e[q]["recovered"] for e in allc if e.get(q) and e[q]["recovered"] is not None] for q in ("S_120", "S_60", "S_30", "ADAPT")}
+        real = [E14[k]["real"]["penalty_pct"] for k in E14 if "real" in E14[k]]
+        s = D.content("기상 정보 갱신 주기 – 얼마나 자주 받아야 하는가")
+        section(s, SEC[4])
+        picture(s, FIG / "F29_update_period.png", X0, 1.08, 7.5, 5.0)
+        head(s, 8.3, 1.15, "속도 명령을 계획대로 고정해 날 때", w=4.5, size=14)
+        items(s, 8.3, 1.62, 4.45, 3.3, [
+            ("예보가 맞으면  ", f"갱신으로 되찾을 손해가 {min(real):.1f} – {max(real):.1f} %뿐입니다."),
+            ("예보가 틀리면  ", "바람 차이 4 m/s부터 손해가 1 %를 넘고, 8–13 m/s면 3–6 %입니다."),
+            ("주기가 짧을수록 되찾습니다.  ", f"2분 {min(rec['S_120']):.0f}–{max(rec['S_120']):.0f} %, 1분 {min(rec['S_60']):.0f}–"
+                                    f"{max(rec['S_60']):.0f} %, 30초 {min(rec['S_30']):.0f}–{max(rec['S_30']):.0f} %"),
+            ("이득은 속도 갱신에서 나옵니다.  ", "경로까지 바꿔도 0.5 %p 이내로만 더 줄었습니다."),
+        ], size=12.5, gap=6)
+        stat(s, 8.3, 5.0, 4.45, 1.3, "권고", "속도는 30초 이하 주기", "경로는 장애물·금지구역이 바뀔 때만 다시 계획", dark=True, vsize=20)
+        source(s, "모의 결과 · 3–5분 비행 · 틀린 예보는 풍향 회전·풍속 배율로 만든 가정 (3일, 경우마다 18건) · 실측 바람과 예보의 차이는 미확인")
+        notes(s, "기상 정보를 몇 분마다 받아야 하는지를 설계 변수로 두고 쟀습니다. 미션 파일은 구간 속도를 계획 때 정해 내려보내므로, "
+                 "속도 명령을 고정해 나는 것을 기준으로 삼았습니다. 예보가 맞는 경우에는 갱신해도 얻을 것이 거의 없습니다. 예보의 풍향을 "
+                 "돌리거나 풍속을 바꿔 일부러 틀리게 하면 손해가 생기고, 갱신 주기가 짧을수록 그 손해를 더 많이 되찾습니다. "
+                 f"2분 주기는 {min(rec['S_120']):.0f}에서 {max(rec['S_120']):.0f} %, 30초 주기는 {min(rec['S_30']):.0f}에서 "
+                 f"{max(rec['S_30']):.0f} %를 되찾았습니다. 이득의 대부분은 경로가 아니라 속도를 다시 정하는 데서 나왔습니다. 그래서 "
+                 "속도는 30초 이하 주기로 갱신하고, 경로는 장애물이나 금지구역이 바뀔 때만 다시 짜는 것을 권합니다. 틀린 예보는 "
+                 "가정으로 만든 것이므로, 실증 지역에서 실측 바람과 예보의 차이를 재는 것이 다음 일입니다.")
+
     # ================================================================= 06 Conclusion
     s = D.content("결론")
     section(s, SEC[5])
     con = [("SOC와 바람을 고른 근거", f"DJI 드론이 내놓는 {DJ['n_total']}개 조건 중 외생·영향·변동·경로 의존·사전 지식을 모두 만족하는 "
                              "것은 바람뿐입니다. SOC는 임무 가능 여부의 단위입니다."),
-           ("바람 속 SOC는 속도와 에너지 비교 지름길이 좌우", "강풍일 왕복 102.9 → 76.7 %p. 비행 불가에서 예비 확보로 바뀌었습니다."),
+           ("바람 속 SOC는 속도와 에너지 비교 지름길이 좌우", "강풍일 왕복 102.9 → 76.7 %p. " + (
+               f"7일 630건 평균으로는 기존 경로(최단 + 정속 10 m/s) 대비 {abs(max(ex)):.1f}–{abs(min(ex)):.1f} % 절감, 그중 경로 모양의 몫은 "
+               f"{abs(max(pth)):.1f}–{abs(min(pth)):.1f} %입니다." if E13 else "비행 불가에서 예비 확보로 바뀌었습니다.")),
            ("구간별 선형 팽창 반경의 위험구간을 해석해로", "가우시안 오차에서 고정 버퍼와 같은 안전성을 4.9 % 적은 에너지로 얻었습니다."),
            ("실측 오차는 꼬리가 두껍고 τ^1.5로 성장", "데이터 모양이 시점별 위험을 보정하지만, 폐루프 안전은 탐지 시각과 반응 시간 "
                                            "여유가 좌우합니다."),
@@ -814,7 +880,7 @@ def build(template, out):
     section(s, SEC[5])
     head(s, X0, 1.2, "한계")
     items(s, X0, 1.7, 5.9, 3.6, [
-        "두 지역(판교·창원)·하루의 모의 결과이며, 창원의 공역 제한은 확인하지 않았습니다.",
+        "두 지역(판교·창원)·10월 7일의 모의 결과이며, 비행 거리가 1.5–2.8 km로 짧습니다.",
         "GFS 0.25°는 성글고, '실제' 바람은 관측이 아닌 갱신 예보입니다.",
         "실측 비행 자료에는 풍향이 없어 방향 효과를 직접 검증하지 못했습니다.",
         "DJI 풍속·풍향 키의 지원 기체와 정확도를 확인하지 못했습니다.",
@@ -827,14 +893,14 @@ def build(template, out):
         "소규모 실비행으로 계획 대비 실측 SOC와 풍향 효과 검증",
         "드론 원격식별(Remote ID)·OpenSky 이력으로 항적 표본 확대",
         "감시 주기·탐지 시각·반응 하한을 함께 설계해 궤적 수준 위험 보정",
-        "기상청 LDAPS·관측 바람, 다일·다지역 평가",
+        "기상청 LDAPS·관측 바람으로 예보 오차를 실측, 계절·장거리 평가",
         "배터리 온도·노화를 넣은 SOC 모델, 다중 드론·UTM 연동",
     ], size=14, gap=7)
     sp = box(s, X0, 5.45, W, 1.35, fill=NAVY, shadow=False)
     box_text(sp, [[("가장 먼저 할 일 – 소규모 실비행", {"size": 15, "bold": True, "color": ORANGE})],
                   [("X650으로 호버·정속 왕복 비행을 하며 전압·전류, 기체 추정 바람, 지상 풍속계를 함께 기록합니다. 전력 모델 보정, 바람 "
                     "추정 정확도, 풍향 효과, 계획 대비 실측 SOC를 한 번에 확인할 수 있습니다.", {"size": 14, "bold": False, "color": WHITE})]])
-    notes(s, "한계는 먼저 밝혀 두는 것이 좋습니다. 결과는 한 지역, 하루, 한 기체에서 나왔습니다. 바람은 운영 예보라 해상도가 낮고, "
+    notes(s, "한계는 먼저 밝혀 두는 것이 좋습니다. 결과는 두 지역, 10월의 일곱 날짜, 두 기체의 모의 결과입니다. 바람은 운영 예보라 해상도가 낮고, "
              "실측 비행 자료에는 풍향이 없습니다. DJI 풍속·풍향 키는 SDK 문서에서 존재만 확인했습니다. 향후에는 기체가 주는 바람 "
              "값으로 예보를 보정하고, 실비행으로 풍향 효과와 SOC를 검증하는 것이 가장 먼저 할 일입니다.")
 
