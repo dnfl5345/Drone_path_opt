@@ -82,7 +82,7 @@ def run_round_trip(planner, mission: Mission, mode=1, speed_policy="opt", vconst
 
 # ------------------------------------------------------------------ 롤링 호라이즌 재계획
 def run_rolling(planner_fcst, site_truth, drone, a, b, t0, mass, dt_replan=60.0, events=(), bias_update=True,
-                max_iter=60):
+                max_iter=60, weight=1.0):
     """비행 중 주기적(Δt)/이벤트 기반 재계획 (Receding-horizon, MPC형).
 
     - 예보장으로 계획 → 실제 바람에서 Δt 만큼 비행
@@ -109,7 +109,7 @@ def run_rolling(planner_fcst, site_truth, drone, a, b, t0, mass, dt_replan=60.0,
         if bias_update:
             sp.U[:] = U0 + du
             sp.V[:] = V0 + dv
-        r = planner_fcst.plan(cur, goal, t_start=t, mass=mass, mode=1)
+        r = planner_fcst.plan(cur, goal, t_start=t, mass=mass, mode=1, weight=weight)
         if r is None:
             break
         plans.append(dict(t=t, path=r["path"].copy(), cur=cur, cpu=r["cpu_s"], pred_e=r["cost"]))
