@@ -3,7 +3,7 @@
 바람·지형·탑재중량을 반영해 **도착 SOC(배터리 잔량)를 최대화**하는 드론 물류 경로계획 알고리즘입니다.
 지난 회의에서 선정한 최단 경로 알고리즘(Lazy Theta*)을 3D 시공간 에너지 탐색기 **WE-LT\* (Wind-aware Energy Lazy Theta\*)**로 확장했습니다.
 
-- 회의 보고 자료: [`docs/drone_soc_path_planning_dev.pptx`](docs/drone_soc_path_planning_dev.pptx) (기존 회의자료와 같은 포맷, 31장)
+- 회의 보고 자료: [`docs/drone_soc_path_planning_dev.pptx`](docs/drone_soc_path_planning_dev.pptx) (기존 회의자료와 같은 포맷, 37장. 결과 ⑯–⑳: X650·창원 여러 날 통계, 3D 화면 비교, DJI 경로 기능과의 차이, 예보 시점·신뢰도, SITL 검증)
 - **학술 발표 자료** (Intro → Background → Related Works → Proposed Method → Results → Conclusion, KETI 템플릿, 41장, 발표자 노트 포함, 대상 기체·3D 지도·창원 순회 시뮬레이션·630건 우수성 통계·갱신 주기 반영): [`docs/drone_soc_academic_talk.pptx`](docs/drone_soc_academic_talk.pptx)
 - 최신 연구 대비 정식화 비교: [`docs/algorithm_comparison.md`](docs/algorithm_comparison.md) (문제 (P) 정의, 문헌별 정식화, 가정 축소 실험)
 - 확장안 (8방향 탐색 + 고도별 균일·선형 바람, LUT): [`docs/extension_8way_linear_wind.md`](docs/extension_8way_linear_wind.md)

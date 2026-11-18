@@ -46,6 +46,7 @@
   - DJI 쪽 설명은 공개 문서에서 확인한 것만 적고 나머지는 `[확인요망]` 으로 둔다. WPML 내보내기는 없다.
 - **만든·고친 파일**: `src/dpo/webapp/server.py` (`compare`, `/api/compare`), `static/map3d.*`, `scripts/capture_compare.js`, `results/compare_examples.json`, `results/platform_3d_compare_*.json`, `results/figures/platform_3d_compare_*.png`, `scripts/build_deploy_report.js` (2·3·12·13장), `scripts/build_academic_ppt.py` (슬라이드 5장), `tests/test_field.py` (비교 시험).
 - **확인하지 못한 것**: DJI 기체에서의 동작 전부, DJI 의 복귀 판단이 바람을 쓰는지 여부.
+- **회의용 발표자료에도 반영** (31 → 37장): 두 발표자료가 같은 슬라이드 코드(`scripts/build_ppt.py` 의 `add_v11_slides`)를 쓴다. 회의자료에는 대상 기체·여러 날 통계 한 장(`bridge=True`)을 앞에 더 넣는다. 수치를 고치면 두 자료를 모두 다시 만든다.
 
 ## ③ 다음에 할 일
 
