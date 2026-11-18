@@ -1,0 +1,65 @@
+{
+ "source": "E16 (GFS 표본 36일, 2025-11–2026-10) – results/E16_stats.json",
+ "default_site": "changwon",
+ "sites": {
+  "changwon": {
+   "set": "changwon_x650",
+   "months": {
+    "10": {
+     "season": "SON",
+     "wind_ms": 5.2,
+     "wind_class": "중",
+     "setting": "에너지 탐색 + 안전장치 + 속도 갱신 30 s",
+     "saving_vs_baseline_pct": -16.7,
+     "saving_vs_shortest_pct": -0.5,
+     "shortest_share": 0.33,
+     "soc_used": 13.8,
+     "sigma6": 0.72,
+     "margin95_pct": 6.9,
+     "margin95_adapt_pct": 6.9,
+     "margin95_30h_pct": null,
+     "best_hours": [
+      9,
+      18
+     ],
+     "hours": {
+      "9": {
+       "wind_ms": 3.2,
+       "wind_class": "약",
+       "soc_used": 13.2
+      },
+      "12": {
+       "wind_ms": 5.8,
+       "wind_class": "중",
+       "soc_used": 14.2
+      },
+      "15": {
+       "wind_ms": 6.6,
+       "wind_class": "중",
+       "soc_used": 14.4
+      },
+      "18": {
+       "wind_ms": 4.0,
+       "wind_class": "약",
+       "soc_used": 13.3
+      }
+     },
+     "n_cases": 48,
+     "note": "10월 표본 3일: 100 m 평균 풍속 5.2 m/s (중), 기존 대비 -16.7 %, 최단 + 속도 최적화 대비 -0.5 %, 최단 경로 채택 33 %. 6시간 전 예보로 계획할 때 95 % 신뢰수준의 SOC 여유는 명목값의 6.9 % (σ 0.72 m/s)."
+    }
+   }
+  }
+ },
+ "rule": {
+  "changwon_x650": {
+   "path_gain_by_wind": {
+    "약 (<4)": -0.08317245788617832,
+    "중 (4–8)": -0.5586266602510518,
+    "강 (≥8)": -2.1095693090048586
+   },
+   "differ": true,
+   "threshold_pct": 0.5,
+   "text": "경로 모양의 이득이 바람 세기에 따라 달라진다 – 다만 안전장치가 두 후보 중 더 싼 쪽을 고르므로 설정을 바꿀 필요는 없다"
+  }
+ }
+}
