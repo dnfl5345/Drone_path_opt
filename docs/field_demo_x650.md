@@ -12,12 +12,12 @@
 | 기체 없이 전 과정 연습 | 됨 | `dpo-fly --rehearse` |
 | 비행 로그로 전력 모델 보정 | 됨 (가상 로그로 확인) | `dpo-calibrate` |
 | 출발 전 신뢰도 판정 | 됨 | `dpo-plan --confidence` ([`reliability.md`](reliability.md)) |
-| ArduPilot SITL에서의 동작 | **미검증** | 5절 |
+| ArduPilot SITL(실제 펌웨어의 모의 실행)에서의 동작 | 됨 (ArduCopter 4.7.2) | `scripts/sitl_check.py`, 5절 |
 | 실기체 비행 | **미검증** | 6–8절 |
 
 ## 2. ArduCopter 소스에서 확인한 사실
 
-펌웨어를 실행하지는 못했습니다. 대신 `ArduPilot/ardupilot`의 `Copter-4.7.2` 소스를 읽어 확인했습니다.
+`ArduPilot/ardupilot`의 `Copter-4.7.2` 소스를 읽어 확인했고, 같은 소스로 만든 SITL에서 실행해 다시 확인했습니다(5절).
 
 | 확인한 것 | 내용 | 소스 |
 |---|---|---|
@@ -95,38 +95,73 @@ dpo-calibrate logs/sweep_1.bin logs/sweep_2.bin --drone x650 --mass 5.1 --save
 | 단계 | 내용 | 통과 기준 | 상태 |
 |---|---|---|---|
 | 0 | 리허설: `dpo-fly --rehearse` | 완료까지 진행, 명령이 모두 수락됨 | 통과 |
-| 1 | SITL: 실제 펌웨어를 컴퓨터에서 실행해 같은 절차 수행 | 미션 수락, AUTO 비행, 속도 명령 반영, `WIND` 수신 | **미실행** |
+| 1 | SITL: 실제 펌웨어를 컴퓨터에서 실행해 같은 절차 수행 | 미션 수락, AUTO 비행, 속도 명령 반영, `WIND` 수신 | 통과 (4.7.2) |
 | 2 | 지상 점검 (프로펠러 제거): 연결, 미션 올리기·되읽기, 점검표 | 지상국에서 본 미션이 계획과 같음 | 대기 |
-| 3 | 전력 보정 비행: 호버 2분 + 정속 왕복 5·7.5·10·12.5·15 m/s | `dpo-calibrate` 오차 5 % 이내, 경고 없음 | 대기 |
+| 3 | 전력 보정 비행: 호버 2분 + 정속 왕복 5·7.5·10·12.5·15 m/s. 최대 대기속도와 바람 추정 계수도 이때 확인 | `dpo-calibrate` 오차 5 % 이내, 경고 없음 | 대기 |
 | 4 | 비교 비행: 기존 경로와 제안 경로를 번갈아 | 7절 | 대기 |
 | 5 | 속도 갱신 비행: 명령 방식 미션 + `dpo-fly` | 명령 수락, 경로 이탈 없음, SOC가 계획 범위 안 | 대기 |
 
-### 1단계를 실행하지 못한 이유와 방법
+### 1단계 결과: ArduCopter 4.7.2 SITL
 
-이 환경에서 ArduCopter 4.7.2 소스를 받아 SITL을 빌드하려 했지만, 내려받은 소스의 빌드 실행이 권한 정책에 막혔습니다. 다음 명령을 실증팀 컴퓨터에서 실행하면 됩니다.
+`ArduCopter 4.7.2`를 소스에서 빌드해 창원 지도의 편도 임무(X650, 탑재 1 kg, 항목 13개)를 실행했습니다. SITL의 기체는 ArduPilot 기본 쿼드콥터이고 X650이 아닙니다. 그래서 통신 절차와 펌웨어의 동작만 확인한 것이고, 속도·전력의 크기는 X650과 다릅니다.
+
+| 확인한 것 | 결과 |
+|---|---|
+| 명령 방식 미션 올리기와 되읽기 | 수락, 보낸 항목 13개 = 되읽은 항목 13개 |
+| AUTO에서 끝까지 비행 | 이륙 → 순항 → 착륙 → 시동 꺼짐 |
+| 비행 중 속도 명령 | 3회 보냄, 모두 수락 |
+| 위치 추종 | 계획 경로와의 거리 중앙값 3.7 m, 최대 24 m |
+| 바람 수신 (`WIND`) | 추정 4.0 m/s · 242°, 모의 바람 6 m/s · 250° (벡터 차이 2.1 m/s) |
+| 펌웨어가 쓴 로그 읽기 | `dpo-calibrate`의 읽기 함수가 166초 분량을 읽음 (바람 추정값 포함) |
+
+**직선 구간의 속도 계단 시험** (무풍, 2.5 km)
+
+| 보낸 속도 | 5 m/s | 8 m/s | 12 m/s | 15 m/s | 18 m/s |
+|---|---|---|---|---|---|
+| 실제 대지속도 | 4.97 | 7.98 | 10.03 | 10.02 | 10.02 |
+
+- **기체 한계 안에서는 명령을 정확히 따릅니다** (5 → 4.97, 8 → 7.98 m/s).
+- **한계를 넘는 명령은 거부되지 않고 수락됩니다. 그러나 더 느리게 납니다.** SITL 기본 기체는 대기속도 약 10 m/s가 한계라, 12·15·18 m/s 명령에서 모두 10.0 m/s로 날았습니다. 맞바람 6 m/s에서는 대지속도가 4.5 m/s에 머물렀습니다.
+- 따라서 **X650이 실제로 낼 수 있는 최대 대기속도를 비행으로 재서 계획기에 넣어야 합니다.** 지금 가정은 15 m/s입니다. `dpo-calibrate`가 로그에서 본 가장 빠른 정속 대기속도를 알려 주고, `dpo-fly`는 명령 속도에 못 미치는 비행을 감지하면 이후 명령을 그 속도로 낮춥니다.
+
+**꺾이는 경로의 감속** (무풍, 명령 8 m/s, 구간 8개)
+
+| 경로 | 구간 100 m | 구간 200 m | 구간 400 m |
+|---|---|---|---|
+| 30° 꺾임: 정속 대비 추가 시간 | 10.0 s | 10.0 s | 10.2 s |
+| 90° 꺾임: 정속 대비 추가 시간 | 22.6 s | 22.6 s | 22.7 s |
+
+- 직선 1.6 km의 추가 시간은 9.7초입니다(출발 가속과 도착 감속). 이를 빼면 30° 꺾임은 경로점당 약 0.1초, 90° 꺾임은 약 1.8초입니다. 구간 길이와는 무관합니다.
+- 계획기는 이 가감속을 넣지 않습니다. 미션 요약에 보정값(`overhead_s`, `soc_end_adj`)을 따로 냅니다. 판교 X650 편도 예에서 비행 시간 +18.5초, 도착 SOC −1.4 %p입니다. 실기체의 값은 가속·저크 설정에 따라 다릅니다.
+
+**바람 추정과 항력 계수** (맞바람 6 m/s, 대지속도 4 m/s)
+
+| `EK3_DRAG_BCOEF_X/Y` | 10 | 20 | 30 | 60 |
+|---|---|---|---|---|
+| 추정 풍속 [m/s] | 5.3 | 8.6 | 11.1 | 19.5 |
+| 추정 풍향 [°] | 6 | 5 | 4 | 1 |
+
+- **풍향은 맞지만 풍속은 항력 계수 설정에 따라 0.9배에서 3.2배까지 달라졌습니다.** 이 매개변수를 기체에 맞추지 않으면 바람 추정값을 쓸 수 없습니다.
+- 맞추는 방법: 지상 풍속계가 있는 날 호버와 저속 정속 비행을 하고, 추정 풍속이 풍속계 값과 같아지도록 계수를 조정합니다. 같은 구간을 왕복했을 때 가는 편과 오는 편의 추정 바람이 같은지도 확인합니다.
+- `dpo-fly`는 측정값이 예보와 8 m/s 넘게 다르면 버립니다(`--max-wind-dev`). 추정이 검증되기 전에는 `--no-wind`로 바람 측정을 끄고 계획 속도만 보내십시오.
+
+재현 방법은 다음과 같습니다(빌드 약 6분).
 
 ```bash
-git clone --depth 1 --branch Copter-4.7.2 https://github.com/ArduPilot/ardupilot.git && cd ardupilot && git submodule update --init --recursive --depth 1
+git clone --depth 1 --branch Copter-4.7.2 https://github.com/ArduPilot/ardupilot.git && cd ardupilot && git submodule update --init --depth 1 modules/waf modules/mavlink modules/DroneCAN/DSDL modules/DroneCAN/pydronecan modules/DroneCAN/dronecan_dsdlc modules/DroneCAN/libcanard modules/lwip modules/littlefs modules/gtest modules/gbenchmark modules/Micro-CDR modules/Micro-XRCE-DDS-Client && (cd modules/mavlink && git submodule update --init --depth 1)
 ```
 
 ```bash
-./waf configure --board sitl && ./waf copter
+./waf configure --board sitl --no-submodule-update && ./waf copter
 ```
 
 ```bash
-./build/sitl/bin/arducopter --model quad --home 35.23923,128.64658,30,0 --defaults Tools/autotest/default_params/copter.parm
+PYTHONPATH=src python scripts/sitl_check.py --bin ardupilot/build/sitl/bin/arducopter --defaults ardupilot/Tools/autotest/default_params/copter.parm
 ```
 
 ```bash
-dpo-fly --url tcp:127.0.0.1:5760 --site changwon --drone x650 --payload 1.0 --upload --log sitl.jsonl
+PYTHONPATH=src python scripts/sitl_speed_test.py --bin ardupilot/build/sitl/bin/arducopter --defaults ardupilot/Tools/autotest/default_params/copter.parm
 ```
-
-SITL에서 확인할 것은 네 가지입니다.
-
-1. 명령 방식 미션이 수락되고 AUTO에서 끝까지 비행하는가
-2. 비행 중 속도 명령이 실제 대지속도에 반영되는가 (로그의 `GPS.Spd`)
-3. `SIM_WIND_SPD`·`SIM_WIND_DIR`로 준 바람이 `WIND`로 돌아오는가 (`EK3_DRAG_BCOEF_X/Y` 설정 후)
-4. 급경사 구간과 호버 대기 항목이 계획한 시간대로 진행되는가
 
 ## 6. 비행 당일 절차
 
@@ -165,7 +200,8 @@ SITL에서 확인할 것은 네 가지입니다.
 
 ## 9. 확인하지 못한 것
 
-- ArduPilot SITL과 실기체에서의 동작 (5절)
+- 실기체에서의 동작. SITL은 통과했지만 SITL의 기체는 X650이 아닙니다.
+- X650이 낼 수 있는 최대 대기속도, 가감속 설정에서의 실제 추가 시간, 바람 추정 계수
 - 실증 기체의 펌웨어 판과 매개변수 값
 - 비행 중 지상국–기체 무선 링크의 구성과 지연
 - X650의 실제 전력 곡선과 반복 비행 변동

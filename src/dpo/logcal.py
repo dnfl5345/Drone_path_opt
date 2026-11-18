@@ -124,6 +124,7 @@ def fit_drone(points, drone: Drone, mass: float, rho: float = RHO0):
                  params=dict(eta=d.eta, p0=d.p0, cda=d.cda, p_av=d.p_av),
                  before=dict(eta=drone.eta, p0=drone.p0, cda=drone.cda, p_av=drone.p_av),
                  hover_w=float(power_w(0.0, 0.0, mass, rho, d.params())), v_best=float(v[epm.argmin()]),
+                 va_obs_max=float(np.percentile(va, 98)),
                  gain_vs_10=float((epm.min() / e10 - 1) * 100), mass=float(mass), warnings=warn)
     return d, stats
 
@@ -224,6 +225,8 @@ def main(argv=None):
         print(f"  효율 η      {b['eta']:.3f} → {c['eta']:.3f}\n  형상 전력 P0 {b['p0']:.1f} → {c['p0']:.1f} W\n"
               f"  항력 면적 CdA {b['cda']:.3f} → {c['cda']:.3f} m²  (항전 전력 {c['p_av']:.0f} W 는 고정)")
         print(f"  호버 전력 {st['hover_w']:.0f} W · 미터당 에너지가 가장 적은 속도 {st['v_best']:.1f} m/s · 10 m/s 대비 {st['gain_vs_10']:+.1f} %")
+        print(f"  로그에서 본 가장 빠른 정속 대기속도 {st['va_obs_max']:.1f} m/s (계획기의 최대 대기속도 {d0.va_max:g} m/s 와 비교하십시오. "
+              "ArduCopter 는 낼 수 없는 속도 명령도 수락합니다)")
         for w in st["warnings"]:
             print(f"  주의: {w}")
         if a.save:

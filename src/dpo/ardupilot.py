@@ -64,6 +64,28 @@ def _speed_groups(sim, lh, t0, dv=1.0, min_len=75.0):
     return out
 
 
+def kinematic_overhead(segs):
+    """ArduCopter 의 가감속 때문에 계획보다 더 걸리는 시간 [s] 의 근사.
+
+    계획기는 구간마다 속도가 곧바로 바뀐다고 본다. 실제 펌웨어는 출발·도착과 급하게 꺾이는 점에서 가감속한다.
+    ArduCopter 4.7.2 SITL (기본 기체, 기본 WP 매개변수, 8 m/s) 에서 잰 값 (scripts/sitl_speed_test.py):
+      출발 + 도착 9.7 s · 30° 꺾임 약 0.1 s · 90° 꺾임 약 1.8 s (구간 길이 100–400 m 와 무관)
+    속도에 비례한다고 두고 맞춘 식이다. 실기체의 값은 가속·저크 설정에 따라 다르다.
+    segs: [(ax, ay, az, bx, by, bz, v)] – v 는 그 구간의 대지속도 (수직 이동이면 None)."""
+    hs = [g for g in segs if g[6]]
+    if not hs:
+        return 0.0
+    t = 0.6 * hs[0][6] + 0.6 * hs[-1][6]
+    for a, b in zip(hs[:-1], hs[1:]):
+        u = np.array([a[3] - a[0], a[4] - a[1]]); v = np.array([b[3] - b[0], b[4] - b[1]])
+        nu, nv = np.linalg.norm(u), np.linalg.norm(v)
+        if nu < 1e-6 or nv < 1e-6:
+            continue
+        c = float(np.clip(np.dot(u, v) / (nu * nv), -1.0, 1.0))
+        t += 0.23 * min(a[6], b[6]) * (1.0 - c) ** 2
+    return float(t)
+
+
 def merge_collinear(path, waits):
     """일직선 위의 중간 노드를 없앤다 (그 노드에서 호버 대기가 없을 때만).
     ArduCopter 는 경로점 사이를 직선으로 비행하므로 중간 점은 필요 없다."""
@@ -123,7 +145,7 @@ def leg_items(site, drone, path, waits, t_cruise0, mass, ground_delay=0.0, e_bef
     add(CMD["TAKEOFF"], FRAME_REL, lat=lat0, lon=lon0, alt=round(z0 - gh, 1), note="이륙", alt_msl=z0, xy=(x0, y0),
         t=t_cruise0 - t_ref, soc=soc(e_takeoff))
     t, e, v_prev, dist = t_cruise0, e_takeoff, None, 0.0
-    v_used = []
+    v_used, segs = [], []
     for n in range(len(path) - 1):
         xa, ya, za = _node_xyz(site, path[n])
         xb, yb, zb = _node_xyz(site, path[n + 1])
@@ -141,6 +163,7 @@ def leg_items(site, drone, path, waits, t_cruise0, mass, ground_delay=0.0, e_bef
             raise ValueError("미션 변환 중 비행 불가 구간")
         lh = math.hypot(xb - xa, yb - ya)
         dist += math.sqrt(lh * lh + (zb - za) ** 2)
+        segs.append((xa, ya, za, xb, yb, zb, None if lh < 1e-6 else lh / max(float(sim["t"][-1] - t), 1e-9)))
         if lh < 1e-6:                                    # 순수 수직 이동
             groups = [(1.0, None, float(sim["t"][-1] - t), float(sim["e"][-1]))]
         elif speed_items:
@@ -168,6 +191,9 @@ def leg_items(site, drone, path, waits, t_cruise0, mass, ground_delay=0.0, e_bef
     add(CMD["LAND"], FRAME_REL, lat=lat, lon=lon, alt=0.0, note="착륙", alt_msl=float(site.ground[path[-1][1], path[-1][2]]),
         t=t + t_land - t_ref, soc=soc(e + e_land))
     alts = [it["alt"] for it in items if it["frame"] == FRAME_REL and it["cmd"] != CMD["LAND"]]
+    from .energy import power_w
+    ov_t = kinematic_overhead(segs)
+    ov_e = ov_t * power_w(0.0, 0.0, mass, 1.2, drone.params())      # 가감속 구간을 호버 전력으로 본 보수적 값
     summary = dict(n_items=len(items), n_plan_nodes=n_nodes, n_waypoints=sum(1 for it in items if it["cmd"] == CMD["WAYPOINT"]) - 1,
                    n_speed_changes=sum(1 for it in items if it["cmd"] == CMD["CHANGE_SPEED"]),
                    n_loiter=sum(1 for it in items if it["cmd"] == CMD["LOITER_TIME"]),
@@ -175,6 +201,7 @@ def leg_items(site, drone, path, waits, t_cruise0, mass, ground_delay=0.0, e_bef
                    speed_min=float(min(v_used)) if v_used else None, speed_max=float(max(v_used)) if v_used else None,
                    distance_m=float(dist), duration_s=float(t + t_land - (t_cruise0 - t_takeoff - ground_delay)),
                    soc_end=soc(e + e_land), speed_mode="file" if speed_items else "command",
+                   overhead_s=round(ov_t, 1), soc_end_adj=soc(e + e_land + ov_e),
                    params=dict(WP_SPD_UP=drone.vz_up, WP_SPD_DN=drone.vz_dn,
                                note="계획기는 이 상승·하강률을 가정했다. 4.6 이하의 이름: WPNAV_SPEED_UP/DN [cm/s]"))
     return dict(items=items, rows=rows, summary=summary)
