@@ -370,6 +370,33 @@ def analyze():
                                               q95=float(np.quantile([(r["P0s"]["frozen"] / r["P0s"]["nominal"] - 1) * 100 for r in tru], 0.95)),
                                               max=float(np.max([(r["P0s"]["frozen"] / r["P0s"]["nominal"] - 1) * 100 for r in tru]))) if tru else None
         R["coverage"][name] = cv
+        # 지도 격자(다운스케일한 바람)에서 잰 오차: 15시 = 선행 6 h, 18시 = 9 h
+        R.setdefault("site_sigma", {})[name] = {str(6 + h - 15): float(np.sqrt(np.mean([r["uni"]["rms"] ** 2 for r in tr if r["hour"] == h]) / 2))
+                                                 for h in (15, 18) if any(r["hour"] == h for r in tr)}
+        # 신뢰도 기준 선택: 명목값으로 고른 것과 90 % 분위수로 고른 것이 얼마나 다르고, 실제로 어느 쪽이 덜 썼는가
+        rb = [r for r in rows if r.get("robust") and all(v["actual"] is not None for v in r["robust"].values())]
+        RB = dict(n=len(rb))
+        for sg in ("1", "2"):
+            diff, a_nom, a_rob, better, worse = 0, [], [], 0, 0
+            for r in rb:
+                c = r["robust"]
+                k_nom = min(c, key=lambda k: c[k]["nominal"])
+                k_rob = min(c, key=lambda k: (c[k][f"q90_{sg}"] if c[k][f"q90_{sg}"] is not None else math.inf, c[k]["nominal"]))
+                a_nom.append(c[k_nom]["actual"]); a_rob.append(c[k_rob]["actual"])
+                if k_nom != k_rob:
+                    diff += 1
+                    better += c[k_rob]["actual"] < c[k_nom]["actual"] - 1e-9
+                    worse += c[k_rob]["actual"] > c[k_nom]["actual"] + 1e-9
+            RB[sg] = dict(differ=int(diff), better=int(better), worse=int(worse), mean_nominal_rule=float(np.mean(a_nom)) if rb else None,
+                          mean_robust_rule=float(np.mean(a_rob)) if rb else None,
+                          change_pct=float((np.mean(a_rob) / np.mean(a_nom) - 1) * 100) if rb else None)
+        # 사후 최선(실제 바람에서 더 싼 후보)을 골랐다면
+        if rb:
+            best = float(np.mean([min(v["actual"] for v in r["robust"].values()) for r in rb]))
+            RB["oracle_change_pct"] = float((best / RB["1"]["mean_nominal_rule"] - 1) * 100)
+            RB["nominal_rule_wrong"] = float(np.mean([min(r["robust"], key=lambda k: r["robust"][k]["nominal"]) != min(r["robust"], key=lambda k: r["robust"][k]["actual"])
+                                                    for r in rb]))
+        R.setdefault("robust", {})[name] = RB
     # 보정 배율: 조합들 가운데 가장 큰 값을 쓴다 (보수적)
     scale = max([c["scale"] for c in R["coverage"].values()], default=1.0)
     md["scale"] = scale
@@ -438,8 +465,7 @@ def seasonal_table(R, md):
                     f"최단 경로 채택 {a['shortest'] * 100:.0f} %. 6시간 전 예보로 계획할 때 95 % 신뢰수준의 SOC 여유는 명목값의 "
                     + (f"{margin:.1f} %" if margin is not None else "(계산 불가)") + f" (σ {model.sigma(6, season=sk):.2f} m/s).")
             # 설정: 그 달의 바람 세기 구간에서 경로 모양의 이득이 0.5 % 에 못 미치면 에너지 탐색을 생략해도 된다고 적는다
-            gcls = bw.get({"약": "약 (<4)", "중": "중 (4–8)", "강": "강 (≥8)"}[cls])
-            light = gcls is not None and gcls["save_EXv"] > -0.5
+            light = a["save_EXv"] > -0.5 and cls != "강"          # 그 달 표본에서 경로 모양의 이득이 0.5 % 에 못 미침
             setting = ("최단 경로 + 속도 최적화 + 속도 갱신 30 s (에너지 탐색은 생략 가능 – 켜 두면 안전장치가 같은 경로를 고른다)" if light
                        else "에너지 탐색 + 안전장치 + 속도 갱신 30 s")
             months[str(mth)] = dict(season=sk, wind_ms=round(wm, 1), wind_class=cls, setting=setting, energy_search_needed=not light,
@@ -470,6 +496,7 @@ def report(R, md):
         print(f"   배율 {c['scale']} → 시험 날짜 90/95 고정: {c['test']['90|0']}, {c['test']['95|0']} | 실제−명목 [%]: {c['actual_minus_nominal_pct']}")
         if name in R["uniform"]:
             print("   오차장의 고른 정도:", R["uniform"][name])
+        print("   지도 격자에서 잰 σ(6 h, 9 h):", R["site_sigma"].get(name), "| 신뢰도 기준 선택:", R["robust"].get(name))
         print("   나이별 여유(전체):", {k: (round(v["fixed"], 2) if v["fixed"] is not None else None, round(v["adapt"], 2) if v["adapt"] is not None else None)
                                   for k, v in R["margin"][name].get("ALL", {}).items()})
 
@@ -508,7 +535,7 @@ def figures(R, md, sets, model):
     ax.plot(fl, [E["overall"][str(int(ld))]["sigma"] for ld in fl], "s-", color="#16202A", lw=2.4, ms=6, label="같은 나이의 예보를 쓸 때")
     ax.set_xlabel("자료의 나이 [h]"); ax.set_ylabel("바람 오차 σ (성분별) [m/s]"); ax.set_ylim(bottom=0)
     ax.set_title("(b) 과거 바람을 그대로 쓰는 것과 예보를 쓰는 것")
-    ax.legend(frameon=False, fontsize=9, loc="upper left")
+    ax.legend(frameon=False, fontsize=9, loc="center right", bbox_to_anchor=(1.0, 0.42))
     fig.savefig(C.FIG / "F34_forecast_age.png"); plt.close(fig)
     # ---- F35 계절성
     name = "changwon_x650" if "changwon_x650" in R["sets"] else next(iter(R["sets"]))
@@ -535,7 +562,7 @@ def figures(R, md, sets, model):
     for k in SEASONS:
         ax.plot(range(9, 21), [sh[k][str(h)] for h in range(9, 21)], "o-", color=SC[k], lw=1.8, ms=4, label=SK[k])
     ax.set_xticks(range(9, 21)); ax.set_xlabel("시각 [시, KST]"); ax.set_ylabel("지면 위 100 m 풍속 [m/s]"); ax.set_ylim(bottom=0)
-    ax.set_title(f"(b) 시각별 바람 ({LAB[site0]})"); ax.legend(frameon=False, fontsize=9, ncol=4, loc="upper left")
+    ax.set_title(f"(b) 시각별 바람 ({LAB[site0]})"); ax.legend(frameon=False, fontsize=9, ncol=2, loc="lower right")
     ax = axs[1, 0]
     ex = [S["months"][str(m)]["soc_EX"] if S["months"].get(str(m)) else np.nan for m in order]
     exv = [S["months"][str(m)]["soc_EXv"] if S["months"].get(str(m)) else np.nan for m in order]
@@ -560,7 +587,8 @@ def figures(R, md, sets, model):
     from dpo.reliability import mission_confidence
     from dpo.energy import soc_drop
     from dpo.planner import vertical_energy
-    rows = sets[name]
+    ex_name = "pangyo_m100" if "pangyo_m100" in sets else name      # 예시는 속도 갱신의 차이가 보이는 기체로
+    rows = sets[ex_name]
     cand = [r for r in rows if r["truth"] and r["hour"] == 15 and r.get("P0s") and r["P0s"]["frozen"] is not None]
     r0 = max(cand, key=lambda r: r["wind"])                # 바람이 가장 센 표본 날짜의 경우를 예로 든다
     fc, tr, d, P = _load_day(r0["site"], r0["day"], r0["drone"])
@@ -579,15 +607,13 @@ def figures(R, md, sets, model):
     bins = np.linspace(lo, hi, 36)
     ax.hist(c0["samples"], bins=bins, color="#9E9E9E", alpha=0.75, label="계획한 속도 명령 그대로")
     ax.hist(c1["samples"], bins=bins, color="#1B6CA8", alpha=0.6, label="비행 중 속도 갱신")
-    ymax = ax.get_ylim()[1]
-    for x, lb, col, yy in ((c0["nominal"]["soc_used"], "명목 (예보대로)", "#16202A", 0.97), (c0["soc_used_q"][95], "95 % 상한 (명령 그대로)", "#D7263D", 0.86),
-                           (c1["soc_used_q"][95], "95 % 상한 (속도 갱신)", "#1B6CA8", 0.75)):
-        ax.axvline(x, color=col, lw=1.6, ls="--")
-        ax.text(x, ymax * yy, f" {lb} {x:.1f}", color=col, fontsize=8.5, va="top", ha="left")
+    for x, lb, col in ((c0["nominal"]["soc_used"], "명목 (예보대로)", "#16202A"), (c0["soc_used_q"][95], "95 % 상한 (명령 그대로)", "#D7263D"),
+                       (c1["soc_used_q"][95], "95 % 상한 (속도 갱신)", "#1B6CA8")):
+        ax.axvline(x, color=col, lw=1.6, ls="--" if col != "#1B6CA8" else ":", label=f"{lb} {x:.1f} %p")
     ax.set_xlim(lo - (hi - lo) * 0.02, hi + (hi - lo) * 0.42)
     ax.set_xlabel("임무 SOC 소모 [%p]"); ax.set_ylabel("표본 수 (400개 중)")
-    ax.set_title(f"(a) 한 임무의 SOC 소모 분포\n{r0['day'][4:6]}월 {r0['day'][6:]}일 15시, 30시간 전 예보 (σ {sg30:.1f} m/s)", fontsize=10.5)
-    ax.legend(frameon=False, fontsize=8.5, loc="center right")
+    ax.set_title(f"(a) 한 임무의 SOC 소모 분포 ({LAB[r0['site']]} · {r0['drone'].upper()})\n{r0['day'][4:6]}월 {r0['day'][6:]}일 15시, 30시간 전 예보 (σ {sg30:.1f} m/s)", fontsize=10.5)
+    ax.legend(frameon=False, fontsize=8.5, loc="upper right")
     ax = axs[1]
     cv = R["coverage"][name]
     labs = ["90 %\n명령 그대로", "95 %\n명령 그대로", "90 %\n속도 갱신", "95 %\n속도 갱신"]
@@ -604,7 +630,7 @@ def figures(R, md, sets, model):
     for xx, v in zip(x + 0.2, tst):
         ax.text(xx, v + 1, f"{v:.0f}", ha="center", fontsize=8.5)
     ax.set_xticks(x); ax.set_xticklabels(labs, fontsize=8.5); ax.set_ylim(0, 122); ax.set_ylabel("실제 SOC 소모가 상한 안에 든 비율 [%]")
-    ax.set_title(f"(b) 신뢰수준의 검증 (빨간 선 = 목표)\n{cv['raw']['95|0']['n']}건, 실제 = 6시간 뒤 발표된 예보", fontsize=10.5)
+    ax.set_title(f"(b) 신뢰수준의 검증 (빨간 선 = 목표)\n{LAB[site0]} · {name.split('_')[1].upper()} {cv['raw']['95|0']['n']}건, 실제 = 6시간 뒤 발표된 예보", fontsize=10.5)
     ax.legend(frameon=False, fontsize=8.5, loc="upper center", ncol=1)
     ax = axs[2]
     M = R["margin"][name]
@@ -618,7 +644,7 @@ def figures(R, md, sets, model):
     ax.set_xticks(lds); ax.set_xlabel("예보의 나이 [h]"); ax.set_ylabel("95 % 신뢰수준에 필요한 SOC 여유 [명목값의 %]"); ax.set_ylim(bottom=0)
     ax.set_title("(c) 자료가 오래될수록 필요한 여유", fontsize=10.5); ax.legend(frameon=False, fontsize=8.5, loc="upper left", ncol=2)
     fig.savefig(C.FIG / "F36_confidence.png"); plt.close(fig)
-    R["example"] = dict(day=r0["day"], hour=r0["hour"], wind=r0["wind"], sigma=sg30, nominal=c0["nominal"]["soc_used"], q95_fixed=c0["soc_used_q"][95],
+    R["example"] = dict(set=ex_name, day=r0["day"], hour=r0["hour"], wind=r0["wind"], sigma=sg30, nominal=c0["nominal"]["soc_used"], q95_fixed=c0["soc_used_q"][95],
                         q95_adapt=c1["soc_used_q"][95], actual_frozen=r0["P0s"]["frozen"], actual_adapt=r0["P0s"]["adapt"])
     (C.RES / "E16_stats.json").write_text(json.dumps(R, ensure_ascii=False, indent=1))
 

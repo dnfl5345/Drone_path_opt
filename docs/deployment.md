@@ -45,6 +45,8 @@ pip install -e ".[dev]"
 | `data/raw/gfs_*_06z.npz` | 모의 운용의 '실제 바람' (06Z) | 아니오 |
 | `data/raw/adsb/` | 실측 ADS-B 항적 (침입기 투입) | 아니오 |
 | `results/adsb_error_model.json` | 실측 오차 분위수 모양 | 아니오 |
+| `results/wind_error_model.json`, `seasonal_table.json` | 예보 나이별 바람 오차, 월별 권고표 (신뢰도 판정). 없으면 내장 기본값을 씁니다. | 아니오 |
+| `calibration/<기체>.json` | 비행 로그로 보정한 전력 모델 (`dpo-calibrate --save`) | 아니오 |
 | `scenarios/` | 예시 장애물 | 아니오 |
 | `data/raw/overture_buildings*.json` | 3D 화면의 건물 다각형. 없으면 격자 높이로 상자를 그립니다. | 아니오 |
 

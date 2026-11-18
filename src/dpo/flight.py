@@ -278,6 +278,9 @@ def main(argv=None):
     ap.add_argument("--max-wind-dev", type=float, default=8.0, help="예보와 이만큼 넘게 다른 바람 측정은 버린다 [m/s]")
     ap.add_argument("--upload", action="store_true", help="미션을 기체에 올린다 (없으면 연결·계획만 확인)")
     ap.add_argument("--log", default=None, metavar="FILE", help="비행 기록 (JSON Lines)")
+    ap.add_argument("--confidence", type=float, default=0.95, help="출발 판정의 신뢰수준 (0.9 | 0.95 | 0.99)")
+    ap.add_argument("--forecast-age", type=float, default=6.0, metavar="H", help="계획에 쓴 예보가 발표된 뒤 지난 시간 [h]")
+    ap.add_argument("--force", action="store_true", help="신뢰도 판정이 '불가'여도 미션을 올린다 (운용 책임자 판단)")
     ap.add_argument("--rehearse", action="store_true", help="모의 기체로 전 과정을 연습한다 (기체 불필요)")
     ap.add_argument("--wind-rot", type=float, default=0.0, help="리허설: 실제 풍향을 예보에서 이만큼 돌림 [도]")
     ap.add_argument("--rate", type=float, default=20.0, help="리허설 빨리 감기 배율")
@@ -307,7 +310,13 @@ def main(argv=None):
         print(f"구간 {a.leg} 이 없습니다 (가능: {[x['name'] for x in ms['legs']]})", file=sys.stderr)
         return 2
     site, drone = app.site, app.drones[a.drone]
-    print(f"{C.SITE['label']} · {ms['drone']} · 구간 {a.leg} · 항목 {M['summary']['n_items']}개 · 예상 도착 SOC {M['summary']['soc_end']:.1f} %")
+    print(f"{C.SITE['label']} · {ms['drone']} · 구간 {a.leg} · 항목 {M['summary']['n_items']}개 · 예상 도착 SOC {M['summary']['soc_end']:.1f} % "
+          f"(가감속 보정 {M['summary']['soc_end_adj']:.1f} %)")
+    conf = app.confidence(dict(level=a.confidence, forecast_age_h=a.forecast_age))
+    print(f"신뢰도 판정: {dict(go='가능', caution='주의')[conf['decision']] if conf['decision'] != 'no-go' else '불가'} – {conf['reason']}")
+    if conf["decision"] == "no-go" and not a.force and not a.rehearse:
+        print("판정이 '불가'라 미션을 올리지 않습니다. 탑재·거리·출발 시각을 바꾸거나 --force 를 주십시오.", file=sys.stderr)
+        return 4
     veh = None
     if a.rehearse:
         from .live import perturbed_site

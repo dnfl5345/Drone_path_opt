@@ -4,6 +4,7 @@
   dpo-plan --drone x650 --payload 1.0 --dep-hour 15 --out missions/
   dpo-plan --site changwon --drone x650 --tour "2600,2300;1900,2700;1200,2100" --dwell 10 --out missions/
   dpo-plan --hub 127.1055,37.4020 --dst 127.1271,37.3886 --lonlat --one-way --obstacles obstacles.json --out missions/
+  dpo-plan --drone x650 --confidence 0.95 --forecast-age 30      # 30시간 전 예보로 계획할 때의 출발 판정
   dpo-plan --check
 
 좌표는 지역 좌표 (x 동쪽, y 북쪽 [m], 지도 남서쪽 모서리 기준) 또는 --lonlat 을 주면 경도,위도다.
@@ -42,6 +43,9 @@ def build_parser():
     ap.add_argument("--no-safeguard", action="store_true", help="안전장치(최단 경로 후보 비교)를 끈다")
     ap.add_argument("--speed-mode", default="file", choices=["file", "command"],
                     help="file: 구간 속도를 미션 항목으로 넣음 / command: 속도 항목은 첫 구간만 (dpo-fly 가 비행 중 속도 명령을 보낼 때)")
+    ap.add_argument("--confidence", type=float, default=None, metavar="LEVEL",
+                    help="신뢰수준 (0.9 | 0.95 | 0.99). 주면 예보 오차를 넣은 SOC 분포로 출발 판정을 낸다")
+    ap.add_argument("--forecast-age", type=float, default=6.0, metavar="H", help="계획에 쓴 예보가 발표된 뒤 지난 시간 [h]")
     ap.add_argument("--out", default=None, metavar="DIR", help="미션 파일을 쓸 폴더 (없으면 요약만 출력)")
     ap.add_argument("--json", action="store_true", help="요약을 JSON 으로 출력")
     ap.add_argument("--check", action="store_true", help="자료와 계획기를 점검하고 끝낸다")
@@ -92,6 +96,14 @@ def main(argv=None):
                  chosen=L.get("chosen")) for L in r["legs"]]
     out = dict(feasible=r["feasible"], soc_used=r["soc_used"], soc_end=r["soc_end"], legs=legs, errors=r["errors"],
                safeguard=r["safeguard"], drone=r["drone"]["label"], site=C.SITE["label"], dep_hour=a.dep_hour, files=[])
+    conf = None
+    if a.confidence is not None:
+        try:
+            conf = app.confidence(dict(level=a.confidence, forecast_age_h=a.forecast_age))
+        except ValueError as ex:
+            print(f"입력 오류: {ex}", file=sys.stderr)
+            return 2
+        out["confidence"] = conf
     if r["feasible"] and a.out:
         m = app.mission(dict(speed_mode=a.speed_mode))
         d = Path(a.out)
@@ -114,11 +126,20 @@ def main(argv=None):
             print(f"  {L['name']:>5}: SOC {L['soc']:5.1f} %p · {L['T']:5.0f} s · {L['L'] / 1000:5.2f} km · 대기 {L['wait']:.0f} s{ch}")
         print(f"  합계 SOC 소모 {out['soc_used']:.1f} %p → 도착 SOC {out['soc_end']:.1f} % " +
               ("(예비 확보)" if r["feasible"] else "(임무 불가: 예비 SOC 미달 또는 경로 없음)"))
+        if conf is not None:
+            word = {"go": "가능", "caution": "주의", "no-go": "불가"}[conf["decision"]]
+            print(f"  신뢰도 판정: {word} – {conf['reason']}")
+            print(f"    예보의 나이 {conf['forecast_age_h']:g} h → 바람 오차 σ {conf['sigma']:.2f} m/s (성분별), "
+                  + ("여유 계산 불가" if conf["margin_pp"] is None else f"신뢰수준에 필요한 여유 {conf['margin_pp']:.1f} %p"))
+            sn = conf["season"]
+            print(f"    {conf['month']}월 권고: {sn.get('note', '')}")
         for e in r["errors"]:
             print(f"  경고: {e}")
         for f in out["files"]:
             print(f"  → {f}")
-    return 0 if r["feasible"] else 1
+    if not r["feasible"]:
+        return 1
+    return 4 if (conf is not None and conf["decision"] != "go") else 0
 
 
 if __name__ == "__main__":

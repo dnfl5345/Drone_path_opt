@@ -593,6 +593,56 @@ class App:
                         legs=[dict(name=m["name"], legs=m["legs"], wpl=m["wpl"], csv=m["csv"], summary=m["summary"],
                                    items=m["items"], plan=m["plan"]) for m in ms])
 
+    def confidence(self, req=None):
+        """마지막 계획의 신뢰도: 예보가 틀린 만큼의 SOC 소모 분포와 출발 판정 (docs/reliability.md).
+
+        req: level (0.5 | 0.9 | 0.95 | 0.99), forecast_age_h (계획에 쓴 예보가 발표된 뒤 지난 시간), adapt (비행 중 속도 갱신 가정).
+        구간마다 같은 바람 편차를 받는다고 보고 구간 분위수를 더한다. 가는 편과 오는 편은 바람에 반대로 반응하므로
+        이 합은 실제 임무 분위수보다 크다 (보수적)."""
+        from ..reliability import WindErrorModel, mission_confidence, seasonal_recommendation
+        req = req or {}
+        level = float(req.get("level", 0.95))
+        lv = int(round(level * 100))
+        if lv not in (50, 90, 95, 99):
+            raise ValueError("신뢰수준은 0.5, 0.9, 0.95, 0.99 중 하나")
+        age = float(req.get("forecast_age_h", 6.0))
+        if not (0 <= age <= 120):
+            raise ValueError("예보의 나이는 0~120 시간")
+        with self.lock:
+            ss = getattr(self, "session", None)
+            if ss is None:
+                raise ValueError("먼저 경로를 생성하세요")
+            cx, legs = ss["cx"], ss["legs"]
+            month = int(str(C.SITE["t0"])[5:7])
+            model = WindErrorModel.load()
+            sigma = float(model.sigma(age, month=month))
+            d, site = cx["d"], cx["site"]
+            out_legs, used_nom, used_q, feasible = [], 0.0, 0.0, True
+            for L in legs:
+                if not L.get("feasible"):
+                    feasible = False
+                    break
+                gd = float(L["r"].get("ground_delay", 0.0))
+                t0 = L["t_leg0"] + L["t_to"] + (0.0 if L.get("air_start") else gd)
+                c = mission_confidence(site, d, L["r"]["path"], L["waits"], t0, L["m"], sigma, n=int(req.get("n", 200)),
+                                       adapt=bool(req.get("adapt", False)), e_fixed=L["e_to"] + L["e_ld"], reserve=cx["reserve"])
+                q = {int(round(float(k) * 100)) if float(k) <= 1 else int(k): v for k, v in c["soc_used_q"].items()}
+                out_legs.append(dict(name=L["name"], soc_used=c["nominal"]["soc_used"], soc_used_q=q[lv], infeasible=c["infeasible"]))
+                used_nom += c["nominal"]["soc_used"]
+                used_q += q[lv]
+            end_nom, end_q = 100.0 - used_nom, (100.0 - used_q if math.isfinite(used_q) else -math.inf)
+            res = cx["reserve"]
+            if not feasible or end_nom < res:
+                dec, why = "no-go", "예보대로여도 예비 SOC 를 지키지 못합니다"
+            elif end_q >= res:
+                dec, why = "go", f"신뢰수준 {lv} % 에서 도착 SOC {end_q:.1f} % ≥ 예비 {res:g} %"
+            else:
+                dec, why = "caution", (f"예보대로면 도착 SOC {end_nom:.1f} % 이지만, 신뢰수준 {lv} % 에서는 "
+                                       + ("비행할 수 없는 바람이 포함됩니다" if not math.isfinite(end_q) else f"{end_q:.1f} % 로 예비 {res:g} % 에 못 미칩니다"))
+            return dict(level=level, forecast_age_h=age, sigma=sigma, month=month, legs=out_legs, soc_end=end_nom, soc_end_q=end_q,
+                        margin_pp=None if not math.isfinite(end_q) else end_nom - end_q, reserve=res, decision=dec, reason=why,
+                        season=seasonal_recommendation(month, cx["dep_hour"], site=C.SITE_KEY), model_source=getattr(model, "source", ""))
+
     # ---------------------------------------------------------------- 비행 중 장애물 변경 → 재계획
     def replan(self, req, latency=3.0):
         """t_now(출발 기준 s)에 새 장애물 집합이 발표됨 → 남은 경로 검사 → 충돌 시에만 재계획."""
@@ -866,6 +916,8 @@ def make_handler(app):
                     return self._send(200, app.plan(req))
                 if self.path == "/api/mission":
                     return self._send(200, app.mission(req))
+                if self.path == "/api/confidence":
+                    return self._send(200, app.confidence(req))
                 if self.path == "/api/replan":
                     return self._send(200, app.replan(req))
                 if self.path == "/api/live/start":

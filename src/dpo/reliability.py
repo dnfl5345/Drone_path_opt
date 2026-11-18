@@ -30,9 +30,10 @@ SEASONS = {"DJF": (12, 1, 2), "MAM": (3, 4, 5), "JJA": (6, 7, 8), "SON": (9, 10,
 SEASON_KO = {"DJF": "겨울", "MAM": "봄", "JJA": "여름", "SON": "가을"}
 LEVELS = (50, 90, 95, 99)
 
-# 자료 파일이 없을 때 쓰는 기본값: E16 에서 잰 값(전체 평균)을 올림한 보수적인 값. [선행 시간 h] → 성분별 σ [m/s]
-DEFAULT_MODEL = dict(leads_h=[0.0, 6.0, 30.0, 54.0, 78.0], sigma=[0.5, 1.0, 1.6, 2.0, 2.6], by_season={}, scale=1.0,
-                     source="built-in default (E16 전체 평균을 올림한 값)")
+# 자료 파일이 없을 때 쓰는 기본값: E16 에서 잰 전체 평균(6·12·30·54·78 h: 0.31·0.40·1.00·1.33·1.74 m/s)에
+# 덮임률 보정 배율 1.25 를 곱해 올림한 값. [선행 시간 h] → 성분별 σ [m/s]
+DEFAULT_MODEL = dict(leads_h=[6.0, 12.0, 30.0, 54.0, 78.0], sigma=[0.5, 0.6, 1.3, 1.7, 2.2], by_season={}, scale=1.0,
+                     source="built-in default (E16 전체 평균 × 1.25 를 올림한 값)")
 
 
 def season_of(month: int) -> str:

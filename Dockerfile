@@ -20,7 +20,7 @@ COPY data/processed /opt/dpo/data/processed
 COPY data/raw/gfs_20261027_00z.npz data/raw/gfs_20261027_06z.npz \
      data/raw/gfs_changwon_20261027_00z.npz data/raw/gfs_changwon_20261027_06z.npz /opt/dpo/data/raw/
 COPY data/raw/adsb /opt/dpo/data/raw/adsb
-COPY results/adsb_error_model.json /opt/dpo/results/
+COPY results/adsb_error_model.json results/wind_error_model.json results/seasonal_table.json /opt/dpo/results/
 COPY scenarios /opt/dpo/scenarios
 
 RUN useradd --create-home dpo && chown -R dpo /opt/dpo

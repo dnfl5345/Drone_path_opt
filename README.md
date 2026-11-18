@@ -8,6 +8,11 @@
 - 최신 연구 대비 정식화 비교: [`docs/algorithm_comparison.md`](docs/algorithm_comparison.md) (문제 (P) 정의, 문헌별 정식화, 가정 축소 실험)
 - 확장안 (8방향 탐색 + 고도별 균일·선형 바람, LUT): [`docs/extension_8way_linear_wind.md`](docs/extension_8way_linear_wind.md)
 - 3D 시공간 확장 (동적 장애물) + 장애물 편집 플랫폼 + 장애물 변경 시 이벤트 기반 재계획: [`docs/spatiotemporal_dynamic_obstacles.md`](docs/spatiotemporal_dynamic_obstacles.md)
+- **v1.1.0: 신뢰도 검토와 X650 실증 준비**: [`docs/reliability.md`](docs/reliability.md), [`docs/field_demo_x650.md`](docs/field_demo_x650.md), Word [`docs/drone_soc_reliability_fielddemo.docx`](docs/drone_soc_reliability_fielddemo.docx)
+  - **신뢰도 (E16)**: 12개월 36일 표본으로 예보의 나이별 바람 오차(6시간 0.31 → 78시간 1.74 m/s), SOC 신뢰구간과 출발 판정(`dpo-plan --confidence 0.95 --forecast-age 30`). 95 % 상한의 실제 적중률 94.7 % (432건)
+  - **계절성**: 알고리즘을 계절별로 바꿀 근거는 없었고, 설정은 하나로 두고 SOC 여유와 출발 시각만 계절에 맞춥니다 (`results/seasonal_table.json`)
+  - **실증 도구**: `dpo-fly` (기체 연결, 위치 추종, 속도 명령. `--rehearse`로 기체 없이 연습), `dpo-calibrate` (비행 로그 → 전력 모델 보정), 명령 방식 미션 (`dpo-plan --speed-mode command`)
+  - **ArduCopter 4.7.2 SITL 검증** (`scripts/sitl_check.py`, `scripts/sitl_speed_test.py`): 미션 수락, AUTO 비행 완료, 속도 명령 수락·반영, 바람 수신, 로그 읽기. 한계를 넘는 속도 명령은 수락되지만 느리게 나는 것, 꺾임·출발·도착의 추가 시간, 바람 추정의 항력 계수 민감도를 쟀습니다
 - **배포판 v1.0.0: 속도 갱신·안전장치를 실시간 플랫폼과 미션 파일에 연결**: [`docs/deployment.md`](docs/deployment.md), 보고서 [`docs/drone_soc_deployment_report.docx`](docs/drone_soc_deployment_report.docx), 인수인계 [`HANDOVER.md`](HANDOVER.md)
   - 설치 `pip install -e ".[dev]"` → 점검 `dpo-plan --check` → 서버 `dpo-server` → 미션 파일 `dpo-plan --drone x650 --out missions/`
   - 실시간 화면(`/live`): 안전장치, 속도 갱신 주기, 모의 실제 바람, 속도 명령 표, 남은 구간 미션 내려받기. 기체 연결 `dpo-server --mavlink udpin:0.0.0.0:14550`

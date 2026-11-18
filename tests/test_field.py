@@ -139,3 +139,27 @@ def test_flight_runner_rejects_bad_wind_and_caps_unreachable_speed():
     finally:
         link.close()
         veh.stop()
+
+
+@needs_data
+def test_confidence_go_no_go_grows_with_forecast_age():
+    from dpo import cli
+    from dpo.webapp.server import App
+    app = App()
+    app.plan(dict(obstacles=[], dep_hour=15, payload=1.0, drone="x650", round_trip=True))
+    c6, c30, c78 = (app.confidence(dict(level=0.95, forecast_age_h=h)) for h in (6, 30, 78))
+    assert c6["decision"] == "go" and c6["sigma"] < c30["sigma"] < c78["sigma"]
+    assert 0 <= c6["margin_pp"] < c30["margin_pp"]                    # 예보가 오래될수록 필요한 여유가 크다
+    # 78시간 전 예보: 강풍일이라 비행할 수 없는 바람이 신뢰구간에 들어간다 → 여유를 숫자로 낼 수 없거나 더 크다
+    assert c78["margin_pp"] is None or c78["margin_pp"] > c30["margin_pp"]
+    assert c78["soc_end_q"] <= c30["soc_end_q"] <= c6["soc_end_q"]
+    assert c6["soc_end_q"] <= c6["soc_end"] and len(c6["legs"]) == 2 and c6["season"]["month"] == 10
+    assert app.confidence(dict(level=0.5, forecast_age_h=6))["soc_end_q"] >= c6["soc_end_q"] - 1e-9
+    with pytest.raises(ValueError):
+        app.confidence(dict(level=0.8))
+    # 예비를 80 % 로 올리면 예보대로여도 못 지킨다 → 불가
+    app.plan(dict(obstacles=[], dep_hour=15, payload=1.0, drone="x650", round_trip=True, reserve=80.0))
+    assert app.confidence(dict(level=0.95))["decision"] == "no-go"
+    # 명령줄: 판정이 '가능'이면 0, 아니면 4
+    assert cli.main(["--drone", "x650", "--payload", "1.0", "--one-way", "--confidence", "0.95"]) == 0
+    assert cli.main(["--drone", "m100", "--payload", "0.5", "--confidence", "0.95", "--forecast-age", "30"]) == 4
