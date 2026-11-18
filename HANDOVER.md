@@ -37,6 +37,16 @@
 - **만든 파일**: `src/dpo/reliability.py`, `flight.py`, `sim_vehicle.py`, `logcal.py`, `scripts/exp_reliability.py`, `fetch_gfs_clim.py`, `sitl_check.py`, `sitl_speed_test.py`, `tests/test_reliability.py`, `test_field.py`, `docs/reliability.md`, `field_demo_x650.md`, `results/E16_*`, `wind_error_model.json`, `seasonal_table.json`, `sitl_check.json`, `sitl_speed.json`, 그림 F34–F36
 - **SITL 에서 알게 된 것**: 한계를 넘는 속도 명령은 수락되지만 느리게 난다 / 90° 꺾임은 경로점당 약 1.8 s, 출발·도착 합 약 9.7 s (8 m/s) / EKF 바람 추정의 크기는 `EK3_DRAG_BCOEF` 에 따라 0.9–3.2배
 
+## 2026-11-18 추가 (보고서·발표자료 개정)
+
+- **정한 것**
+  - 발주처 설명용 비교는 '기존 = 최단 + 지면 기준 정속 10 m/s', '대조 = 최단 + 계산한 속도', '제안' 세 가지로 한다. 화면의 근거 문장은 수치에서 만든다 (`App.compare`).
+  - 3D 화면의 예시(2026-10-27)는 바람이 센 날이다. 경로·고도의 몫(12–21 %)이 평균(1–5 %)보다 크다는 점을 항상 함께 적는다.
+  - 용어는 '예보 시점'(발표 후 경과 시간)으로 통일한다. 명령줄 인자 이름 `--forecast-age` 는 그대로 둔다.
+  - DJI 쪽 설명은 공개 문서에서 확인한 것만 적고 나머지는 `[확인요망]` 으로 둔다. WPML 내보내기는 없다.
+- **만든·고친 파일**: `src/dpo/webapp/server.py` (`compare`, `/api/compare`), `static/map3d.*`, `scripts/capture_compare.js`, `results/compare_examples.json`, `results/platform_3d_compare_*.json`, `results/figures/platform_3d_compare_*.png`, `scripts/build_deploy_report.js` (2·3·12·13장), `scripts/build_academic_ppt.py` (슬라이드 5장), `tests/test_field.py` (비교 시험).
+- **확인하지 못한 것**: DJI 기체에서의 동작 전부, DJI 의 복귀 판단이 바람을 쓰는지 여부.
+
 ## ③ 다음에 할 일
 
 1. **X650 보정 비행** (호버 + 5–15 m/s 정속 왕복): `dpo-calibrate --save` 로 전력 곡선, 최대 대기속도, `EK3_DRAG_BCOEF` 를 정한다. 실증 기체의 펌웨어 판도 이때 확인한다.

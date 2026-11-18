@@ -8,6 +8,8 @@
 - 최신 연구 대비 정식화 비교: [`docs/algorithm_comparison.md`](docs/algorithm_comparison.md) (문제 (P) 정의, 문헌별 정식화, 가정 축소 실험)
 - 확장안 (8방향 탐색 + 고도별 균일·선형 바람, LUT): [`docs/extension_8way_linear_wind.md`](docs/extension_8way_linear_wind.md)
 - 3D 시공간 확장 (동적 장애물) + 장애물 편집 플랫폼 + 장애물 변경 시 이벤트 기반 재계획: [`docs/spatiotemporal_dynamic_obstacles.md`](docs/spatiotemporal_dynamic_obstacles.md)
+- **기존 경로와의 비교 (3D 화면)**: `/3d`에서 경로를 만든 뒤 '기존 경로와 비교'를 누르면 기존 경로(최단 + 지면 기준 정속 10 m/s)가 주황색으로 겹쳐지고, 방식별 수치와 수치에서 만든 근거 문장이 나옵니다 (`POST /api/compare`). 예: 판교 X650 15시 왕복 67.4 → 48.2 %p, 창원 X650 17.0 → 14.0 %p. 예시 날은 바람이 센 날이며 여러 날 평균은 E13·E16을 봐야 합니다 (`results/compare_examples.json`, 보고서 2–3장: DJI 경로 기능과의 차이 포함).
+- **용어**: '예보의 나이' 대신 **예보 시점**(예보가 발표된 시각, 발표 후 경과 시간)을 씁니다.
 - **v1.1.0: 신뢰도 검토와 X650 실증 준비**: [`docs/reliability.md`](docs/reliability.md), [`docs/field_demo_x650.md`](docs/field_demo_x650.md), Word [`docs/drone_soc_reliability_fielddemo.docx`](docs/drone_soc_reliability_fielddemo.docx)
   - **신뢰도 (E16)**: 12개월 36일 표본으로 예보 시점별 바람 오차(6시간 0.31 → 78시간 1.74 m/s), SOC 신뢰구간과 출발 판정(`dpo-plan --confidence 0.95 --forecast-age 30`). 95 % 상한의 실제 적중률 94.7 % (432건)
   - **계절성**: 알고리즘을 계절별로 바꿀 근거는 없었고, 설정은 하나로 두고 SOC 여유와 출발 시각만 계절에 맞춥니다 (`results/seasonal_table.json`)

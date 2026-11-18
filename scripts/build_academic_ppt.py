@@ -28,6 +28,15 @@ CW = json.loads(_CW.read_text()) if _CW.exists() else None
 _E13, _E14 = ROOT / "results" / "E13_stats.json", ROOT / "results" / "E14_stats.json"
 E13 = json.loads(_E13.read_text()) if _E13.exists() else None
 E14 = json.loads(_E14.read_text()) if _E14.exists() else None
+
+
+def _opt(name):
+    f = ROOT / "results" / name
+    return json.loads(f.read_text()) if f.exists() else None
+
+
+E16, CMPX, SITL, SSPD = _opt("E16_stats.json"), _opt("compare_examples.json"), _opt("sitl_check.json"), _opt("sitl_speed.json")
+CX = {k: _opt(f"platform_3d_compare_{v}.json") for k, v in (("pg", "pangyo_x650"), ("cw", "changwon_x650"), ("pm", "pangyo_m100"))}
 X0, W = 0.6, 12.15          # 본문 좌우 범위 [in]
 SRC_Y = 7.02                # 출처 줄 위치 (오른쪽 아래 로고와 겹치지 않게 폭 제한)
 
@@ -844,6 +853,147 @@ def build(template, out):
                  "속도는 30초 이하 주기로 갱신하고, 경로는 장애물이나 금지구역이 바뀔 때만 다시 짜는 것을 권합니다. 틀린 예보는 "
                  "가정으로 만든 것이므로, 실증 지역에서 실측 바람과 예보의 차이를 재는 것이 다음 일입니다.")
 
+
+    # ---------------------------------------------------------------- v1.1.0: 3D 비교, DJI 차이, 신뢰도, SITL
+    if all(CX.values()):
+        M = {k: {m["key"]: m for m in c["methods"]} for k, c in CX.items()}
+        pg, cw, pm = CX["pg"], CX["cw"], CX["pm"]
+        s = D.content("3D 화면에서 본 기존 경로와 제안 경로")
+        section(s, SEC[4])
+        picture(s, FIG / "platform_3d_compare_pangyo_x650_map.png", X0, 1.08, 7.3, 4.95)
+        rows = [["방식", "SOC 소모", "비행 시간", "거리", "지면 위 높이"]]
+        for k, lab in (("existing", "기존 (최단 + 정속 10 m/s)"), ("existing_vopt", "대조 (최단 + 계산한 속도)"), ("proposed", "제안")):
+            m = M["pg"][k]
+            rows.append([lab, f"{m['soc_used']:.1f} %p", f"{m['T']:.0f} s", f"{m['L'] / 1000:.2f} km", " / ".join(f"{q['agl']:.0f}" for q in m["per"]) + " m"])
+        table(s, 8.05, 1.2, 4.7, rows, [2.0, 0.9, 0.85, 0.85, 1.0], row_h=0.44, head_size=11, body_size=11, highlight=(3,),
+              first_col_center=False, aligns=[PP_ALIGN.LEFT] + [PP_ALIGN.CENTER] * 4)
+        e_, v_, p_ = M["pg"]["existing"]["per"], M["pg"]["existing_vopt"]["per"], M["pg"]["proposed"]["per"]
+        items(s, 8.05, 3.15, 4.7, 2.3, [
+            ("속도  ", f"기존은 맞바람 {-e_[1]['tail']:.0f} m/s 구간에서 {e_[1]['v_mean']:.1f} m/s밖에 못 내고, 뒷바람 구간에서는 공기 속에서 거의 서 있습니다. "
+                      f"속도만 바꿔 {pg['by']['speed_pct']:.1f} %"),
+            ("고도  ", f"오는 편: 지면 위 {v_[1]['agl']:.0f} → {p_[1]['agl']:.0f} m, 맞바람 {-v_[1]['tail']:.1f} → {-p_[1]['tail']:.1f} m/s. "
+                      f"경로·고도로 {pg['by']['path_pct']:.1f} %"),
+        ], size=12, gap=5)
+        stat(s, 8.05, 5.3, 4.7, 1.1, "SOC 소모 (판교 · X650 · 1 kg · 15시 왕복)", f"{M['pg']['existing']['soc_used']:.1f} → {M['pg']['proposed']['soc_used']:.1f} %p",
+             f"{pg['by']['total_pct']:.1f} % · 바람이 센 날(100 m 풍속 11.9 m/s)의 예", dark=True, vsize=22)
+        source(s, "모의 결과 · 플랫폼 3D 화면의 '기존 경로와 비교' · 주황 = 기존, 파랑 = 제안, 붉은 원기둥 = 비행금지구역 · 2026-10-27 GFS 00Z")
+        notes(s, "발주처에 보이기 위해 플랫폼의 3D 화면에 비교 기능을 넣었습니다. 주황색이 기존 경로이고 파란색이 제안 경로입니다. 기존 경로는 "
+                 "최단 경로를 지면 기준 10 m/s로 나는 일반적인 웨이포인트 비행입니다. 이 날은 바람이 센 날이라 차이가 크게 보입니다. "
+                 f"SOC 소모가 {M['pg']['existing']['soc_used']:.1f}에서 {M['pg']['proposed']['soc_used']:.1f} %p로 줄었습니다. 이유는 두 가지입니다. "
+                 "첫째는 속도입니다. 지면 기준 정속은 뒷바람에서 공기 속 속도가 거의 0이 되어 제자리 비행만큼 전력을 쓰고, 맞바람에서는 "
+                 "대기속도 한계에 걸려 오래 떠 있습니다. 둘째는 고도입니다. 제안 경로는 맞바람을 받는 오는 편에서 낮은 고도로 내려가 "
+                 "약한 바람을 받습니다. 이 화면은 유리한 날의 예이고, 여러 날의 평균은 앞 장의 통계를 봐야 합니다.")
+
+        s = D.content("왜 더 좋은가 – 건물을 넘지 않는 경로, 출발 전 가부 판정")
+        section(s, SEC[4])
+        picture(s, FIG / "platform_3d_compare_changwon_x650_map.png", X0, 1.08, 7.3, 4.95)
+        cv, cp = M["cw"]["existing_vopt"]["per"], M["cw"]["proposed"]["per"]
+        head(s, 8.05, 1.15, "창원 · X650 · 1 kg (그림)", w=4.6, size=14)
+        items(s, 8.05, 1.6, 4.7, 1.9, [
+            ("기존  ", f"직선 위의 고층 건물을 넘으려고 도중에 {cv[0]['climb']:.0f}–{cv[1]['climb']:.0f} m를 올라갔다 내려옵니다."),
+            ("제안  ", f"낮은 고도로 건물 옆을 돌아갑니다 (거리 {cv[0]['L'] / 1000:.2f} → {cp[0]['L'] / 1000:.2f} km)."),
+            ("결과  ", f"{M['cw']['existing']['soc_used']:.1f} → {M['cw']['proposed']['soc_used']:.1f} %p ({cw['by']['total_pct']:.1f} %), "
+                      f"그중 경로·고도 {cw['by']['path_pct']:.1f} %"),
+        ], size=12, gap=5)
+        head(s, 8.05, 3.5, "판교 · M100 · 0.5 kg", w=4.6, size=14)
+        items(s, 8.05, 3.95, 4.7, 1.3, [
+            ("기존  ", f"도착 SOC {M['pm']['existing']['soc_end']:.1f} % – 예비 20 %를 지키지 못해 임무 불가"),
+            ("제안  ", f"도착 SOC {M['pm']['proposed']['soc_end']:.1f} % – 가능. 한 구간은 안전장치가 최단 경로를 골랐습니다."),
+        ], size=12, gap=5)
+        if CMPX:
+            tx, tc = CMPX["pangyo_x650"]["total"], CMPX["changwon_x650"]["total"]
+            stat(s, 8.05, 5.3, 4.7, 1.1, "같은 날 9–20시 출발 12건의 범위 (X650)", f"판교 {abs(tx[2]):.0f}–{abs(tx[0]):.0f} %  ·  창원 {abs(tc[2]):.0f}–{abs(tc[0]):.0f} % 절감",
+                 "여러 날 평균에서 경로·고도의 몫은 1–5 % · 이 화면은 그 몫이 큰 경우", dark=True, vsize=17)
+        source(s, "모의 결과 · 기존 = 최단 + 지면 기준 정속 10 m/s · 장애물 없음 · X650 전력 모델은 추정 (비행 로그 보정 전)")
+        notes(s, "두 번째 이유는 지형과 건물입니다. 창원의 이 경로는 직선 위에 고층 건물이 있습니다. 기존 경로는 그것을 넘으려고 40 m 가까이 "
+                 "올라갔다 내려옵니다. 제안 경로는 오르는 에너지와 돌아가는 에너지를 비교해서, 낮은 고도로 건물 옆을 돌아갑니다. "
+                 "세 번째는 출발 전 가부 판정입니다. 판교의 M100 예에서 기존 경로는 예비를 지키지 못해 임무가 안 되고, 제안 경로는 됩니다. "
+                 "다만 이 두 화면은 경로와 고도의 몫이 큰 경우를 보인 것입니다. 여러 날 평균에서는 절감의 대부분이 속도에서 나오고, "
+                 "경로와 고도의 몫은 1에서 5 %입니다. X650의 수치는 전력 모델이 추정이라 비행 로그로 보정한 뒤 다시 계산해야 합니다.")
+
+    s = D.content("기존 DJI 경로(웨이포인트) 기능과의 차이")
+    section(s, SEC[4])
+    rows = [["항목", "DJI 경로 기능", "본 연구의 프로그램"],
+            ["경로", "운용자가 경로점을 찍습니다.", "출발지·도착지에서 경로점을 계산합니다."],
+            ["속도", "운용자가 정한 값 (임무 전체 또는 경로점별)", "구간마다 바람에 맞게 계산, 비행 중 잰 바람으로 갱신"],
+            ["고도", "운용자가 지정. 지형 추종은 지면 간격 유지가 목적", "바람이 유리한 고도 선택, 건물·지형 이격 유지"],
+            ["바람 예보", "경로 생성에 쓰지 않음 [확인요망]", "3차원 예보 바람(GFS)을 시각별로 사용"],
+            ["배터리", "비행 중 남은 전력으로 복귀 판단 [확인요망]", "출발 전 도착 SOC와 신뢰수준 판정 (가능·주의·불가)"],
+            ["다른 항공기", "센서 감지 범위에서 반응 [확인요망]", "예측 궤적으로 시공간에서 미리 회피, 비행 중 재계획"],
+            ["결과물", "기체가 경로 파일(WPML) 실행", "ArduPilot 미션 + MAVLink 속도 명령 (WPML 내보내기 없음)"]]
+    table(s, X0, 1.2, W, rows, [1.5, 4.6, 6.05], row_h=0.5, head_size=13, body_size=12.5, first_col_center=False,
+          aligns=[PP_ALIGN.LEFT, PP_ALIGN.LEFT, PP_ALIGN.LEFT])
+    items(s, X0, 5.35, W, 1.5, [
+        ("순서가 다른 기능입니다.  ", "DJI는 정해진 경로를 정확히 따라 나는 기능이고, 본 연구는 그 경로·고도·속도를 계산하는 앞 단계입니다."),
+        ("비교의 기준  ", "'기존 경로'(최단 + 정속 10 m/s)가 운용자가 직선과 정속을 넣는 일반적인 사용을 본뜬 것입니다. DJI 기체로 비행해 비교한 값은 아닙니다."),
+        ("[확인요망]  ", "DJI 쪽 내용은 공개 개발 문서(WPML, Mobile SDK)를 읽고 정리한 것이며 기종·펌웨어에 따라 다를 수 있습니다."),
+    ], size=12.5, gap=4)
+    source(s, "DJI Cloud API 문서 (WPML overview, common element) · DJI Mobile SDK Waypoint 안내 · DJI SDK 포럼 (follow surface) · 2026-11 열람")
+    notes(s, "DJI의 경로 기능과 무엇이 다른지 묻는 경우가 많습니다. DJI의 웨이포인트 비행은 운용자가 정한 경로점과 속도를 정확히 따라 나는 "
+             "기능입니다. 본 연구의 프로그램은 그 앞 단계, 곧 어떤 경로와 고도와 속도로 날아야 배터리를 가장 덜 쓰는지를 계산합니다. "
+             "그래서 둘은 서로 대신하는 기능이 아닙니다. 계산 결과는 경로점과 구간 속도이므로 DJI 경로 파일에도 넣을 수 있는 형태이지만, "
+             "변환기는 만들지 않았습니다. 이번 실증 기체는 ArduPilot을 쓰는 X650입니다. 표에서 확인요망으로 적은 칸은 공식 문서에서 "
+             "근거를 찾지 못했거나 기종에 따라 다른 내용입니다.")
+
+    if E16:
+        eo = E16["errors"]["overall"]
+        cv = E16["coverage"]
+        hit = sum(cv[k]["raw"]["95|0"]["hit"] for k in cv); nn = sum(cv[k]["raw"]["95|0"]["n"] for k in cv)
+        mg = E16["margin"]["changwon_x650"]["ALL"]
+        s = D.content("예보 시점과 계획의 신뢰도 – 신뢰수준 출발 판정")
+        section(s, SEC[4])
+        picture(s, FIG / "F34_forecast_age.png", X0, 1.08, 7.4, 3.05)
+        picture(s, FIG / "F36_confidence.png", X0, 4.15, 7.4, 2.75)
+        head(s, 8.2, 1.15, "예보 시점 = 예보가 발표된 시각", w=4.5, size=14)
+        items(s, 8.2, 1.6, 4.55, 3.5, [
+            ("예보 시점이 멀수록 틀립니다.  ", f"바람 오차 σ: 6시간 전 {eo['6']['sigma']:.2f}, 30시간 전 {eo['30']['sigma']:.2f}, 78시간 전 {eo['78']['sigma']:.2f} m/s"),
+            ("과거에 잰 바람을 그대로 쓰면  ", f"6시간 전 값으로 {E16['errors']['persist']['proxy']['6']['sigma']:.1f} m/s. 예보의 8배입니다."),
+            ("신뢰수준 판정  ", "바람 편차 200개로 SOC 소모 분포를 구해 가능·주의·불가를 냅니다."),
+            ("검증  ", f"95 % 상한 안에 실제 값이 든 것이 {hit}/{nn}건 ({100 * hit / nn:.1f} %)"),
+            ("계절  ", "알고리즘을 계절별로 바꿀 근거는 없었습니다. 여유와 출발 시각만 달라집니다."),
+        ], size=12, gap=5)
+        stat(s, 8.2, 5.3, 4.55, 1.1, "95 % 신뢰수준에 필요한 SOC 여유 (명목값 대비)", f"6시간 전 {mg['6']['fixed']:.1f} %  ·  30시간 전 {mg['30']['fixed']:.0f} %",
+             "가장 새 예보로 다시 계획하는 것이 가장 쉬운 대책", dark=True, vsize=18)
+        source(s, "모의 결과 · 12개월 36일, 창원 X650·판교 M100 각 432건 · 평가용 바람도 예보(관측 아님) · 임무 단위 검증은 6–9시간 전 예보까지")
+        notes(s, "계획에 쓰는 바람은 언제나 과거에 발표된 예보입니다. 예보가 발표된 시각을 예보 시점이라고 부르겠습니다. 예보 시점이 멀수록 "
+                 f"실제와 더 다릅니다. 6시간 전 예보는 성분별 {eo['6']['sigma']:.2f} m/s, 30시간 전 예보는 {eo['30']['sigma']:.2f} m/s 틀렸습니다. "
+                 "이 크기를 써서 계획 경로의 SOC 소모 분포를 구하고, 신뢰수준 95 %로 출발 가능, 주의, 불가를 판정합니다. "
+                 f"95 % 상한 안에 실제 값이 든 비율은 {100 * hit / nn:.1f} %로 목표와 거의 같았습니다. 계절별로 알고리즘을 바꿀 근거는 "
+                 "찾지 못했습니다. 경로 모양의 이득은 계절이 아니라 그날의 바람 세기에 달려 있고, 안전장치가 그날 예보에서 고르기 때문입니다. "
+                 "한계는 평가용 바람도 예보라는 점입니다. 관측 바람과의 차이는 더 클 수 있습니다.")
+
+    if SITL and SSPD:
+        s = D.content(f"실증 준비 – {SITL['firmware']} SITL에서 확인한 것")
+        section(s, SEC[4])
+        ck, rn = SITL["checks"], SITL["runner"]
+        rows = [["확인한 것", "결과"],
+                ["명령 방식 미션 올리기·되읽기", f"수락, {ck['mission_count_sent']}개 = {ck['mission_count_readback']}개"],
+                ["AUTO에서 끝까지 비행", "이륙 → 순항 → 착륙 → 시동 꺼짐"],
+                ["비행 중 속도 명령", f"{rn['cmd_sent']}회 보냄, {rn['cmd_acked']}회 수락"],
+                ["위치 추종", f"계획 경로와의 거리 중앙값 {SITL['xtrack']['median']:.1f} m, 최대 {SITL['xtrack']['max']:.0f} m"],
+                ["바람 수신 (WIND)", f"추정 {SITL['wind']['est_speed']:.1f} m/s · {SITL['wind']['est_dir']:.0f}° (모의 {SITL['wind']['sim'][0]:.0f} m/s · {SITL['wind']['sim'][1]:.0f}°)"],
+                ["펌웨어 로그 읽기", f"{SITL['dataflash']['seconds']}초 분량, 바람 추정값 포함"]]
+        table(s, X0, 1.2, 6.3, rows, [2.6, 3.7], row_h=0.5, head_size=12.5, body_size=12, first_col_center=False, aligns=[PP_ALIGN.LEFT, PP_ALIGN.LEFT])
+        st = [q for q in SSPD["A_nowind"]["steps"] if q["cmd"] in (5, 8, 12, 15, 18)][:5]
+        rows = [["보낸 속도 [m/s]"] + [f"{q['cmd']:g}" for q in st], ["실제 대지속도"] + [f"{q['gs']:.2f}" for q in st]]
+        table(s, X0, 4.95, 6.3, rows, [2.0] + [0.86] * len(st), row_h=0.45, head_size=12, body_size=12, first_col_center=False,
+              aligns=[PP_ALIGN.LEFT] + [PP_ALIGN.CENTER] * len(st))
+        textbox(s, X0, 5.95, 6.3, 0.7, [[("기체 한계(SITL 기본 기체 약 10 m/s)를 넘는 명령은 수락되지만 더 느리게 납니다.", {"size": 12, "bold": False, "color": INK})]])
+        head(s, 7.2, 1.15, "SITL에서 알게 된 것", w=5.5, size=14)
+        items(s, 7.2, 1.6, 5.55, 3.6, [
+            ("속도 명령의 우선순위  ", "미션 안의 속도 항목과 외부 명령은 같은 값을 덮어씁니다. 속도 갱신 비행은 속도 항목이 없는 미션으로 올립니다."),
+            ("최대 대기속도  ", "X650이 실제로 낼 수 있는 값을 비행으로 재서 계획기에 넣어야 합니다 (가정 15 m/s)."),
+            ("바람 추정  ", f"풍향은 맞지만 풍속은 항력 계수 설정에 따라 {SSPD['C_bcoef10']['wind_est']['speed']:.1f}–{SSPD['A_headwind6']['wind_est']['speed']:.1f} m/s로 달라졌습니다 (실제 6 m/s). 지상 풍속계로 맞춰야 합니다."),
+            ("꺾임 감속  ", "30° 꺾임은 경로점당 약 0.1초, 90°는 약 1.8초 더 걸립니다."),
+        ], size=12, gap=6)
+        stat(s, 7.2, 5.3, 5.55, 1.1, "도구", "dpo-fly · dpo-calibrate", "기체 연결 실행기 (시동·이륙은 하지 않음) · 비행 로그로 전력 모델 보정", dark=True, vsize=20)
+        source(s, "SITL의 기체는 ArduPilot 기본 쿼드콥터이며 X650이 아님 · 통신 절차와 펌웨어 동작만 확인 · 실기체 비행은 미검증")
+        notes(s, "실증 기체는 ArduPilot을 쓰는 Holybro X650입니다. 실제 펌웨어를 컴퓨터에서 실행하는 SITL로 절차를 확인했습니다. 미션을 올리고 "
+                 "되읽었고, 자동 비행을 끝까지 했고, 비행 중 속도 명령이 모두 수락됐습니다. 이 과정에서 실기체 전에 알아야 할 것 네 가지를 "
+                 "찾았습니다. 미션 안의 속도 항목과 외부 속도 명령은 같은 값을 덮어쓰므로 속도 갱신 비행은 속도 항목이 없는 미션으로 올려야 "
+                 "합니다. 기체 한계를 넘는 속도 명령은 거부되지 않고 수락되지만 더 느리게 납니다. 바람 추정의 풍속은 항력 계수 설정에 크게 "
+                 "좌우됩니다. 꺾이는 경로점에서는 감속합니다. SITL의 기체는 X650이 아니므로 속도와 전력의 크기는 실기체에서 다시 봐야 합니다.")
+
     # ================================================================= 06 Conclusion
     s = D.content("결론")
     section(s, SEC[5])
@@ -861,15 +1011,22 @@ def build(template, out):
         con.append(("대상 기체와 실증 지역으로 옮김",
                     f"X650 추정 모델로 창원 창이대로 71 주변 {c1['L'] / 1000:.1f} km 순회를 계획했고, 가상 장애물 3종을 피해 SOC "
                     f"{c1['soc_used']:.1f} %p를 썼습니다 (모의 결과)."))
-    step = 1.13 if len(con) <= 5 else 0.95
+    if E16 and SITL:
+        _cv = E16["coverage"]
+        _hit = sum(_cv[k]["raw"]["95|0"]["hit"] for k in _cv); _n = sum(_cv[k]["raw"]["95|0"]["n"] for k in _cv)
+        con.append(("신뢰수준 출발 판정과 실증 준비",
+                    f"예보 시점별 바람 오차로 SOC 상한을 내고(95 % 상한의 덮임률 {100 * _hit / _n:.1f} %), {SITL['firmware']} SITL에서 미션·추종·"
+                    "속도 명령을 확인했습니다. 실기체 비행은 남아 있습니다."))
+    step = 1.13 if len(con) <= 5 else (0.95 if len(con) == 6 else 0.81)
     for i, (t, d) in enumerate(con):
         y = 1.2 + i * step
         sp = box(s, X0, y, 0.7, min(0.95, step - 0.14), fill=NAVY, shadow=False)
         box_text(sp, [[(str(i + 1), {"size": 20, "bold": True, "color": WHITE})]], align=PP_ALIGN.CENTER)
         textbox(s, X0 + 0.9, y - (0.0 if step > 1 else 0.04), 11.2, 0.9,
-                [[(t, {"size": 16 if step > 1 else 15, "bold": True, "color": NAVY})],
-                 [(d, {"size": 14 if step > 1 else 13, "bold": False, "color": INK})]], space_after=1)
-    notes(s, "여섯 가지로 정리합니다. 첫째, SOC와 바람은 임의로 고른 것이 아니라 DJI 드론이 내놓는 조건 전체를 검토해 고른 "
+                [[(t, {"size": 16 if step > 1 else (15 if step > 0.9 else 14), "bold": True, "color": NAVY})],
+                 [(d, {"size": 14 if step > 1 else (13 if step > 0.9 else 12), "bold": False, "color": INK})]], space_after=1)
+    notes(s, ("일곱 가지로 정리합니다. 일곱째는 이번에 더한 것으로, 예보가 틀릴 것을 감안한 신뢰수준 출발 판정과 ArduPilot SITL 검증입니다. "
+              if len(con) == 7 else "") + "앞의 여섯 가지는 다음과 같습니다. 첫째, SOC와 바람은 임의로 고른 것이 아니라 DJI 드론이 내놓는 조건 전체를 검토해 고른 "
              "것입니다. 둘째, 바람 속 에너지 최적화에서는 속도 결정과 에너지 비교 지름길이 결정적입니다. 셋째, 팽창 반경이 구간별 "
              "선형이면 위험구간을 해석적으로 구할 수 있습니다. 넷째, 실측 오차는 꼬리와 성장 모양이 가우시안과 달랐고, 이 부정적 "
              "결과도 기여로 봅니다. 다섯째, 실시간 운용 플랫폼으로 구현해 검증했습니다. 여섯째, 대상 기체 X650과 창원 지도로 옮겨 "
@@ -880,16 +1037,16 @@ def build(template, out):
     section(s, SEC[5])
     head(s, X0, 1.2, "한계")
     items(s, X0, 1.7, 5.9, 3.6, [
-        "두 지역(판교·창원)·10월 7일의 모의 결과이며, 비행 거리가 1.5–2.8 km로 짧습니다.",
+        "두 지역(판교·창원)의 모의 결과입니다 (10월 7일 + 12개월 36일). 비행 거리가 1.5–3 km로 짧습니다.",
         "GFS 0.25°는 성글고, '실제' 바람은 관측이 아닌 갱신 예보입니다.",
         "실측 비행 자료에는 풍향이 없어 방향 효과를 직접 검증하지 못했습니다.",
         "DJI 풍속·풍향 키의 지원 기체와 정확도를 확인하지 못했습니다.",
         "ADS-B 표본 18대는 시연용 샘플입니다(무작위 아님).",
-        "X650 전력 모델은 추정이며, 2D 충돌 판정에 실비행 검증이 없습니다.",
+        "X650 전력 모델은 추정입니다. SITL까지 확인했고 실비행 검증은 없습니다.",
     ], size=14, gap=7)
     head(s, 6.85, 1.2, "향후 연구")
     items(s, 6.85, 1.7, 5.9, 3.6, [
-        "기체의 풍속·풍향 값으로 예보 바람장을 비행 중 보정",
+        "DJI 경로 파일(WPML) 내보내기와 DJI 기체에서의 속도 갱신 가능 여부 확인",
         "소규모 실비행으로 계획 대비 실측 SOC와 풍향 효과 검증",
         "드론 원격식별(Remote ID)·OpenSky 이력으로 항적 표본 확대",
         "감시 주기·탐지 시각·반응 하한을 함께 설계해 궤적 수준 위험 보정",
@@ -900,9 +1057,9 @@ def build(template, out):
     box_text(sp, [[("가장 먼저 할 일 – 소규모 실비행", {"size": 15, "bold": True, "color": ORANGE})],
                   [("X650으로 호버·정속 왕복 비행을 하며 전압·전류, 기체 추정 바람, 지상 풍속계를 함께 기록합니다. 전력 모델 보정, 바람 "
                     "추정 정확도, 풍향 효과, 계획 대비 실측 SOC를 한 번에 확인할 수 있습니다.", {"size": 14, "bold": False, "color": WHITE})]])
-    notes(s, "한계는 먼저 밝혀 두는 것이 좋습니다. 결과는 두 지역, 10월의 일곱 날짜, 두 기체의 모의 결과입니다. 바람은 운영 예보라 해상도가 낮고, "
-             "실측 비행 자료에는 풍향이 없습니다. DJI 풍속·풍향 키는 SDK 문서에서 존재만 확인했습니다. 향후에는 기체가 주는 바람 "
-             "값으로 예보를 보정하고, 실비행으로 풍향 효과와 SOC를 검증하는 것이 가장 먼저 할 일입니다.")
+    notes(s, "한계는 먼저 밝혀 두는 것이 좋습니다. 결과는 두 지역, 10월의 일곱 날짜와 열두 달에서 뽑은 서른여섯 날, 두 기체의 모의 결과입니다. 바람은 운영 예보라 해상도가 낮고, "
+             "실측 비행 자료에는 풍향이 없습니다. DJI 풍속·풍향 키는 SDK 문서에서 존재만 확인했습니다. 기체가 주는 바람 값으로 "
+             "속도를 다시 정하는 기능은 만들었고 SITL까지 확인했습니다. 실비행으로 전력 모델과 바람 추정, SOC를 검증하는 것이 가장 먼저 할 일입니다.")
 
     s = D.content("참고문헌")
     section(s, "References")
@@ -924,7 +1081,8 @@ def build(template, out):
              "[19] Stolaroff et al. Energy use of drones for package delivery. Nat. Commun. 2018.",
              "[20] Thibbotuwawa et al. UAV mission planning resistant to weather uncertainty. Sensors 2020.",
              "[21] DJI. Onboard SDK, Payload SDK, Mobile SDK V5 (GitHub: dji-sdk), 2026-11 열람.",
-             "[22] ArduPilot (ArduCopter), MAVLink common.xml·ardupilotmega.xml (GitHub), 2026-11 열람."]
+             "[22] ArduPilot (ArduCopter 4.7.2), MAVLink common.xml·ardupilotmega.xml (GitHub), 2026-11 열람.",
+             "[23] DJI. Cloud API 문서 – WPML (overview, common element), 2026-11 열람."]
     textbox(s, X0, 1.2, 6.0, 5.6, [[(r, {"size": 12, "bold": False, "color": INK})] for r in left], space_after=7)
     textbox(s, 6.75, 1.2, 6.0, 5.6, [[(r, {"size": 12, "bold": False, "color": INK})] for r in right], space_after=7)
     source(s, "데이터: Copernicus GLO-30 DSM · Overture Maps · NOAA GFS · CMU M100 비행 · OpenSky ADS-B (traffic 2.13)")
