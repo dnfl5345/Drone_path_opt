@@ -33,7 +33,7 @@ def test_sigma_model_interpolation_and_season():
     md = RL.WindErrorModel([6, 30, 54, 78], [1.0, 1.5, 1.4, 2.4], by_season={"DJF": [1.2, 2.0, 2.5, 3.0]}, scale=1.0)
     xs = [0, 3, 6, 12, 30, 40, 54, 78, 100, 200]
     ys = [md.sigma(x) for x in xs]
-    assert all(b >= a - 1e-12 for a, b in zip(ys, ys[1:]))            # 나이가 들수록 줄지 않는다 (역전된 표본값은 눌러 둔다)
+    assert all(b >= a - 1e-12 for a, b in zip(ys, ys[1:]))            # 경과 시간이 길수록 줄지 않는다 (역전된 표본값은 눌러 둔다)
     assert md.sigma(0) == md.sigma(6) == 1.0 and md.sigma(18) == pytest.approx(1.25)
     assert md.sigma(54) == pytest.approx(1.5) and md.sigma(100) > md.sigma(78)
     assert md.sigma(30, season="DJF") == 2.0 and md.sigma(30, month=1) == 2.0 and md.sigma(30, season="JJA") == 1.5

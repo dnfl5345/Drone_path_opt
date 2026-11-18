@@ -129,7 +129,7 @@ def main(argv=None):
         if conf is not None:
             word = {"go": "가능", "caution": "주의", "no-go": "불가"}[conf["decision"]]
             print(f"  신뢰도 판정: {word} – {conf['reason']}")
-            print(f"    예보의 나이 {conf['forecast_age_h']:g} h → 바람 오차 σ {conf['sigma']:.2f} m/s (성분별), "
+            print(f"    예보 시점 {conf['forecast_age_h']:g} 시간 전 → 바람 오차 σ {conf['sigma']:.2f} m/s (성분별), "
                   + ("여유 계산 불가" if conf["margin_pp"] is None else f"신뢰수준에 필요한 여유 {conf['margin_pp']:.1f} %p"))
             sn = conf["season"]
             print(f"    {conf['month']}월 권고: {sn.get('note', '')}")

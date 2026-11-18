@@ -31,7 +31,7 @@
 - **정한 것**
   - 실증 기체는 Holybro X650 (Pixhawk 6X, ArduPilot). 사양서에 DJI 부품은 없다.
   - 비행 중 속도 갱신을 쓰는 비행은 '명령 방식' 미션(속도 항목은 첫 구간만)으로 올린다. ArduCopter 는 미션의 속도 항목과 외부 명령이 같은 값을 덮어쓴다 (4.7.2 소스·SITL 확인).
-  - 출발 판정은 신뢰수준 95 % 를 기본으로 한다. 예보의 나이를 `--forecast-age` 로 넣는다.
+  - 출발 판정은 신뢰수준 95 % 를 기본으로 한다. 예보 시점(발표 후 경과 시간)을 `--forecast-age` 로 넣는다.
   - 계절별로 알고리즘을 바꾸지 않는다. 설정은 하나, 여유와 출발 시각만 계절에 맞춘다 (E16).
   - `dpo-fly` 는 시동·이륙·모드 전환을 하지 않는다. 예보와 8 m/s 넘게 다른 바람 측정은 버린다.
 - **만든 파일**: `src/dpo/reliability.py`, `flight.py`, `sim_vehicle.py`, `logcal.py`, `scripts/exp_reliability.py`, `fetch_gfs_clim.py`, `sitl_check.py`, `sitl_speed_test.py`, `tests/test_reliability.py`, `test_field.py`, `docs/reliability.md`, `field_demo_x650.md`, `results/E16_*`, `wind_error_model.json`, `seasonal_table.json`, `sitl_check.json`, `sitl_speed.json`, 그림 F34–F36

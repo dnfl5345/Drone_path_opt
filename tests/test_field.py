@@ -149,7 +149,7 @@ def test_confidence_go_no_go_grows_with_forecast_age():
     app.plan(dict(obstacles=[], dep_hour=15, payload=1.0, drone="x650", round_trip=True))
     c6, c30, c78 = (app.confidence(dict(level=0.95, forecast_age_h=h)) for h in (6, 30, 78))
     assert c6["decision"] == "go" and c6["sigma"] < c30["sigma"] < c78["sigma"]
-    assert 0 <= c6["margin_pp"] < c30["margin_pp"]                    # 예보가 오래될수록 필요한 여유가 크다
+    assert 0 <= c6["margin_pp"] < c30["margin_pp"]                    # 예보 시점이 멀수록 필요한 여유가 크다
     # 78시간 전 예보: 강풍일이라 비행할 수 없는 바람이 신뢰구간에 들어간다 → 여유를 숫자로 낼 수 없거나 더 크다
     assert c78["margin_pp"] is None or c78["margin_pp"] > c30["margin_pp"]
     assert c78["soc_end_q"] <= c30["soc_end_q"] <= c6["soc_end_q"]

@@ -740,7 +740,7 @@ class App:
             raise ValueError("신뢰수준은 0.5, 0.9, 0.95, 0.99 중 하나")
         age = float(req.get("forecast_age_h", 6.0))
         if not (0 <= age <= 120):
-            raise ValueError("예보의 나이는 0~120 시간")
+            raise ValueError("예보 시점은 0~120 시간 전이어야 합니다")
         with self.lock:
             ss = getattr(self, "session", None)
             if ss is None:

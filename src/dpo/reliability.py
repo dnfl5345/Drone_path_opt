@@ -1,8 +1,8 @@
 """신뢰도 평가 – 과거 시점의 자료(예보)로 계획한 경로가 실제 비행에서도 성립할 확률을 따진다.
 
 배경 (docs/reliability.md, 실험 E16)
-  계획에 쓰는 바람은 언제나 과거에 발표된 예보다. 예보가 오래될수록 실제 바람과 더 다르다.
-  이 모듈은 그 차이를 '영역 전체에 같은 바람 편차 (du, dv)' 로 보고, 편차의 크기 σ 를 자료의 나이(예보 선행 시간)와
+  계획에 쓰는 바람은 언제나 과거에 발표된 예보다. 예보 시점이 멀수록(발표 후 시간이 지날수록) 실제 바람과 더 다르다.
+  이 모듈은 그 차이를 '영역 전체에 같은 바람 편차 (du, dv)' 로 보고, 편차의 크기 σ 를 자료 시점(예보 선행 시간)와
   계절의 함수로 둔다. σ 는 GFS 표본(12개월 × 3일)에서 잰 값이다 (results/wind_error_model.json).
 
 구성
@@ -13,7 +13,7 @@
   seasonal_recommendation 월·시각별 권고 (설정, SOC 여유) – results/seasonal_table.json 에서 읽는다
 
 한계: σ 는 관측이 아니라 예보끼리의 차이에서 잰 값이고, 편차가 영역 전체에 같다고 가정한다 (4–6 km 지도는
-GFS 격자 한 칸보다 작다). 지형·건물 자료의 나이는 다루지 않는다.
+GFS 격자 한 칸보다 작다). 지형·건물 자료가 만들어진 시점은 다루지 않는다.
 """
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ def season_of(month: int) -> str:
 
 
 class WindErrorModel:
-    """예보 바람 오차의 성분별 표준편차 σ [m/s] = f(자료의 나이 [h], 계절).
+    """예보 바람 오차의 성분별 표준편차 σ [m/s] = f(자료 시점 (경과 시간) [h], 계절).
 
     leads_h, sigma : 잰 선행 시간과 그때의 σ (전체)
     by_season      : {"DJF": [σ…], …} 같은 선행 시간에서의 계절별 σ (없으면 전체 값을 쓴다)
@@ -76,8 +76,8 @@ class WindErrorModel:
         return dict(leads_h=self.leads_h, sigma=self.sigma_all, by_season=self.by_season, scale=self.scale, source=self.source)
 
     def sigma(self, lead_h, season=None, month=None, scaled=True):
-        """자료의 나이 lead_h [h] 에서의 성분별 σ [m/s]. 잰 범위 안은 선형 보간, 밖은 마지막 기울기로 늘린다.
-        나이가 들수록 줄어들지 않게 한다 (표본이 적어 생기는 역전을 막는다)."""
+        """자료 시점(발표 후 경과 시간) lead_h [h] 에서의 성분별 σ [m/s]. 잰 범위 안은 선형 보간, 밖은 마지막 기울기로 늘린다.
+        경과 시간이 길수록 줄어들지 않게 한다 (표본이 적어 생기는 역전을 막는다)."""
         if month is not None and season is None:
             season = season_of(month)
         ys = self.by_season.get(season, self.sigma_all) if season else self.sigma_all

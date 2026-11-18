@@ -1,10 +1,10 @@
-"""E16: 과거 시점 자료로 계획한 경로의 신뢰도 – 자료의 나이·계절에 따른 예보 오차, 신뢰수준, 계절 권고
+"""E16: 과거 시점 자료로 계획한 경로의 신뢰도 – 자료 시점·계절에 따른 예보 오차, 신뢰수준, 계절 권고
 
 우리가 받는 바람은 언제나 과거에 발표된 예보다. 이 실험은 GFS 표본(2025-11 … 2026-10, 매달 5·15·25일 = 36일,
 scripts/fetch_gfs_clim.py)으로 다음을 잰다. 모두 예보끼리의 비교이고 관측은 쓰지 않았다.
 
   A. 지면 위 100 m 바람의 월별·시각별 분포 (한 해의 36일 표본 – 여러 해 기후값이 아니다)
-  B. 예보 오차와 자료의 나이: 선행 6·9·12·30·54·78 시간, 전체와 계절별. '몇 시간 전 바람을 그대로 쓸 때'의 오차도.
+  B. 예보 오차와 자료 시점: 선행 6·9·12·30·54·78 시간, 전체와 계절별. '몇 시간 전 바람을 그대로 쓸 때'의 오차도.
   C. 임무 수준의 계절성: 날짜 × 출발 시각(9·12·15·18시) × 경로 3개. 기존(최단 + 정속 10 m/s), 최단 + 속도 최적화,
      제안(에너지 탐색 + 안전장치). 15·18시는 06Z 예보에서 평가하고, 9·12시는 계획에 쓴 예보에서 평가한다.
   D. 신뢰수준 검증: mission_confidence 가 낸 90·95 % 상한 아래로 실제(06Z) SOC 소모가 들어온 비율(덮임률).
@@ -52,7 +52,7 @@ def days_available(site):
     return [d for d in days if (C.RAW / gfs_name(site, d, "00")).exists() and (C.RAW / gfs_name(site, d, "06")).exists()]
 
 
-# ------------------------------------------------------------------ B. 예보 오차와 자료의 나이 (GFS 원격자)
+# ------------------------------------------------------------------ B. 예보 오차와 자료 시점 (GFS 원격자)
 def _center(a, lat, lon, latc, lonc):
     """GFS 격자값을 지역 중심으로 쌍선형 보간. a: (..., nlat, nlon), lat 내림차순."""
     fi = np.interp(latc, lat[::-1], np.arange(len(lat))[::-1])
@@ -402,7 +402,7 @@ def analyze():
     md["scale"] = scale
     mp.write_text(json.dumps(md, ensure_ascii=False, indent=1))
     model = WindErrorModel(md["leads_h"], md["sigma"], md["by_season"], scale, md["source"])
-    # 자료 나이별 SOC 여유 (95 % 상한 / 명목 − 1), 15시 출발 경우
+    # 자료 시점별 SOC 여유 (95 % 상한 / 명목 − 1), 15시 출발 경우
     for name, rows in sets.items():
         ok = [r for r in rows if r["truth"] and r["hour"] == 15 and r.get("P0s") and r.get("conf")]
         M = {}
@@ -497,7 +497,7 @@ def report(R, md):
         if name in R["uniform"]:
             print("   오차장의 고른 정도:", R["uniform"][name])
         print("   지도 격자에서 잰 σ(6 h, 9 h):", R["site_sigma"].get(name), "| 신뢰도 기준 선택:", R["robust"].get(name))
-        print("   나이별 여유(전체):", {k: (round(v["fixed"], 2) if v["fixed"] is not None else None, round(v["adapt"], 2) if v["adapt"] is not None else None)
+        print("   시점별 여유(전체):", {k: (round(v["fixed"], 2) if v["fixed"] is not None else None, round(v["adapt"], 2) if v["adapt"] is not None else None)
                                   for k, v in R["margin"][name].get("ALL", {}).items()})
 
 
@@ -516,7 +516,7 @@ def figures(R, md, sets, model):
     SC = {"DJF": "#1B6CA8", "MAM": "#2CA58D", "JJA": "#E46C0A", "SON": "#7B3FA0"}
     SK = {"DJF": "겨울", "MAM": "봄", "JJA": "여름", "SON": "가을"}
     E = R["errors"]
-    # ---- F34 예보 오차와 자료의 나이
+    # ---- F34 예보 오차와 자료 시점
     fig, axs = plt.subplots(1, 2, figsize=(13.2, 4.6), gridspec_kw=dict(wspace=0.24))
     ax = axs[0]
     leads = [ld for ld in E["leads_h"] if E["overall"][str(int(ld))]]
@@ -524,16 +524,16 @@ def figures(R, md, sets, model):
         y = [E["by_season"][k][str(int(ld))]["sigma"] if E["by_season"][k][str(int(ld))] else np.nan for ld in leads]
         ax.plot(leads, y, "o-", color=SC[k], lw=1.5, ms=4, label=SK[k])
     ax.plot(leads, [E["overall"][str(int(ld))]["sigma"] for ld in leads], "s-", color="#16202A", lw=2.4, ms=6, label="전체")
-    ax.set_xticks(leads); ax.set_xlabel("예보의 나이 (발표 뒤 지난 시간) [h]"); ax.set_ylabel("바람 오차 σ (성분별) [m/s]")
-    ax.set_ylim(bottom=0); ax.set_title("(a) 예보가 오래될수록 실제와 더 다르다")
+    ax.set_xticks(leads); ax.set_xlabel("예보 시점 (발표 후 경과 시간) [h]"); ax.set_ylabel("바람 오차 σ (성분별) [m/s]")
+    ax.set_ylim(bottom=0); ax.set_title("(a) 예보 시점이 멀수록 실제와 더 다르다")
     ax.legend(frameon=False, fontsize=9, ncol=5, loc="upper left")
     ax = axs[1]
     n = list(range(1, 13))
     ax.plot(n, [E["persist"]["proxy"][str(k)]["sigma"] for k in n], "o-", color="#9E9E9E", lw=2, label="몇 시간 전 바람을 그대로 쓸 때 (예보 계열로 대용)")
     ax.plot([6], [E["persist"]["analysis_6h"]["sigma"]], "D", color="#D7263D", ms=9, label="6시간 전 분석값을 그대로 쓸 때")
     fl = [ld for ld in leads if ld <= 12]
-    ax.plot(fl, [E["overall"][str(int(ld))]["sigma"] for ld in fl], "s-", color="#16202A", lw=2.4, ms=6, label="같은 나이의 예보를 쓸 때")
-    ax.set_xlabel("자료의 나이 [h]"); ax.set_ylabel("바람 오차 σ (성분별) [m/s]"); ax.set_ylim(bottom=0)
+    ax.plot(fl, [E["overall"][str(int(ld))]["sigma"] for ld in fl], "s-", color="#16202A", lw=2.4, ms=6, label="같은 시점의 예보를 쓸 때")
+    ax.set_xlabel("자료 시점 (경과 시간) [h]"); ax.set_ylabel("바람 오차 σ (성분별) [m/s]"); ax.set_ylim(bottom=0)
     ax.set_title("(b) 과거 바람을 그대로 쓰는 것과 예보를 쓰는 것")
     ax.legend(frameon=False, fontsize=9, loc="center right", bbox_to_anchor=(1.0, 0.42))
     fig.savefig(C.FIG / "F34_forecast_age.png"); plt.close(fig)
@@ -641,7 +641,7 @@ def figures(R, md, sets, model):
     if "ALL" in M:
         ax.plot(lds, [M["ALL"][str(v)]["fixed"] for v in lds], "s-", color="#16202A", lw=2.4, ms=6, label="전체 (명령 그대로)")
         ax.plot(lds, [M["ALL"][str(v)]["adapt"] for v in lds], "s--", color="#16202A", lw=1.6, ms=5, mfc="white", label="전체 (속도 갱신)")
-    ax.set_xticks(lds); ax.set_xlabel("예보의 나이 [h]"); ax.set_ylabel("95 % 신뢰수준에 필요한 SOC 여유 [명목값의 %]"); ax.set_ylim(bottom=0)
+    ax.set_xticks(lds); ax.set_xlabel("예보 시점 (발표 후 경과 시간) [h]"); ax.set_ylabel("95 % 신뢰수준에 필요한 SOC 여유 [명목값의 %]"); ax.set_ylim(bottom=0)
     ax.set_title("(c) 자료가 오래될수록 필요한 여유", fontsize=10.5); ax.legend(frameon=False, fontsize=8.5, loc="upper left", ncol=2)
     fig.savefig(C.FIG / "F36_confidence.png"); plt.close(fig)
     R["example"] = dict(set=ex_name, day=r0["day"], hour=r0["hour"], wind=r0["wind"], sigma=sg30, nominal=c0["nominal"]["soc_used"], q95_fixed=c0["soc_used_q"][95],
