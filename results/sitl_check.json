@@ -1,0 +1,115 @@
+{
+ "site": "changwon",
+ "drone": "x650",
+ "firmware": "ArduCopter 4.7.2",
+ "checks": {
+  "mission_accepted": true,
+  "mission_count_readback": 13,
+  "mission_count_sent": 13,
+  "armed_in_auto": true,
+  "flight_completed": true,
+  "speed_cmds_all_accepted": true,
+  "speed_tracking_median_abs_err": 7.720000000000001,
+  "wind_received": true,
+  "dataflash_readable": true
+ },
+ "mission": {
+  "n_items": 13,
+  "n_plan_nodes": 14,
+  "n_waypoints": 9,
+  "n_speed_changes": 1,
+  "n_loiter": 0,
+  "home": {
+   "lat": 35.23933947986713,
+   "lon": 128.64671412896388,
+   "alt_msl": 7.110834844151814
+  },
+  "alt_rel_min": 32.9,
+  "alt_rel_max": 32.9,
+  "speed_min": 9.5,
+  "speed_max": 15.0,
+  "distance_m": 1051.7745710487068,
+  "duration_s": 112.78770410923971,
+  "soc_end": 92.52946546437131,
+  "speed_mode": "command",
+  "params": {
+   "WP_SPD_UP": 2.5,
+   "WP_SPD_DN": 1.5,
+   "note": "계획기는 이 상승·하강률을 가정했다. 4.6 이하의 이름: WPNAV_SPEED_UP/DN [cm/s]"
+  }
+ },
+ "params_set": {
+  "AUTO_OPTIONS": true,
+  "SIM_WIND_SPD": true,
+  "SIM_WIND_DIR": true,
+  "SIM_BATT_CAP_AH": true,
+  "EK3_DRAG_BCOEF_X": true,
+  "EK3_DRAG_BCOEF_Y": true,
+  "WP_SPD": true
+ },
+ "params_read": {
+  "WP_SPD": 10.0,
+  "WP_SPD_UP": 2.5,
+  "WP_SPD_DN": 1.5,
+  "RTL_ALT_M": 15.0,
+  "EK3_DRAG_BCOEF_X": 63.70000076293945
+ },
+ "runner": {
+  "phase": "완료",
+  "updates": 1,
+  "checks": 6,
+  "cmd_sent": 2,
+  "cmd_acked": 2,
+  "cmd_failed": 0,
+  "max_xtrack": 72.34237819703924,
+  "paused": 29,
+  "bias": 6.7457539591442774,
+  "soc_meas_last": 55.0,
+  "soc_pred_last": 92.25
+ },
+ "events": [
+  "AUTO 확인 – 추종 시작",
+  "순항 진입",
+  "속도 명령 9.5 m/s",
+  "속도 갱신: 바람 편차 14.6 m/s, 남은 구간 예상 에너지 −11.4%",
+  "속도 명령 15.0 m/s",
+  "경로 이탈 72 m – 속도 갱신 중지",
+  "착륙·시동 꺼짐 – 종료"
+ ],
+ "speed_tracking": [
+  {
+   "cmd": 9.5,
+   "gs": 0.04
+  },
+  {
+   "cmd": 15.0,
+   "gs": 9.02
+  }
+ ],
+ "wind": {
+  "sim": [
+   6.0,
+   250.0
+  ],
+  "est_speed": 2.279236046317149,
+  "est_dir": 102.26013578798346,
+  "vec_err": 8.020205406960754,
+  "n": 668
+ },
+ "xtrack": {
+  "median": 4.5,
+  "p95": 30.134999999999955,
+  "max": 72.3
+ },
+ "dataflash": {
+  "file": "00000001.BIN",
+  "seconds": 186,
+  "has_wind": true,
+  "steady_points": 20,
+  "va_range": [
+   9.038910692933854,
+   16.218532750938987
+  ]
+ },
+ "workdir": "/tmp/sitl_bajmu7gr"
+}

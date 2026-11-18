@@ -87,7 +87,7 @@ def test_flight_runner_follows_simulated_vehicle():
     try:
         assert link.connect() and link.upload_mission(M["items"])
         assert len(veh.mission) == len(M["items"])
-        run = FlightRunner(app.site, d, link, M["plan"], period=30.0)
+        run = FlightRunner(app.site, d, link, M["plan"], period=30.0, max_wind_dev=15.0)    # 이 시험의 바람 차이는 약 10 m/s
         run.time_rate = 10.0
         assert run.step() == "대기" or run.phase == "대기"          # 조종사가 AUTO 로 바꾸기 전에는 아무것도 보내지 않는다
         time.sleep(0.3); run.step()
@@ -102,6 +102,40 @@ def test_flight_runner_follows_simulated_vehicle():
         assert sum(1 for *_, src in veh.speed_log if src == "mission") == 1               # 미션 안의 속도 항목은 첫 구간 하나
         assert "soc_meas_last" in s and abs(s["soc_meas_last"] - s["soc_pred_last"]) < 15.0
         assert any(e["kind"] == "update" for e in s["events"])
+    finally:
+        link.close()
+        veh.stop()
+
+
+@needs_data
+def test_flight_runner_rejects_bad_wind_and_caps_unreachable_speed():
+    """SITL 에서 본 두 가지: EKF 바람 추정이 크게 틀릴 수 있고, 낼 수 없는 속도 명령도 수락된다."""
+    pytest.importorskip("pymavlink")
+    from dpo.flight import FlightRunner
+    from dpo.mavlink_bridge import MavBridge
+    from dpo.sim_vehicle import SimVehicle
+    from dpo.webapp.server import App
+    app = App()
+    d = app.drones["m100"]
+    app.plan(dict(obstacles=[], dep_hour=15, payload=0.5, drone="m100", round_trip=False))
+    M = app.mission(dict(speed_mode="command"))["legs"][0]
+    st = app.site.lowest_free_k(*M["plan"]["a"])
+    wu, wv = (float(v) for v in app.site.wind_at(M["plan"]["t_cruise0"], *st))
+    port = 15000 + int(time.time() * 1000) % 200
+    # 실제 바람은 예보와 같지만 기체가 3배로 부풀려 보고하고, 대기속도는 6 m/s 까지만 낸다
+    veh = SimVehicle(f"udpin:127.0.0.1:{port}", rate=10.0, wind_uv=(wu, wv), wind_report=(3 * wu + 9.0, 3 * wv), va_limit=6.0).start()
+    link = MavBridge(f"udpout:127.0.0.1:{port}", timeout=5.0)
+    try:
+        assert link.connect() and link.upload_mission(M["items"])
+        run = FlightRunner(app.site, d, link, M["plan"], period=20.0)
+        run.time_rate = 10.0
+        veh.start_auto()
+        s = run.run(timeout=180.0, dt=0.02)
+        assert s["phase"] == "완료" and veh.done
+        assert s["wind_rejected"] >= 1 and s["updates"] == 0 and s["bias"] == 0.0       # 틀린 바람 측정으로는 속도를 바꾸지 않는다
+        assert s["speed_shortfall"] >= 1 and run.v_cap is not None and run.v_cap <= d.vg_max
+        assert any("명령 속도 미달" in e["msg"] for e in s["events"]) and any("측정 제외" in e["msg"] for e in s["events"])
+        assert any("착륙 중" in e["msg"] for e in s["events"]) and s["max_xtrack"] < 60.0
     finally:
         link.close()
         veh.stop()

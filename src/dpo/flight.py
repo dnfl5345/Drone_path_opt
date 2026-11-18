@@ -11,8 +11,11 @@
   * 경로점은 건드리지 않는다. 보내는 것은 속도 명령뿐이고, 기체 한계(vg_max)와 3 m/s 사이로 자른다.
   * 경로 이탈이 max_xtrack 을 넘거나 위치가 끊기면 속도 갱신을 멈추고 마지막 속도를 유지한다 (기록에 남긴다).
   * 미션은 '명령 방식'(속도 항목 없음)으로 올려야 한다. 미션 안의 속도 항목은 실행기의 명령을 덮어쓴다.
+  * 바람 측정값을 그대로 믿지 않는다. 예보와 max_wind_dev 넘게 다르면 버린다 (SITL: EKF 바람 추정의 크기가
+    EK3_DRAG_BCOEF 설정에 따라 몇 배 틀렸다). 기체가 명령 속도를 내지 못하면 (수락은 되지만 느리게 난다) 기록하고
+    이후 명령을 낼 수 있는 속도로 낮춘다.
 
-검증 범위: 모의 기체(dpo.sim_vehicle)와의 UDP 루프백. ArduPilot SITL·실기체에서는 시험하지 않았다.
+검증 범위: 모의 기체(dpo.sim_vehicle)와의 UDP 루프백, ArduCopter 4.7.2 SITL (scripts/sitl_check.py). 실기체는 미검증.
 """
 from __future__ import annotations
 
@@ -31,13 +34,17 @@ MODE_AUTO = 3
 
 class FlightRunner:
     def __init__(self, site, drone, link, plan, period=30.0, margin=SU.DEFAULTS["margin"], latency=3.0, max_xtrack=40.0,
-                 first_after=5.0, log_path=None, fr=None, clock=time.time):
+                 first_after=5.0, log_path=None, fr=None, clock=time.time, max_wind_dev=8.0, use_wind=True):
         """plan: ardupilot.mission_from_legs 가 주는 dict(path, waits, mass, t_cruise0, a, b)."""
         from .data_terrain import site_frame
         self.site, self.drone, self.link, self.plan = site, drone, link, plan
         self.period, self.margin, self.latency, self.max_xtrack, self.first_after = period, margin, latency, max_xtrack, first_after
         self.fr = fr or site_frame()
         self.clock = clock
+        self.max_wind_dev, self.use_wind = float(max_wind_dev), bool(use_wind)
+        self.winds = []                           # 최근 WIND 표본 (u, v)
+        self.v_cap = None                         # 기체가 실제로 낸 속도에서 정한 명령 상한
+        self._short = []                          # 명령 속도 미달 감시용 (시각, 명령, 실제)
         self.m = float(plan["mass"])
         path, waits = np.array(plan["path"], float), np.array(plan["waits"], float)
         pred = simulate(site, drone, path, waits, float(plan["t_cruise0"]), self.m)
@@ -54,7 +61,8 @@ class FlightRunner:
         self.soc0 = None
         self.last = {}
         self.rows, self.events = [], []
-        self.stats = dict(updates=0, checks=0, cmd_sent=0, cmd_acked=0, cmd_failed=0, max_xtrack=0.0, paused=0)
+        self.stats = dict(updates=0, checks=0, cmd_sent=0, cmd_acked=0, cmd_failed=0, max_xtrack=0.0, paused=0, wind_rejected=0,
+                          speed_shortfall=0)
         self._log = open(log_path, "w", encoding="utf-8") if log_path else None
 
     # ------------------------------------------------------------ 통신
@@ -69,6 +77,10 @@ class FlightRunner:
                 if t == "HEARTBEAT" and msg.get_srcSystem() == mv.source_system:
                     continue
                 self.last[t] = (self.clock(), msg)
+                if t == "WIND":
+                    from .mavlink_bridge import wind_to_uv
+                    self.winds.append(wind_to_uv(msg.direction, msg.speed))
+                    del self.winds[:-15]
             elif t == "COMMAND_ACK" and msg.command == 178:
                 self.stats["cmd_acked" if msg.result == 0 else "cmd_failed"] += 1
                 if msg.result != 0:
@@ -78,7 +90,7 @@ class FlightRunner:
         self.events.append(dict(t=round(self.clock(), 2), kind=kind, msg=msg))
 
     def _send_speed(self, v):
-        v = float(np.clip(round(v * 2) / 2.0, 3.0, self.drone.vg_max))
+        v = float(np.clip(round(v * 2) / 2.0, 3.0, self.drone.vg_max if self.v_cap is None else min(self.drone.vg_max, self.v_cap)))
         if self.v_sent is not None and abs(v - self.v_sent) < 0.5 - 1e-9:
             return
         self.link.send_change_speed(v, wait_ack=False)
@@ -116,7 +128,7 @@ class FlightRunner:
                 self.phase = "이륙"
                 self._ev("phase", "AUTO 확인 – 추종 시작")
             return self.phase
-        if self.phase in ("이륙", "순항") and not armed:
+        if self.phase in ("이륙", "순항", "착륙") and not armed:
             self.phase = "완료"
             self._ev("phase", "착륙·시동 꺼짐 – 종료")
             return self.phase
@@ -137,8 +149,14 @@ class FlightRunner:
             return self.phase
         q, dist = self._progress(x, y, z)
         self.q = q
-        self.stats["max_xtrack"] = max(self.stats["max_xtrack"], dist)
         sim, cmd = self.cur["sim"], self.cur["cmd"]
+        if q >= len(sim["t"]) - 2 and math.hypot(sim["x"][-1] - x, sim["y"][-1] - y) < 30.0:
+            self.phase = "착륙"                    # 마지막 경로점에 닿음: 이후는 기체의 착륙 절차
+            self._ev("phase", "도착 – 착륙 중 (속도 명령 종료)")
+            return self.phase
+        self.stats["max_xtrack"] = max(self.stats["max_xtrack"], dist)
+        gs = math.hypot(p.vx, p.vy) / 100.0
+        self._watch_speed(now, gs)
         off = stale or dist > self.max_xtrack
         w = self.last.get("WIND")
         row = dict(t=round(now, 2), phase=self.phase, x=round(x, 1), y=round(y, 1), z=round(z, 1), q=q, xtrack=round(dist, 1),
@@ -170,6 +188,24 @@ class FlightRunner:
             self._log.write(json.dumps(row, ensure_ascii=False) + "\n")
         return self.phase
 
+    def _watch_speed(self, now, gs):
+        """명령 속도를 내지 못하는지 감시. 같은 명령이 8 s(기체 시간) 이상 이어졌는데 실제 속도가 1.5 m/s 넘게 낮으면
+        그 속도를 상한으로 삼는다 (ArduCopter 는 낼 수 없는 속도 명령도 수락한다)."""
+        if self.v_sent is None:
+            return
+        if self._short and self._short[0][1] != self.v_sent:
+            self._short = []
+        self._short.append((now, self.v_sent, gs))
+        span = (now - self._short[0][0]) * self._rate()
+        if span >= 8.0 and len(self._short) >= 10:
+            tail = [g for _, _, g in self._short[len(self._short) // 2:]]
+            med = float(np.median(tail))
+            if med < self.v_sent - 1.5 and float(np.std(tail)) < 0.6:
+                self.stats["speed_shortfall"] += 1
+                self.v_cap = max(3.0, math.floor(med * 2) / 2.0 + 0.5)
+                self._ev("warn", f"명령 속도 미달: {self.v_sent:.1f} m/s 를 보냈지만 {med:.1f} m/s 로 비행 – 이후 명령을 {self.v_cap:.1f} m/s 이하로 제한")
+            self._short = []
+
     def _rate(self):
         return getattr(self, "time_rate", 1.0)      # 리허설에서 모의 기체가 빨리 감기일 때의 배율
 
@@ -178,9 +214,18 @@ class FlightRunner:
         s, d, cur = self.site, self.drone, self.cur
         T = float(cur["sim"]["t"][q])
         self.stats["checks"] += 1
-        if w is not None:
-            from .mavlink_bridge import wind_to_uv
-            self.bias.update(wind_to_uv(w[1].direction, w[1].speed), SU.wind_at_xyz(s, T, x, y, z), T)
+        if not self.use_wind:
+            return
+        if w is not None and len(self.winds) >= 3:
+            meas = tuple(np.median(np.array(self.winds), axis=0))           # 최근 표본의 중앙값
+            fc = SU.wind_at_xyz(s, T, x, y, z)
+            if math.hypot(meas[0] - fc[0], meas[1] - fc[1]) > self.max_wind_dev:
+                self.stats["wind_rejected"] += 1
+                if self.stats["wind_rejected"] == 1:
+                    self._ev("warn", f"바람 측정값이 예보와 {math.hypot(meas[0] - fc[0], meas[1] - fc[1]):.1f} m/s 다름 – 측정 제외 "
+                                     f"(한도 {self.max_wind_dev:g} m/s, EK3_DRAG_BCOEF 확인)")
+            else:
+                self.bias.update(meas, fc, T)
         if self.bias.n == 0 or self.bias.magnitude < 0.05:
             return
         p = SU.propose(s, d, cur["path"], cur["waits"], cur["sim"], cur["cmd"], cur["t0"], T + self.latency, self.m,
@@ -228,6 +273,8 @@ def main(argv=None):
     ap.add_argument("--dst", default=None, metavar="X,Y")
     ap.add_argument("--leg", default="out", help="올릴 구간 이름 (out | back | tour)")
     ap.add_argument("--period", type=float, default=30.0, help="속도 갱신 주기 [s], 0 이면 갱신 없이 계획 속도만 보냄")
+    ap.add_argument("--no-wind", action="store_true", help="기체의 바람 추정값을 쓰지 않는다 (추정이 검증되기 전)")
+    ap.add_argument("--max-wind-dev", type=float, default=8.0, help="예보와 이만큼 넘게 다른 바람 측정은 버린다 [m/s]")
     ap.add_argument("--upload", action="store_true", help="미션을 기체에 올린다 (없으면 연결·계획만 확인)")
     ap.add_argument("--log", default=None, metavar="FILE", help="비행 기록 (JSON Lines)")
     ap.add_argument("--rehearse", action="store_true", help="모의 기체로 전 과정을 연습한다 (기체 불필요)")
@@ -285,7 +332,8 @@ def main(argv=None):
                 print(f"미션 올리기 실패: {link.last_error}", file=sys.stderr)
                 return 3
             print("미션을 올렸습니다 (명령 방식: 속도 항목은 첫 구간만).")
-        run = FlightRunner(site, drone, link, M["plan"], period=a.period if a.period > 0 else math.inf, log_path=a.log)
+        run = FlightRunner(site, drone, link, M["plan"], period=a.period if a.period > 0 else math.inf, log_path=a.log,
+                           use_wind=not a.no_wind, max_wind_dev=a.max_wind_dev)
         if a.rehearse:
             run.time_rate = a.rate
             veh.start_auto()

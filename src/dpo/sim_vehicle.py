@@ -17,12 +17,15 @@ MODE_AUTO, MODE_STAB = 3, 0
 
 class SimVehicle:
     def __init__(self, url="udpin:127.0.0.1:14650", rate=20.0, wind_uv=(0.0, 0.0), power_fn=None, battery_wh=222.0,
-                 wp_spd=10.0, vz_up=2.5, vz_dn=1.5, sysid=1):
+                 wp_spd=10.0, vz_up=2.5, vz_dn=1.5, sysid=1, va_limit=None, wind_report=None):
+        """va_limit: 낼 수 있는 최대 대기속도 [m/s] – 넘는 명령도 수락하지만 느리게 난다 (SITL 에서 본 ArduCopter 의 동작).
+        wind_report: WIND 로 내보낼 값 (u, v). 주면 실제 바람과 다른 '틀린 추정'을 흉내 낸다."""
         from pymavlink import mavutil
         self.m = mavutil.mavlink_connection(url, source_system=sysid, dialect="ardupilotmega")
         self.mv = mavutil.mavlink
         self.rate, self.wind_uv, self.power_fn, self.battery_wh = float(rate), wind_uv, power_fn, float(battery_wh)
         self.vz_up, self.vz_dn = vz_up, vz_dn
+        self.va_limit, self.wind_report = va_limit, wind_report
         self.speed = float(wp_spd)                 # 지금 쓰는 대지속도 [m/s] (WP_SPD → 미션 항목·명령이 덮어씀)
         self.mission, self._want = [], None
         self.auto = self.armed = self.done = False
@@ -95,7 +98,13 @@ class SimVehicle:
             dn, de, dz = (tlat - self.lat) * MLAT, (tlon - self.lon) * mlon, tgt_alt - self.alt
             dh = math.hypot(dn, de)
             vz_lim = self.vz_up if dz > 0 else self.vz_dn
-            t_h = dh / max(self.speed, 0.1)
+            spd = self.speed
+            if self.va_limit is not None and dh > 1e-6:          # 대기속도 한계에서 낼 수 있는 대지속도
+                un, ue = dn / dh, de / dh
+                w_al = self.wind_uv[1] * un + self.wind_uv[0] * ue
+                w_cr = -self.wind_uv[1] * ue + self.wind_uv[0] * un
+                spd = min(spd, max(0.5, w_al + math.sqrt(max(self.va_limit ** 2 - w_cr ** 2, 0.0))))
+            t_h = dh / max(spd, 0.1)
             t_v = abs(dz) / vz_lim
             T = max(t_h, t_v)                       # 수직 한계가 걸리면 그만큼 천천히 간다
             if T < 1e-6:
@@ -136,8 +145,9 @@ class SimVehicle:
                     m.mav.global_position_int_send(int(self.t_sim * 1000) % 2 ** 32, int(round(self.lat * 1e7)), int(round(self.lon * 1e7)),
                                                    0, int(round(self.alt * 1000)), int(round(self.vx * 100)), int(round(self.vy * 100)),
                                                    int(round(-self.vz * 100)), 0)
-                    d = math.degrees(math.atan2(-self.wind_uv[0], -self.wind_uv[1])) % 360.0
-                    m.mav.wind_send(d, math.hypot(*self.wind_uv), 0.0)
+                    wr = self.wind_report if self.wind_report is not None else self.wind_uv
+                    d = math.degrees(math.atan2(-wr[0], -wr[1])) % 360.0
+                    m.mav.wind_send(d, math.hypot(*wr), 0.0)
                     m.mav.battery_status_send(0, mv.MAV_BATTERY_FUNCTION_ALL, mv.MAV_BATTERY_TYPE_LIPO, 250, [22200] + [65535] * 9,
                                               1500, int(self.energy / 79.92), -1, int(round(self.soc)))
                     m.mav.mission_current_send(self.seq)
