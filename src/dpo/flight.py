@@ -142,7 +142,9 @@ class FlightRunner:
         off = stale or dist > self.max_xtrack
         w = self.last.get("WIND")
         row = dict(t=round(now, 2), phase=self.phase, x=round(x, 1), y=round(y, 1), z=round(z, 1), q=q, xtrack=round(dist, 1),
-                   bias=round(self.bias.magnitude, 2), v_sent=self.v_sent)
+                   bias=round(self.bias.magnitude, 2), v_sent=self.v_sent, gs=round(math.hypot(p.vx, p.vy) / 100.0, 2))
+        if w is not None:
+            row["wind"] = [round(float(w[1].direction), 1), round(float(w[1].speed), 2)]
         bs = self.last.get("BATTERY_STATUS")
         if bs is not None and self.soc0 is not None:
             row["soc_meas"] = float(bs[1].battery_remaining)
