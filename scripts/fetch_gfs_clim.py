@@ -7,6 +7,7 @@
                                                         → data/raw/gfsage_<site>_<날짜>_lead030.npz 등
 ①②는 scripts/fetch_gfs_days.py 와 같은 이름·형식이라 exp_superiority._load_day 가 그대로 읽는다.
 GRIB 메시지는 한 번만 내려받아 두 지역을 각각 잘라 쓴다 (지역 좌표를 다른 서비스로 보내지 않는다).
+예보 시각 하나를 받을 때마다 캐시(E16_CACHE)에 적어, 중간에 끊겨도 이어서 받는다.
 
 사용: PYTHONPATH=src python scripts/fetch_gfs_clim.py            # 전체 표본
       PYTHONPATH=src python scripts/fetch_gfs_clim.py 20260115   # 특정 날짜만
@@ -95,7 +96,40 @@ def _pack(frames, cycle):
     return pack
 
 
-def main(days):
+def _cache_dir():
+    """예보 시각 하나를 받을 때마다 여기에 적어 둔다 (중간에 끊겨도 이어서 받는다). 환경변수 E16_CACHE 로 바꿀 수 있다."""
+    import os
+    from pathlib import Path
+    p = Path(os.environ.get("E16_CACHE") or (Path(tempfile.gettempdir()) / "dpo_e16_cache"))
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _cpath(t):
+    return _cache_dir() / f"{t[0]}_{t[1]}_f{t[2]:03d}.npz"
+
+
+def fetch_cached(t):
+    """fetch_hour_multi 를 부르고 결과를 캐시에 적는다. 반환: (작업, None | 오류 문자열)."""
+    p = _cpath(t)
+    if p.exists():
+        return t, None
+    key, res = fetch_hour_multi(t)
+    if isinstance(res, str):
+        return t, res
+    flat = {f"{site}|{k}": v for site, d in res.items() for k, v in d.items()}
+    tmp = p.with_suffix(".tmp.npz")
+    np.savez_compressed(tmp, **flat)
+    tmp.rename(p)
+    return t, None
+
+
+def _load_cached(t, site):
+    z = np.load(_cpath(t), allow_pickle=True)
+    return {k.split("|", 1)[1]: z[k] for k in z.files if k.startswith(site + "|")}
+
+
+def main(days, workers=4):
     t0 = time.time()
     groups = {}                                   # 파일 하나 = (종류, 날짜, ...) → 필요한 (ymd, hh, fh) 목록
     for d in days:
@@ -108,23 +142,30 @@ def main(days):
                 c0 = D + timedelta(hours=6) - timedelta(hours=lead)
                 groups[("age", d, lead)] = [(c0.strftime("%Y%m%d"), c0.strftime("%H"), lead)]
     tasks = sorted({t for g in groups.values() for t in g})
-    print(f"받을 파일 {len(groups)}개, 예보 시각 {len(tasks)}개", flush=True)
-    got, failed = {}, {}
-    with cf.ProcessPoolExecutor(8) as ex:
-        for n, (key, res) in enumerate(ex.map(fetch_hour_multi, tasks, chunksize=1)):
-            if isinstance(res, str):
-                failed["/".join(map(str, key))] = res
-            else:
-                got[key] = res
-            if (n + 1) % 100 == 0:
-                print(f"  {n + 1}/{len(tasks)} ({time.time() - t0:.0f} s, 실패 {len(failed)})", flush=True)
+    todo = [t for t in tasks if not _cpath(t).exists()]
+    print(f"받을 파일 {len(groups)}개, 예보 시각 {len(tasks)}개 (캐시에 {len(tasks) - len(todo)}개)", flush=True)
+    failed = {}
+    for attempt in range(6):                      # 작업 프로세스가 죽으면(메모리 부족 등) 풀을 다시 만들어 이어 받는다
+        todo = [t for t in tasks if not _cpath(t).exists()]
+        if not todo:
+            break
+        failed = {}
+        try:
+            with cf.ProcessPoolExecutor(workers) as ex:
+                for n, (t, err) in enumerate(ex.map(fetch_cached, todo, chunksize=1)):
+                    if err:
+                        failed["/".join(map(str, t))] = err
+                    if (n + 1) % 100 == 0:
+                        print(f"  {n + 1}/{len(todo)} ({time.time() - t0:.0f} s, 실패 {len(failed)})", flush=True)
+        except cf.process.BrokenProcessPool:
+            print(f"  작업 프로세스가 중단됨 – 다시 시도 ({attempt + 1})", flush=True)
+            time.sleep(5)
     saved, skipped = [], []
     for g, need in groups.items():
-        if not all(t in got for t in need):
+        if not all(_cpath(t).exists() for t in need):
             skipped.append("/".join(map(str, g)))
             continue
         for site in SITES:
-            frames = [got[t][site] for t in need]
             if g[0] == "day":
                 path = C.RAW / gfs_name(site, g[1], g[2])
                 cycle = datetime.strptime(g[1] + g[2], "%Y%m%d%H")
@@ -132,7 +173,7 @@ def main(days):
                 path = C.RAW / f"gfsage_{site}_{g[1]}_lead{g[2]:03d}.npz"
                 cycle = datetime.strptime(need[0][0] + need[0][1], "%Y%m%d%H")
             if not path.exists():
-                np.savez_compressed(path, **_pack(frames, cycle))
+                np.savez_compressed(path, **_pack([_load_cached(t, site) for t in need], cycle))
                 saved.append(path.name)
     log = dict(days=days, n_files_saved=len(saved), skipped=skipped, failed=failed, seconds=round(time.time() - t0))
     (C.RES / "E16_fetch_log.json").write_text(json.dumps(log, ensure_ascii=False, indent=1))
