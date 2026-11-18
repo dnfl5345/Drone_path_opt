@@ -593,6 +593,139 @@ class App:
                         legs=[dict(name=m["name"], legs=m["legs"], wpl=m["wpl"], csv=m["csv"], summary=m["summary"],
                                    items=m["items"], plan=m["plan"]) for m in ms])
 
+    def compare(self, req=None):
+        """마지막 계획(제안 경로)을 기존 방식과 나란히 놓는다 – 발주처 설명용.
+
+        기존 경로 = 최단 경로를 정속으로 비행 (운용자가 경로점과 속도를 정하는 일반적인 웨이포인트 비행. 기본 10 m/s).
+        대조     = 같은 최단 경로에서 구간 속도만 최적화 (절감이 속도에서 나오는지 경로에서 나오는지 가르기 위함).
+        장애물은 넣지 않고 비교한다. 반환: methods(경로 표본·수치), reasons(왜 다른지), by(속도·경로의 몫)."""
+        from .. import speed_update as SU
+        from ..mission import make_flyable
+        vconst = float((req or {}).get("speed", 10.0))
+        if not (3.0 <= vconst <= 20.0):
+            raise ValueError("기존 경로의 속도는 3~20 m/s")
+        with self.lock:
+            ss = getattr(self, "session", None)
+            if ss is None:
+                raise ValueError("먼저 경로를 생성하세요")
+            cx, legs = ss["cx"], ss["legs"]
+            if not all(L.get("feasible") for L in legs):
+                raise ValueError("제안 경로가 성립하지 않아 비교할 수 없습니다")
+            site, d, SP, t_dep = cx["site"], cx["d"], cx["SP"], cx["t_dep"]
+
+            def stats(parts):
+                """parts: [(sim, e_to, e_ld, t_ld)] → 수치."""
+                E = sum(e0 + float(sim["e"][-1]) + e1 for sim, e0, e1, _ in parts)
+                Lh = Tm = wsum = hsum = 0.0
+                per = []                                   # 구간별: 진행 방향 바람·지면 위 높이 (거리 가중 – 경로만의 성질)
+                for sim, e0, e1, tl in parts:
+                    x, y, z, t = sim["x"], sim["y"], sim["z"], sim["t"]
+                    l_ = t_ = w_ = h_ = 0.0
+                    up_ = float(np.clip(np.diff(z), 0, None).sum())          # 순항 중 다시 올라간 높이의 합
+                    for q in range(1, len(t)):
+                        dx, dy, dt = x[q] - x[q - 1], y[q] - y[q - 1], t[q] - t[q - 1]
+                        ds = math.hypot(dx, dy)
+                        if ds < 1e-6 or sim["vg"][q] <= 0:
+                            continue
+                        wu, wv = SU.wind_at_xyz(site, float(t[q]), float(x[q]), float(y[q]), float(z[q]))
+                        i, j = int(np.clip(x[q] // site.dx, 0, site.nx - 1)), int(np.clip(y[q] // site.dx, 0, site.ny - 1))
+                        l_ += ds; t_ += dt; w_ += wu * dx + wv * dy; h_ += float(z[q] - site.ground[j, i]) * ds
+                    per.append(dict(L=l_, T=float(t[-1] - t[0]) + tl, v_mean=l_ / max(t_, 1e-9), tail=w_ / max(l_, 1e-9), agl=h_ / max(l_, 1e-9), climb=up_,
+                                    soc_used=float(soc_drop(e0 + float(sim["e"][-1]) + e1, d))))
+                    Lh += l_; Tm += t_; wsum += w_; hsum += h_
+                T = sum(float(sim["t"][-1] - sim["t"][0]) + tl for sim, _, _, tl in parts)
+                return dict(soc_used=float(soc_drop(E, d)), soc_end=float(100 - soc_drop(E, d)), E_kJ=E / 1000, T=T, L=Lh,
+                            v_mean=Lh / max(Tm, 1e-9), tail=wsum / max(Lh, 1e-9), agl=hsum / max(Lh, 1e-9), per=per)
+
+            def fly(policy):
+                t, e_used, parts, out = t_dep, 0.0, [], []
+                for L in legs:
+                    a, b, m, st, gl = L["a"], L["b"], L["m"], L["st"], L["gl"]
+                    air_s, air_e = bool(L.get("air_start")), bool(L.get("air_end"))
+                    e_to, t_to = (0.0, 0.0) if air_s else vertical_energy(site, d, a[0], a[1], st[0], t, m, up=True)
+                    r0 = SP.plan(st, gl, t_start=t + t_to, mass=m, mode=0, ignore_obstacles=True)
+                    fx = None if r0 is None else make_flyable(site, d, r0["path"], np.zeros(len(r0["path"])))
+                    if fx is None:
+                        return None
+                    w = fx[1].copy()
+                    if air_s:
+                        w[1] += cx.get("dwell", 0.0)
+                    sim = simulate(site, d, fx[0], w, t + t_to, m, speed_policy=policy, vconst=vconst)
+                    if sim is None:
+                        return None
+                    e_ld, t_ld = (0.0, 0.0) if air_e else vertical_energy(site, d, b[0], b[1], gl[0], sim["t"][-1], m, up=False)
+                    parts.append((sim, e_to, e_ld, t_ld))
+                    out.append(dict(name=L["name"], samples=_samples(sim, t_dep, e_offset=e_used + e_to, drone=d)))
+                    e_used += e_to + float(sim["e"][-1]) + e_ld
+                    t = sim["t"][-1] + t_ld + (0.0 if air_e else 30.0)
+                return dict(legs=out, **stats(parts))
+
+            ex, exv = fly("const"), fly("opt")
+            names = [L["name"] for L in legs]
+            ko = lambda n: {"out": "가는 편", "back": "오는 편"}.get(n, f"구간 {n[1:]}" if n[:1] == "s" and n[1:].isdigit() else n)
+            wtxt = lambda v: ("뒷바람 " if v >= 0 else "맞바람 ") + f"{abs(v):.1f} m/s"
+            prop = dict(legs=[dict(name=L["name"], samples=_samples(L["sim"], t_dep, e_offset=L["e_before"] + L["e_to"], drone=d)) for L in legs],
+                        **stats([(L["sim"], L["e_to"], L["e_ld"], L["t_ld"]) for L in legs]))
+            res = cx["reserve"]
+            methods = []
+            for key, label, color, m_ in (("existing", f"기존 경로 (최단 + 정속 {vconst:g} m/s)", "#E46C0A", ex),
+                                          ("existing_vopt", "최단 경로 + 속도 최적화 (대조)", "#8A8F98", exv), ("proposed", "제안 경로", "#1B6CA8", prop)):
+                if m_ is None:
+                    methods.append(dict(key=key, label=label, color=color, feasible=False))
+                else:
+                    for q, P_ in enumerate(m_["per"]):
+                        P_["name"], P_["label"] = names[q], ko(names[q])
+                    methods.append(dict(key=key, label=label, color=color, feasible=bool(m_["soc_end"] >= res - 1e-6), **m_))
+            out = dict(methods=methods, reserve=res, speed=vconst, drone=DR.LABEL[cx["dkey"]], payload=cx["payload"], dep_hour=cx["dep_hour"],
+                       chosen=[L["r"].get("chosen") for L in legs], reasons=[], by=None)
+            if ex is not None and exv is not None:
+                tot = (prop["soc_used"] / ex["soc_used"] - 1) * 100
+                spd = (exv["soc_used"] / ex["soc_used"] - 1) * 100
+                pth = (prop["soc_used"] / exv["soc_used"] - 1) * 100
+                out["by"] = dict(total_pct=tot, speed_pct=spd, path_pct=pth, time_pct=(prop["T"] / ex["T"] - 1) * 100)
+                R = out["reasons"]
+                R.append(f"배터리를 {ex['soc_used']:.1f} %p 에서 {prop['soc_used']:.1f} %p 로 덜 씁니다 ({tot:+.1f} %). 비행 시간은 {ex['T']:.0f} s 에서 {prop['T']:.0f} s 가 됩니다.")
+                if not methods[0]["feasible"] and methods[2]["feasible"]:
+                    R.append(f"기존 경로는 도착 SOC {ex['soc_end']:.1f} % 로 예비 {res:g} % 를 지키지 못합니다. 제안 경로는 {prop['soc_end']:.1f} % 로 지킵니다.")
+                head = min(P_["tail"] for P_ in ex["per"])
+                slow = ""
+                if ex["v_mean"] < vconst - 0.5:
+                    slow = (f" 맞바람이 {-head:.0f} m/s 인 구간에서는 대기속도 한계 때문에 그 속도를 내지 못해 평균은 {ex['v_mean']:.1f} m/s 입니다." if head < -5.0
+                            else f" 오르내리는 구간에서는 수직 속도 한계 때문에 그 속도를 내지 못해 평균은 {ex['v_mean']:.1f} m/s 입니다.")
+                calm = [P_ for P_ in ex["per"] if P_["tail"] > vconst - 3.0]
+                still = (f" {calm[0]['label']}처럼 뒷바람이 {calm[0]['tail']:.0f} m/s 인 구간에서 지면 기준 {vconst:g} m/s 로 가면 "
+                         "공기 속에서는 거의 서 있는 셈이라 제자리 비행만큼 전력을 씁니다." if calm else "")
+                R.append(f"속도: 기존은 지면 기준 {vconst:g} m/s 를 목표로 일정하게 납니다.{slow}{still} 제안은 구간마다 미터당 에너지가 가장 적은 속도를 골라 "
+                         f"평균 {prop['v_mean']:.1f} m/s 로 납니다. 같은 최단 경로에서 속도만 바꿔도 {spd:+.1f} % 입니다.")
+                if abs(pth) >= 0.3:
+                    why, how = [], []
+                    for a_, b_ in zip(exv["per"], prop["per"]):
+                        dh, dw, dl, dc = b_["agl"] - a_["agl"], b_["tail"] - a_["tail"], b_["L"] - a_["L"], b_["climb"] - a_["climb"]
+                        bits = []
+                        if abs(dh) >= 8:
+                            bits.append(f"지면 위 높이 {a_['agl']:.0f} → {b_['agl']:.0f} m")
+                        if abs(dc) >= 10:
+                            bits.append(f"도중에 올라가는 높이 {a_['climb']:.0f} → {b_['climb']:.0f} m")
+                        if abs(dw) >= 0.5:
+                            bits.append(f"{wtxt(a_['tail'])} → {wtxt(b_['tail'])}")
+                        if abs(dl) >= 30:
+                            bits.append(f"거리 {a_['L'] / 1000:.2f} → {b_['L'] / 1000:.2f} km")
+                        if bits:
+                            why.append(f"{b_['label']}: " + ", ".join(bits))
+                        if dw >= 0.5 and a_["tail"] < 0 and "맞바람이 약한 고도·방향으로 납니다." not in how:
+                            how.append("맞바람이 약한 고도·방향으로 납니다.")
+                        if dw >= 0.5 and a_["tail"] >= 0 and "뒷바람을 더 받는 고도로 납니다." not in how:
+                            how.append("뒷바람을 더 받는 고도로 납니다.")
+                        if dc <= -10 and "건물·지형을 넘으려고 올라갔다 내려오는 대신 낮은 고도로 조금 돌아갑니다." not in how:
+                            how.append("건물·지형을 넘으려고 올라갔다 내려오는 대신 낮은 고도로 조금 돌아갑니다.")
+                    R.append(f"경로: 바람과 지형을 보고 고른 경로·고도가 추가로 {pth:+.1f} % 입니다."
+                             + (" " + " ".join(how) if how else "") + (" (" + " / ".join(why) + ")" if why else ""))
+                else:
+                    R.append("경로: 이 조건에서는 경로 모양의 차이가 거의 없습니다 (0.3 % 미만). 바람이 약하거나 최단 경로가 이미 유리한 경우입니다.")
+                if "shortest" in out["chosen"]:
+                    R.append("안전장치: 에너지 탐색보다 최단 경로가 더 싼 구간은 최단 경로를 그대로 썼습니다.")
+            return out
+
     def confidence(self, req=None):
         """마지막 계획의 신뢰도: 예보가 틀린 만큼의 SOC 소모 분포와 출발 판정 (docs/reliability.md).
 
@@ -916,6 +1049,8 @@ def make_handler(app):
                     return self._send(200, app.plan(req))
                 if self.path == "/api/mission":
                     return self._send(200, app.mission(req))
+                if self.path == "/api/compare":
+                    return self._send(200, app.compare(req))
                 if self.path == "/api/confidence":
                     return self._send(200, app.confidence(req))
                 if self.path == "/api/replan":

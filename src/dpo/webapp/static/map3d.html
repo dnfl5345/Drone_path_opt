@@ -160,6 +160,15 @@
       <div class="row"><span>도착 SOC</span><span class="big" id="r_soc"></span><span id="r_feas"></span></div>
       <table class="res"><thead><tr><th>구간</th><th>에너지</th><th>SOC</th><th>시간</th><th>거리</th><th>고도(해발)</th><th>장애물 최소 이격</th></tr></thead><tbody id="r_legs"></tbody></table>
       <div class="hint" id="r_note" style="margin-top:6px"></div>
+      <div class="row" style="margin-top:8px"><button id="cmpbtn" class="primary">기존 경로와 비교</button><button id="cmpoff" style="display:none">비교 끄기</button>
+        <span class="hint">기존 = 최단 경로를 지면 기준 정속 10 m/s 로 비행 (운용자가 경로점과 속도를 정하는 일반적인 웨이포인트 비행)</span></div>
+    </div>
+    <div class="card" id="cmpcard" style="display:none">
+      <h2>기존 경로와 제안 경로 <span class="hint" id="c_sub" style="font-weight:normal"></span></h2>
+      <table class="res"><thead><tr><th>방식</th><th>SOC 소모</th><th>도착 SOC</th><th>비행 시간</th><th>거리</th><th>평균 속도</th><th>구간별 바람 [m/s]</th><th>지면 위 높이 [m]</th></tr></thead><tbody id="c_rows"></tbody></table>
+      <div id="c_bar" style="margin:8px 0 4px"></div>
+      <ul id="c_why" style="margin:6px 0 0 18px;padding:0;font-size:12.5px;line-height:1.55"></ul>
+      <div class="hint" style="margin-top:6px">구간별 바람: 맞 = 맞바람, 뒷 = 뒷바람 (경로를 따라 거리로 평균). 장애물을 넣지 않은 비교입니다. 모의 계산이며 전력 모델의 가정과 그날 바람에 따라 크기가 달라집니다.</div>
     </div>
     <div class="card" id="miscard" style="display:none">
       <h2>ArduPilot 미션 내보내기</h2>

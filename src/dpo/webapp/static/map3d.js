@@ -50,7 +50,7 @@ function initThree() {
   scene.add(sun);
   root = new THREE.Group();
   scene.add(root);
-  for (const k of ["terrain", "bld", "nfz", "floor", "wind", "base", "path", "obs", "edit", "marks", "drone"]) {
+  for (const k of ["terrain", "bld", "nfz", "floor", "wind", "base", "path", "cmp", "obs", "edit", "marks", "drone"]) {
     G[k] = new THREE.Group();
     root.add(G[k]);
   }
@@ -201,8 +201,9 @@ function label(text, color) {            // 글자 표식 (항상 화면을 향�
   c.font = "bold 44px 'Malgun Gothic','NanumGothic',sans-serif";
   c.fillStyle = color; c.beginPath(); c.roundRect(0, 0, w, 64, 14); c.fill();
   c.fillStyle = "#fff"; c.textBaseline = "middle"; c.fillText(text, 14, 34);
-  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), depthTest: false }));
-  sp.scale.set(w * 1.6, 64 * 1.6, 1);
+  // 화면에서 늘 같은 크기 (가까이 당겨도 글자가 지도를 덮지 않게)
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), depthTest: false, sizeAttenuation: false }));
+  sp.scale.set(0.034 * w / 64, 0.034, 1);
   sp.renderOrder = 10;
   return sp;
 }
@@ -490,7 +491,7 @@ function drawPlan() {
   }
   for (const L of res.legs) {
     if (!L.feasible) break;
-    const s = L.samples, color = legColor(L.name), a = s[0], b = s[s.length - 1];
+    const s = L.samples, color = S.cmp ? 0x1B6CA8 : legColor(L.name), a = s[0], b = s[s.length - 1];
     const pts = s.map(p => new THREE.Vector3(p.x, p.y, p.z));
     if (!L.air_start) pts.unshift(new THREE.Vector3(a.x, a.y, groundAt(a.x, a.y)));
     if (!L.air_end) pts.push(new THREE.Vector3(b.x, b.y, groundAt(b.x, b.y)));
@@ -505,12 +506,57 @@ function drawPlan() {
       G.path.add(tube(pts, color, 14), curtain(s, color), ghost);
     }
   }
+  drawCompare();
   const body = new THREE.Mesh(new THREE.SphereGeometry(30, 20, 14), new THREE.MeshLambertMaterial({ color: 0xFFD23F, emissive: 0x5A4500 }));
   const drop = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -1)]), new THREE.LineBasicMaterial({ color: 0x16202A }));
   G.drone.add(body, drop);
   G.drone.userData = { body, drop };
   setTime(S.t);
 }
+
+// ------------------------------------------------------------ 기존 경로와 비교
+function drawCompare() {
+  clearGroup(G.cmp);
+  const C = S.cmp;
+  if (!C) return;
+  const ex = C.methods.find(m => m.key === "existing");
+  if (ex && ex.legs) {
+    for (const L of ex.legs) {
+      const s = L.samples, a = s[0], b = s[s.length - 1];
+      const pts = s.map(p => new THREE.Vector3(p.x, p.y, p.z));
+      pts.unshift(new THREE.Vector3(a.x, a.y, groundAt(a.x, a.y))); pts.push(new THREE.Vector3(b.x, b.y, groundAt(b.x, b.y)));
+      const ghost = tube(pts, 0xE46C0A, 12);
+      if (ghost.isMesh) { ghost.material.dispose(); ghost.material = new THREE.MeshBasicMaterial({ color: 0xE46C0A, transparent: true, opacity: 0.45, depthTest: false, depthWrite: false }); ghost.renderOrder = 4; }
+      G.cmp.add(tube(pts, 0xE46C0A, 12), curtain(s, 0xE46C0A), ghost);
+    }
+    // 글자 표식: 각 방식의 첫 구간 가운데쯤
+    const pr = C.methods.find(m => m.key === "proposed");
+    // 두 글자 표식이 겹치지 않게: 기존은 첫 구간 앞쪽, 제안은 마지막 구간 뒤쪽
+    const mark2 = (m, text, color, li, fr) => { const s = m.legs[li].samples, p = s[Math.floor(s.length * fr)]; const l = label(text, color); l.position.set(p.x, p.y, p.z + 70); G.cmp.add(l); };
+    mark2(ex, `기존 ${ex.soc_used.toFixed(1)} %p`, "#E46C0A", 0, 0.25);
+    if (pr && pr.legs) mark2(pr, `제안 ${pr.soc_used.toFixed(1)} %p`, "#1B6CA8", pr.legs.length - 1, pr.legs.length > 1 ? 0.3 : 0.75);
+  }
+  needRender = true;
+}
+function showCompare(C) {
+  $("cmpcard").style.display = "block"; $("cmpoff").style.display = "inline-block";
+  $("c_sub").textContent = `${C.drone} · 탑재 ${C.payload} kg · ${C.dep_hour}시 출발`;
+  const f = (v, d = 1) => v == null ? "–" : v.toFixed(d);
+  $("c_rows").innerHTML = C.methods.map(m => m.soc_used == null ? `<tr><td><b style="color:${m.color}">■</b> ${m.label}</td><td colspan="7" class="bad">비행 불가</td></tr>` :
+    `<tr${m.key === "proposed" ? ' style="font-weight:bold"' : ""}><td><b style="color:${m.color}">■</b> ${m.label}</td><td>${f(m.soc_used)} %p</td>` +
+    `<td class="${m.feasible ? "ok" : "bad"}">${f(m.soc_end)} %${m.feasible ? "" : " (예비 미달)"}</td><td>${Math.round(m.T)} s</td><td>${f(m.L / 1000, 2)} km</td>` +
+    `<td>${f(m.v_mean)} m/s</td><td>${m.per.map(p => `${p.tail >= 0 ? "뒷" : "맞"} ${f(Math.abs(p.tail))}`).join(" / ")}</td><td>${m.per.map(p => Math.round(p.agl)).join(" / ")}</td></tr>`).join("");
+  const top = Math.max(...C.methods.filter(m => m.soc_used != null).map(m => m.soc_used), 1);
+  $("c_bar").innerHTML = C.methods.filter(m => m.soc_used != null).map(m =>
+    `<div style="display:flex;align-items:center;gap:6px;margin:2px 0;font-size:12px"><span style="flex:0 0 96px">${m.key === "existing" ? "기존" : m.key === "proposed" ? "제안" : "속도만 최적화"}</span>` +
+    `<span style="display:inline-block;height:12px;border-radius:3px;background:${m.color};width:${(m.soc_used / top * 260).toFixed(0)}px"></span><b>${f(m.soc_used)} %p</b></div>`).join("");
+  $("c_why").innerHTML = C.reasons.map(r => `<li>${r}</li>`).join("");
+}
+async function doCompare() {
+  try { S.cmp = await api("/api/compare", {}); showCompare(S.cmp); G.base.visible = false; drawPlan(); }
+  catch (e) { $("status").textContent = e.message; }
+}
+function clearCompare() { S.cmp = null; G.base.visible = $("l_base").checked; $("cmpcard").style.display = "none"; $("cmpoff").style.display = "none"; drawPlan(); }
 
 // ------------------------------------------------------------ 시간 재생
 function updateTimeline() {
@@ -665,6 +711,7 @@ async function doPlan() {
                   tour: tour ? S.tour : [], dwell: tour ? +$("dwell").value : 0, eps: $("eps").value || null, obstacles: S.obs };
     const res = await api("/api/plan", req);
     S.plan = res; S.mission = null; S.dirty = false; S.planDwell = req.dwell;
+    S.cmp = null; $("cmpcard").style.display = "none"; $("cmpoff").style.display = "none";
     $("dirty").style.display = "none";
     S.track = buildTrack(res);
     S.t = 0;
@@ -849,6 +896,7 @@ async function init() {
   $("eps").onchange = () => { placeObstacles(); markDirty(); };
   for (const id of ["payload", "kind", "rt", "reserve", "wind", "dwell"]) $(id).addEventListener("change", markDirty);
   $("plan").onclick = doPlan;
+  $("cmpbtn").onclick = doCompare; $("cmpoff").onclick = clearCompare;
   $("pickhub").onclick = () => setMode("hub");
   $("pickdst").onclick = () => setMode("dst");
   $("addvia").onclick = () => setMode("via");

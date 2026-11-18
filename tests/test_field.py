@@ -163,3 +163,27 @@ def test_confidence_go_no_go_grows_with_forecast_age():
     # 명령줄: 판정이 '가능'이면 0, 아니면 4
     assert cli.main(["--drone", "x650", "--payload", "1.0", "--one-way", "--confidence", "0.95"]) == 0
     assert cli.main(["--drone", "m100", "--payload", "0.5", "--confidence", "0.95", "--forecast-age", "30"]) == 4
+
+
+def test_compare_existing_vs_proposed():
+    """기존 경로(최단 + 정속)와 제안 경로를 나란히: 세 방식의 수치·경로 표본·근거 문장이 나오고 몫이 서로 맞는다."""
+    from dpo.webapp.server import App
+    app = App()
+    with pytest.raises(ValueError):
+        app.compare()                                             # 계획이 없으면 비교할 수 없다
+    app.plan(dict(obstacles=[], dep_hour=15, payload=0.5, drone="m100", round_trip=False))
+    c = app.compare()
+    m = {x["key"]: x for x in c["methods"]}
+    assert set(m) == {"existing", "existing_vopt", "proposed"}
+    ex, exv, pr = m["existing"], m["existing_vopt"], m["proposed"]
+    assert ex["legs"][0]["samples"] and pr["legs"][0]["samples"] and len(pr["per"]) == 1
+    assert exv["soc_used"] <= ex["soc_used"] + 1e-6               # 같은 경로에서 속도 최적화는 정속보다 나쁘지 않다
+    assert pr["soc_used"] <= exv["soc_used"] * 1.002 + 1e-6       # 안전장치: 제안은 최단 경로보다 나쁘지 않다 (허용 0.2 %)
+    by = c["by"]
+    assert abs((1 + by["speed_pct"] / 100) * (1 + by["path_pct"] / 100) - (1 + by["total_pct"] / 100)) < 1e-9
+    assert by["total_pct"] < 0 and len(c["reasons"]) >= 3 and c["reasons"][0].startswith("배터리")
+    assert abs(ex["L"] - exv["L"]) < 1.0 and abs(ex["per"][0]["tail"] - exv["per"][0]["tail"]) < 1e-6   # 바람 성분은 경로만의 성질
+    c8 = app.compare(dict(speed=8.0))
+    assert c8["speed"] == 8.0 and c8["methods"][0]["label"].endswith("8 m/s)")
+    with pytest.raises(ValueError):
+        app.compare(dict(speed=40.0))
