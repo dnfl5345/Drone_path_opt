@@ -437,7 +437,12 @@ def seasonal_table(R, md):
             note = (f"{mth}월 표본 3일: 100 m 평균 풍속 {wm:.1f} m/s ({cls}), 기존 대비 {a['save_EX']:+.1f} %, 최단 + 속도 최적화 대비 {a['save_EXv']:+.1f} %, "
                     f"최단 경로 채택 {a['shortest'] * 100:.0f} %. 6시간 전 예보로 계획할 때 95 % 신뢰수준의 SOC 여유는 명목값의 "
                     + (f"{margin:.1f} %" if margin is not None else "(계산 불가)") + f" (σ {model.sigma(6, season=sk):.2f} m/s).")
-            months[str(mth)] = dict(season=sk, wind_ms=round(wm, 1), wind_class=cls, setting="에너지 탐색 + 안전장치 + 속도 갱신 30 s",
+            # 설정: 그 달의 바람 세기 구간에서 경로 모양의 이득이 0.5 % 에 못 미치면 에너지 탐색을 생략해도 된다고 적는다
+            gcls = bw.get({"약": "약 (<4)", "중": "중 (4–8)", "강": "강 (≥8)"}[cls])
+            light = gcls is not None and gcls["save_EXv"] > -0.5
+            setting = ("최단 경로 + 속도 최적화 + 속도 갱신 30 s (에너지 탐색은 생략 가능 – 켜 두면 안전장치가 같은 경로를 고른다)" if light
+                       else "에너지 탐색 + 안전장치 + 속도 갱신 30 s")
+            months[str(mth)] = dict(season=sk, wind_ms=round(wm, 1), wind_class=cls, setting=setting, energy_search_needed=not light,
                                     saving_vs_baseline_pct=round(a["save_EX"], 1), saving_vs_shortest_pct=round(a["save_EXv"], 1),
                                     shortest_share=round(a["shortest"], 2), soc_used=round(a["soc_P"], 1), sigma6=round(model.sigma(6, season=sk), 2),
                                     margin95_pct=margin, margin95_adapt_pct=None if m6.get("adapt") is None else round(m6["adapt"], 1),
