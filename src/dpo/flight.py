@@ -228,7 +228,8 @@ class FlightRunner:
                 self.bias.update(meas, fc, T)
         if self.bias.n == 0 or self.bias.magnitude < 0.05:
             return
-        p = SU.propose(s, d, cur["path"], cur["waits"], cur["sim"], cur["cmd"], cur["t0"], T + self.latency, self.m,
+        # 실제 진행 위치(기록 q)에서 남은 경로를 자른다. 지연은 명령을 보낼 때 앞을 내다보는 것으로 처리한다.
+        p = SU.propose(s, d, cur["path"], cur["waits"], cur["sim"], cur["cmd"], cur["t0"], T, self.m,
                        self.bias.value, margin=self.margin)
         if p is None:
             return

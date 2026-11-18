@@ -9,7 +9,7 @@
   "armed_in_auto": true,
   "flight_completed": true,
   "speed_cmds_all_accepted": true,
-  "speed_tracking_median_abs_err": 7.720000000000001,
+  "speed_tracking_median_abs_err": 1.8900000000000006,
   "wind_received": true,
   "dataflash_readable": true
  },
@@ -52,38 +52,47 @@
   "WP_SPD_UP": 2.5,
   "WP_SPD_DN": 1.5,
   "RTL_ALT_M": 15.0,
-  "EK3_DRAG_BCOEF_X": 63.70000076293945
+  "EK3_DRAG_BCOEF_X": 10.0
  },
  "runner": {
   "phase": "완료",
   "updates": 1,
-  "checks": 6,
-  "cmd_sent": 2,
-  "cmd_acked": 2,
+  "checks": 4,
+  "cmd_sent": 3,
+  "cmd_acked": 3,
   "cmd_failed": 0,
-  "max_xtrack": 72.34237819703924,
-  "paused": 29,
-  "bias": 6.7457539591442774,
-  "soc_meas_last": 55.0,
-  "soc_pred_last": 92.25
+  "max_xtrack": 23.78549283992822,
+  "paused": 0,
+  "wind_rejected": 1,
+  "speed_shortfall": 0,
+  "bias": 7.751445254572721,
+  "soc_meas_last": 70.0,
+  "soc_pred_last": 92.56
  },
+ "v_cap": null,
  "events": [
   "AUTO 확인 – 추종 시작",
   "순항 진입",
   "속도 명령 9.5 m/s",
-  "속도 갱신: 바람 편차 14.6 m/s, 남은 구간 예상 에너지 −11.4%",
+  "바람 측정값이 예보와 8.9 m/s 다름 – 측정 제외 (한도 8 m/s, EK3_DRAG_BCOEF 확인)",
+  "속도 명령 11.0 m/s",
   "속도 명령 15.0 m/s",
-  "경로 이탈 72 m – 속도 갱신 중지",
+  "속도 갱신: 바람 편차 6.7 m/s, 남은 구간 예상 에너지 −6.2%",
+  "도착 – 착륙 중 (속도 명령 종료)",
   "착륙·시동 꺼짐 – 종료"
  ],
  "speed_tracking": [
   {
    "cmd": 9.5,
-   "gs": 0.04
+   "gs": 9.25
+  },
+  {
+   "cmd": 11.0,
+   "gs": 7.63
   },
   {
    "cmd": 15.0,
-   "gs": 9.02
+   "gs": 13.11
   }
  ],
  "wind": {
@@ -91,25 +100,25 @@
    6.0,
    250.0
   ],
-  "est_speed": 2.279236046317149,
-  "est_dir": 102.26013578798346,
-  "vec_err": 8.020205406960754,
-  "n": 668
+  "est_speed": 4.020759405422915,
+  "est_dir": 241.75693377741132,
+  "vec_err": 2.101396496717472,
+  "n": 412
  },
  "xtrack": {
-  "median": 4.5,
-  "p95": 30.134999999999955,
-  "max": 72.3
+  "median": 3.7,
+  "p95": 23.1,
+  "max": 23.8
  },
  "dataflash": {
   "file": "00000001.BIN",
-  "seconds": 186,
+  "seconds": 166,
   "has_wind": true,
-  "steady_points": 20,
+  "steady_points": 9,
   "va_range": [
-   9.038910692933854,
-   16.218532750938987
+   3.4125200274413188,
+   10.490124035231881
   ]
  },
- "workdir": "/tmp/sitl_bajmu7gr"
+ "workdir": "/tmp/sitl_6bv3ywrr"
 }

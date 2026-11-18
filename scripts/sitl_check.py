@@ -57,6 +57,7 @@ def main(argv=None):
     ap.add_argument("--wind", default="6,250", help="SITL 바람: 풍속 [m/s], 불어오는 방향 [도]")
     ap.add_argument("--period", type=float, default=30.0)
     ap.add_argument("--port", type=int, default=5760)
+    ap.add_argument("--bcoef", type=float, default=10.0, help="EK3_DRAG_BCOEF_X/Y. SITL 기본 기체에서는 10 근처가 바람을 맞게 추정했다")
     a = ap.parse_args(argv)
     from dpo import config as C
     C.use_site(a.site)
@@ -87,7 +88,7 @@ def main(argv=None):
         ws, wdir = (float(v) for v in a.wind.split(","))
         mass = M["plan"]["mass"]
         params = dict(AUTO_OPTIONS=3, SIM_WIND_SPD=ws, SIM_WIND_DIR=wdir, SIM_BATT_CAP_AH=20.0,
-                      EK3_DRAG_BCOEF_X=round(mass / 0.08, 1), EK3_DRAG_BCOEF_Y=round(mass / 0.08, 1), WP_SPD=10.0)
+                      EK3_DRAG_BCOEF_X=a.bcoef, EK3_DRAG_BCOEF_Y=a.bcoef, WP_SPD=10.0)
         out["params_set"] = {k: bool(set_param(m, k, v)) for k, v in params.items()}
         out["params_read"] = {k: get_param(m, k) for k in ("WP_SPD", "WP_SPD_UP", "WP_SPD_DN", "RTL_ALT_M", "EK3_DRAG_BCOEF_X")}
         t0 = time.time()
@@ -103,7 +104,14 @@ def main(argv=None):
                 fv = v.flight_sw_version
                 out["firmware"] = f"ArduCopter {fv >> 24 & 255}.{fv >> 16 & 255}.{fv >> 8 & 255}"
         # 1. 미션 올리기와 되읽기
-        ok = link.upload_mission(M["items"])
+        ok = False
+        for _ in range(6):                       # 기동 직후에는 미션 저장소가 준비되지 않아 거부될 수 있다
+            while m.recv_match(blocking=False) is not None:
+                pass
+            ok = link.upload_mission(M["items"])
+            if ok:
+                break
+            time.sleep(6.0)
         m.mav.mission_request_list_send(m.target_system, m.target_component)
         cnt = m.recv_match(type="MISSION_COUNT", blocking=True, timeout=10.0)
         out["checks"]["mission_accepted"] = bool(ok)
@@ -128,6 +136,7 @@ def main(argv=None):
         s = run.run(timeout=1500.0, dt=0.05)
         run.close()
         out["runner"] = {k: v for k, v in s.items() if k != "events"}
+        out["v_cap"] = run.v_cap
         out["events"] = [e["msg"] for e in s["events"]][:40]
         rows = run.rows
         out["checks"]["flight_completed"] = s["phase"] == "완료"
