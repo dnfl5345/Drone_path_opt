@@ -66,9 +66,25 @@ PAYLOAD_MAX = dict(m100=0.75, x650=round(X650_SPEC["mtow_kg"] - X650_SPEC["empty
 LABEL = dict(m100="DJI Matrice 100 (실측 보정)", x650="Holybro X650 (대상 기체, 추정)")
 
 
-def get(key: str) -> Drone:
+def calibration_file(key: str):
+    """비행 로그로 보정한 계수 파일의 위치 (dpo-calibrate 가 쓴다): DPO_HOME/calibration/<기체>.json"""
+    from . import config as C
+    return C.ROOT / "calibration" / f"{key}.json"
+
+
+def get(key: str, calibrated: bool = True) -> Drone:
+    """기체 모델. calibrated=True 이고 보정 파일이 있으면 그 계수(η, P0, CdA, 항전 전력)를 쓴다."""
     if key == "m100":
-        return m100()
-    if key == "x650":
-        return x650()
-    raise ValueError(f"알 수 없는 기체: {key}")
+        d = m100()
+    elif key == "x650":
+        d = x650()
+    else:
+        raise ValueError(f"알 수 없는 기체: {key}")
+    f = calibration_file(key)
+    if calibrated and f.exists():
+        import json
+        c = json.loads(f.read_text(encoding="utf-8"))
+        for k in ("eta", "p0", "cda", "p_av"):
+            setattr(d, k, float(c["params"][k]))
+        d.name = f"{d.name.split(' (')[0]} (비행 로그 보정 {c.get('date', '')})"
+    return d

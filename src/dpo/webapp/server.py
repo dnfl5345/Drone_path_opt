@@ -583,11 +583,15 @@ class App:
             if ss is None:
                 raise ValueError("먼저 경로를 생성하세요")
             cx = ss["cx"]
-            ms = mission_from_legs(cx["site"], cx["d"], ss["legs"], cx["t_dep"])
+            mode = (req or {}).get("speed_mode", "file")
+            if mode not in ("file", "command"):
+                raise ValueError("speed_mode 는 file 또는 command")
+            ms = mission_from_legs(cx["site"], cx["d"], ss["legs"], cx["t_dep"], speed_items=(mode == "file"))
             if not ms:
                 raise ValueError("내보낼 수 있는 경로가 없습니다")
-            return dict(drone=DR.LABEL[cx["dkey"]], dep_hour=cx["dep_hour"],
-                        legs=[dict(name=m["name"], legs=m["legs"], wpl=m["wpl"], csv=m["csv"], summary=m["summary"]) for m in ms])
+            return dict(drone=DR.LABEL[cx["dkey"]], drone_key=cx["dkey"], dep_hour=cx["dep_hour"], t_dep=cx["t_dep"], speed_mode=mode,
+                        legs=[dict(name=m["name"], legs=m["legs"], wpl=m["wpl"], csv=m["csv"], summary=m["summary"],
+                                   items=m["items"], plan=m["plan"]) for m in ms])
 
     # ---------------------------------------------------------------- 비행 중 장애물 변경 → 재계획
     def replan(self, req, latency=3.0):

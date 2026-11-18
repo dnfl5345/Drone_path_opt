@@ -24,6 +24,8 @@ dev = ["pytest>=7", "pymavlink>=2.4.40", "build"]
 [project.scripts]
 dpo-server = "dpo.webapp.server:main"
 dpo-plan = "dpo.cli:main"
+dpo-fly = "dpo.flight:main"
+dpo-calibrate = "dpo.logcal:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

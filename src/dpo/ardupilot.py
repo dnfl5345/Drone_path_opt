@@ -82,11 +82,14 @@ def merge_collinear(path, waits):
 
 
 def leg_items(site, drone, path, waits, t_cruise0, mass, ground_delay=0.0, e_before=0.0, e_takeoff=0.0,
-              t_takeoff=0.0, t_land=0.0, e_land=0.0, t_ref=0.0, fr=None, simplify=True):
+              t_takeoff=0.0, t_land=0.0, e_land=0.0, t_ref=0.0, fr=None, simplify=True, speed_items=True):
     """경로(노드 목록) → 미션 항목과 경로표.
 
     t_cruise0 : 첫 노드(이륙을 마친 고도)에서 수평 비행을 시작하는 시각 [s]
     t_ref     : 경로표의 시각 기준 (보통 임무 출발 시각)
+    speed_items : False 면 '명령 방식' 미션 – 속도 항목은 첫 구간 하나만 넣고 속도 변경점으로 경로를 나누지 않는다.
+                  ArduCopter 는 미션의 DO_CHANGE_SPEED 와 외부 COMMAND 의 속도가 같은 값을 덮어써 나중 것이 이긴다
+                  (4.7.2 소스 mode_auto.cpp · GCS_MAVLink_Copter.cpp). 비행 중 속도 갱신을 쓰려면 미션에 속도 항목이 없어야 한다.
     반환: dict(items=[...], rows=[...], summary={...})
     """
     fr = fr or site_frame()
@@ -140,13 +143,16 @@ def leg_items(site, drone, path, waits, t_cruise0, mass, ground_delay=0.0, e_bef
         dist += math.sqrt(lh * lh + (zb - za) ** 2)
         if lh < 1e-6:                                    # 순수 수직 이동
             groups = [(1.0, None, float(sim["t"][-1] - t), float(sim["e"][-1]))]
-        else:
+        elif speed_items:
             groups = _speed_groups(sim, lh, t)
+        else:                                            # 명령 방식: 구간을 나누지 않는다 (속도는 실행기가 보낸다)
+            T_seg = float(sim["t"][-1] - t)
+            groups = [(1.0, lh / max(T_seg, 1e-9), T_seg, float(sim["e"][-1]))]
         for f, v, T, e_cum in groups:
             if v is not None:
                 v_cmd = round(v * 2) / 2.0
                 v_used.append(v_cmd)
-                if v_prev is None or abs(v_cmd - v_prev) >= 0.5:
+                if v_prev is None or (speed_items and abs(v_cmd - v_prev) >= 0.5):
                     add(CMD["CHANGE_SPEED"], FRAME_ABS, p1=1, p2=v_cmd, p3=-1, note="구간 대지속도 [m/s]",
                         t=t - t_ref, soc=soc(e), speed=v_cmd)
                     v_prev = v_cmd
@@ -168,9 +174,9 @@ def leg_items(site, drone, path, waits, t_cruise0, mass, ground_delay=0.0, e_bef
                    home=dict(lat=lat0, lon=lon0, alt_msl=gh), alt_rel_min=float(min(alts)), alt_rel_max=float(max(alts)),
                    speed_min=float(min(v_used)) if v_used else None, speed_max=float(max(v_used)) if v_used else None,
                    distance_m=float(dist), duration_s=float(t + t_land - (t_cruise0 - t_takeoff - ground_delay)),
-                   soc_end=soc(e + e_land),
+                   soc_end=soc(e + e_land), speed_mode="file" if speed_items else "command",
                    params=dict(WP_SPD_UP=drone.vz_up, WP_SPD_DN=drone.vz_dn,
-                               note="계획기는 이 상승·하강률을 가정했다. 구버전 이름: WPNAV_SPEED_UP/DN [cm/s]"))
+                               note="계획기는 이 상승·하강률을 가정했다. 4.6 이하의 이름: WPNAV_SPEED_UP/DN [cm/s]"))
     return dict(items=items, rows=rows, summary=summary)
 
 
@@ -197,7 +203,7 @@ def to_csv(rows) -> str:
     return "\n".join(out) + "\n"
 
 
-def mission_from_legs(site, drone, legs, t_dep, fr=None):
+def mission_from_legs(site, drone, legs, t_dep, fr=None, speed_items=True):
     """webapp 의 leg 목록(App._fly_legs 결과) → 미션 목록.
 
     이륙~착륙 한 번이 미션 하나다. 왕복은 구간마다 하나씩, 순회(중간 착륙 없음)는 전체가 하나의 미션이 된다."""
@@ -222,9 +228,11 @@ def mission_from_legs(site, drone, legs, t_dep, fr=None):
             waits += [float(w) for w in L["waits"]][1:]
         m = leg_items(site, drone, path, waits, L0["t_leg0"] + L0["t_to"] + gd, L0["m"], ground_delay=gd,
                       e_before=L0["e_before"], e_takeoff=L0["e_to"], t_takeoff=L0["t_to"], t_land=Ln["t_ld"],
-                      e_land=Ln["e_ld"], t_ref=t_dep, fr=fr)
+                      e_land=Ln["e_ld"], t_ref=t_dep, fr=fr, speed_items=speed_items)
         name = L0["name"] if len(G) == 1 else "tour"
-        out.append(dict(name=name, legs=[L["name"] for L in G], wpl=to_wpl(m["items"]), csv=to_csv(m["rows"]), **m))
+        out.append(dict(name=name, legs=[L["name"] for L in G], wpl=to_wpl(m["items"]), csv=to_csv(m["rows"]),
+                        plan=dict(path=path, waits=waits, mass=float(L0["m"]), t_cruise0=float(L0["t_leg0"] + L0["t_to"] + gd),
+                                  a=[float(v) for v in L0["a"]], b=[float(v) for v in Ln["b"]]), **m))
     return out
 
 
