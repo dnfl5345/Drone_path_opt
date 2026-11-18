@@ -40,6 +40,8 @@ def build_parser():
     ap.add_argument("--eps", type=float, default=None, help="장애물 위치 불확실성의 위험 한도 ε (예: 0.05)")
     ap.add_argument("--reserve", type=float, default=20.0, help="예비 SOC [%%]")
     ap.add_argument("--no-safeguard", action="store_true", help="안전장치(최단 경로 후보 비교)를 끈다")
+    ap.add_argument("--speed-mode", default="file", choices=["file", "command"],
+                    help="file: 구간 속도를 미션 항목으로 넣음 / command: 속도 항목은 첫 구간만 (dpo-fly 가 비행 중 속도 명령을 보낼 때)")
     ap.add_argument("--out", default=None, metavar="DIR", help="미션 파일을 쓸 폴더 (없으면 요약만 출력)")
     ap.add_argument("--json", action="store_true", help="요약을 JSON 으로 출력")
     ap.add_argument("--check", action="store_true", help="자료와 계획기를 점검하고 끝낸다")
@@ -91,11 +93,11 @@ def main(argv=None):
     out = dict(feasible=r["feasible"], soc_used=r["soc_used"], soc_end=r["soc_end"], legs=legs, errors=r["errors"],
                safeguard=r["safeguard"], drone=r["drone"]["label"], site=C.SITE["label"], dep_hour=a.dep_hour, files=[])
     if r["feasible"] and a.out:
-        m = app.mission()
+        m = app.mission(dict(speed_mode=a.speed_mode))
         d = Path(a.out)
         d.mkdir(parents=True, exist_ok=True)
         for M in m["legs"]:
-            stem = f"{a.site}_{a.drone}_{a.dep_hour:02d}h_{M['name']}"
+            stem = f"{a.site}_{a.drone}_{a.dep_hour:02d}h_{M['name']}" + ("_cmd" if a.speed_mode == "command" else "")
             (d / f"{stem}.waypoints").write_text(M["wpl"], encoding="utf-8")
             (d / f"{stem}.csv").write_text(M["csv"], encoding="utf-8")
             out["files"] += [str(d / f"{stem}.waypoints"), str(d / f"{stem}.csv")]
