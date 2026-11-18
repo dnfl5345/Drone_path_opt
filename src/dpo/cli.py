@@ -46,6 +46,15 @@ def build_parser():
     ap.add_argument("--confidence", type=float, default=None, metavar="LEVEL",
                     help="신뢰수준 (0.9 | 0.95 | 0.99). 주면 예보 오차를 넣은 SOC 분포로 출발 판정을 낸다")
     ap.add_argument("--forecast-age", type=float, default=6.0, metavar="H", help="계획에 쓴 예보가 발표된 뒤 지난 시간 [h]")
+    ap.add_argument("--vg-max", type=float, default=None, metavar="V",
+                    help="계획에 쓰는 대지속도 상한 [m/s] (기체 기본값보다 낮출 때). --wpml 을 주면 기본으로 --wpml-vmax 와 같게 둔다")
+    ap.add_argument("--wpml", default=None, metavar="MODEL",
+                    help="DJI 경로 파일(.kmz)도 함께 쓴다. MODEL: m30 | m30t | m300 | m350 | m3e | m3t | m3m | m3d | m3td (--out 필요)")
+    ap.add_argument("--wpml-vmax", type=float, default=15.0, metavar="V", help="DJI 기종의 최대 경로 속도 [m/s]. 넘는 구간 속도는 깎는다")
+    ap.add_argument("--wpml-finish", default="autoLand", choices=["autoLand", "goHome", "noAction", "gotoFirstWaypoint"],
+                    help="DJI 경로를 마친 뒤의 동작")
+    ap.add_argument("--wpml-rc-lost", default="goBack", choices=["goBack", "goContinue", "landing", "hover"],
+                    help="DJI 조종기 신호가 끊겼을 때의 동작")
     ap.add_argument("--out", default=None, metavar="DIR", help="미션 파일을 쓸 폴더 (없으면 요약만 출력)")
     ap.add_argument("--json", action="store_true", help="요약을 JSON 으로 출력")
     ap.add_argument("--check", action="store_true", help="자료와 계획기를 점검하고 끝낸다")
@@ -54,6 +63,9 @@ def build_parser():
 
 def main(argv=None):
     a = build_parser().parse_args(argv)
+    if a.wpml and not a.out:
+        print("--wpml 은 --out 과 함께 써야 합니다", file=sys.stderr)
+        return 2
     from . import config as C
     C.use_site(a.site)
     missing = C.check_data()
@@ -78,6 +90,9 @@ def main(argv=None):
     req = dict(drone=a.drone, payload=a.payload if a.payload is not None else (0.5 if a.drone == "m100" else 1.0),
                kind=a.kind, dep_hour=a.dep_hour, round_trip=not a.one_way, reserve=a.reserve, safeguard=not a.no_safeguard,
                eps=a.eps, dwell=a.dwell, obstacles=[])
+    vg = a.vg_max if a.vg_max is not None else (a.wpml_vmax if a.wpml else None)
+    if vg is not None:
+        req["vg_max"] = vg
     if a.hub:
         req["hub"] = conv(a.hub)
     if a.dst:
@@ -113,6 +128,18 @@ def main(argv=None):
             (d / f"{stem}.waypoints").write_text(M["wpl"], encoding="utf-8")
             (d / f"{stem}.csv").write_text(M["csv"], encoding="utf-8")
             out["files"] += [str(d / f"{stem}.waypoints"), str(d / f"{stem}.csv")]
+        if a.wpml:
+            import base64
+            try:
+                w = app.wpml(dict(model=a.wpml, v_max=a.wpml_vmax, finish=a.wpml_finish, rc_lost=a.wpml_rc_lost))
+            except ValueError as ex:
+                print(f"입력 오류: {ex}", file=sys.stderr)
+                return 2
+            out["wpml"] = dict(notes=w["notes"], legs=[dict(name=L["name"], **L["summary"]) for L in w["legs"]])
+            for L in w["legs"]:
+                f = d / f"{a.site}_{a.drone}_{a.dep_hour:02d}h_{L['name']}_{a.wpml}.kmz"
+                f.write_bytes(base64.b64decode(L["kmz_b64"]))
+                out["files"].append(str(f))
         (d / f"{a.site}_{a.drone}_{a.dep_hour:02d}h_plan.json").write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
     if a.json:
         print(json.dumps(out, ensure_ascii=False, indent=1))
@@ -137,6 +164,14 @@ def main(argv=None):
             print(f"  경고: {e}")
         for f in out["files"]:
             print(f"  → {f}")
+        if out.get("wpml"):
+            print("  DJI 경로 파일(WPML) – DJI 기체·소프트웨어에서 확인하지 못한 파일입니다. 불러온 뒤 고도·속도·복귀 고도를 확인하세요.")
+            for L in out["wpml"]["legs"]:
+                print(f"    {L['name']:>5}: {L['model_label']} · 경로점 {L['n_waypoints']}개 · 상대 고도 {L['height_min']:.0f}–{L['height_max']:.0f} m · "
+                      f"속도 {L['speed_min']:g}–{L['speed_max']:g} m/s · 복귀 고도 {L['rth_height']:.0f} m · 검사 {'통과' if not L['check'] else L['check']}")
+                for w in L["warnings"]:
+                    print(f"           ! {w}")
+            print(f"    ! {out['wpml']['notes'][0]}")
     if not r["feasible"]:
         return 1
     return 4 if (conf is not None and conf["decision"] != "go") else 0

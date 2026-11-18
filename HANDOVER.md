@@ -1,4 +1,4 @@
-# 인수인계 (2026-11-18 기준, v1.1.0)
+# 인수인계 (2026-11-18 기준, v1.2.0)
 
 ## ① 지금까지 정한 것
 
@@ -43,10 +43,21 @@
   - 발주처 설명용 비교는 '기존 = 최단 + 지면 기준 정속 10 m/s', '대조 = 최단 + 계산한 속도', '제안' 세 가지로 한다. 화면의 근거 문장은 수치에서 만든다 (`App.compare`).
   - 3D 화면의 예시(2026-10-27)는 바람이 센 날이다. 경로·고도의 몫(12–21 %)이 평균(1–5 %)보다 크다는 점을 항상 함께 적는다.
   - 용어는 '예보 시점'(발표 후 경과 시간)으로 통일한다. 명령줄 인자 이름 `--forecast-age` 는 그대로 둔다.
-  - DJI 쪽 설명은 공개 문서에서 확인한 것만 적고 나머지는 `[확인요망]` 으로 둔다. WPML 내보내기는 없다.
+  - DJI 쪽 설명은 공개 문서에서 확인한 것만 적고 나머지는 `[확인요망]` 으로 둔다.
 - **만든·고친 파일**: `src/dpo/webapp/server.py` (`compare`, `/api/compare`), `static/map3d.*`, `scripts/capture_compare.js`, `results/compare_examples.json`, `results/platform_3d_compare_*.json`, `results/figures/platform_3d_compare_*.png`, `scripts/build_deploy_report.js` (2·3·12·13장), `scripts/build_academic_ppt.py` (슬라이드 5장), `tests/test_field.py` (비교 시험).
 - **확인하지 못한 것**: DJI 기체에서의 동작 전부, DJI 의 복귀 판단이 바람을 쓰는지 여부.
 - **회의용 발표자료에도 반영** (31 → 37장): 두 발표자료가 같은 슬라이드 코드(`scripts/build_ppt.py` 의 `add_v11_slides`)를 쓴다. 회의자료에는 대상 기체·여러 날 통계 한 장(`bridge=True`)을 앞에 더 넣는다. 수치를 고치면 두 자료를 모두 다시 만든다.
+
+## v1.2.0: DJI 경로 파일(WPML) 내보내기 (2026-11-18)
+
+- **정한 것**
+  - 규격은 DJI Cloud API 문서의 원본 저장소(`dji-sdk/Cloud-API-Doc`, 2024-11-07 판)에서 읽었다. `developer.dji.com` 은 이 환경의 네트워크에서 열리지 않는다.
+  - 고도는 이륙점 기준 상대 고도(`relativeToStartPoint`)로만 쓴다. 지오이드 자료가 없어 절대 고도를 쓰면 25–30 m 틀릴 수 있다.
+  - `wpml:waypointSpeed` = 그 경로점에서 다음 경로점까지의 속도. ArduPilot 미션 항목(`speed_items=True`)에서 만든다.
+  - `--wpml` 을 주면 계획 단계의 대지속도 상한을 15 m/s 로 낮춘다 (`vg_max`). 깎인 구간이 있으면 SOC 예상을 내지 않는다.
+  - 기본 동작: 종료 `autoLand`, 신호 두절 `goBack`. 운용자가 바꿀 수 있다.
+- **만든·고친 파일**: `src/dpo/wpml.py`, `tests/test_wpml.py`, `docs/dji_wpml.md`, `src/dpo/webapp/server.py` (`wpml`, `/api/wpml`, 계획 요청의 `vg_max`), `static/map3d.*`, `src/dpo/cli.py` (`--wpml*`, `--vg-max`)
+- **확인하지 못한 것**: DJI Pilot 2·FlightHub 2·기체에서 파일이 열리는지, `wpml:ellipsoidHeight` 의 해석, 기종별 최대 경로 속도, 경로점 최소 간격. WPML 지원 기종(M30 등)의 전력 모델이 없다.
 
 ## ③ 다음에 할 일
 
@@ -56,6 +67,7 @@
 4. **Docker 이미지 빌드 확인** (이 환경에는 데몬이 없었다).
 5. **실측 바람과 예보의 차이 측정**, 기상청 고해상도 자료 연동.
 6. 순회 임무의 실시간 운용, 서버 인증.
+7. **DJI 경로 파일 확인**: 내보낸 `.kmz` 를 DJI Pilot 2 에서 불러와 고도·속도·꺾임 방식이 뜻대로 읽히는지 본다 (`docs/dji_wpml.md` 5절). 대상 DJI 기종의 전력 곡선이 있어야 SOC 예상이 맞는다.
 
 ## 확인 방법
 

@@ -707,7 +707,7 @@ async function doPlan() {
     const tour = $("mtype").value === "tour";
     if (tour && !S.tour.length) throw new Error("경유점을 하나 이상 지정하세요");
     const req = { drone: $("drone").value, payload: +$("payload").value, kind: $("kind").value, round_trip: $("rt").checked,
-                  dep_hour: +$("hour").value, reserve: +$("reserve").value, wind: $("wind").value, hub: S.hub, dst: S.dst,
+                  dep_hour: +$("hour").value, reserve: +$("reserve").value, vg_max: $("vgmax").value || null, wind: $("wind").value, hub: S.hub, dst: S.dst,
                   tour: tour ? S.tour : [], dwell: tour ? +$("dwell").value : 0, eps: $("eps").value || null, obstacles: S.obs };
     const res = await api("/api/plan", req);
     S.plan = res; S.mission = null; S.dirty = false; S.planDwell = req.dwell;
@@ -780,6 +780,26 @@ async function dl(kind) {
       if (kind === "wpl") download(`${base}.waypoints`, L.wpl, "text/plain");
       else download(`${base}.csv`, "﻿" + L.csv, "text/csv");
     }
+  } catch (e) { $("errors").textContent = e.message; }
+}
+
+async function dlKmz() {
+  try {
+    const model = $("dji_model").value;
+    const w = await api("/api/wpml", { model });
+    $("k_tab").style.display = "table";
+    $("k_rows").innerHTML = w.legs.map(L => { const s = L.summary;
+      return `<tr><td>${legKo(L.name)}</td><td>${s.n_waypoints}</td><td>${s.height_min.toFixed(0)}–${s.height_max.toFixed(0)} m</td>` +
+        `<td>${s.speed_min}–${s.speed_max} m/s</td><td class="${s.n_clamped ? "bad" : ""}">${s.n_clamped}</td><td>${s.rth_height.toFixed(0)} m</td>` +
+        `<td class="${s.check.length ? "bad" : "ok"}">${s.check.length ? s.check.length + "건" : "통과"}</td></tr>`; }).join("");
+    const notes = [...w.notes, ...w.legs.flatMap(L => [...L.summary.warnings, ...L.summary.check].map(t => `${legKo(L.name)}: ${t}`))];
+    $("k_notes").innerHTML = notes.map(t => `<li>${t}</li>`).join("");
+    for (const L of w.legs) {
+      const bin = atob(L.kmz_b64), buf = new Uint8Array(bin.length);
+      for (let q = 0; q < bin.length; q++) buf[q] = bin.charCodeAt(q);
+      download(`${S.site.site.key}_${S.plan.drone.key}_${w.dep_hour}h_${L.name}_${model}.kmz`, buf, "application/vnd.google-earth.kmz");
+    }
+    S.wpml = w;
   } catch (e) { $("errors").textContent = e.message; }
 }
 
@@ -912,6 +932,7 @@ async function init() {
   };
   $("dl_wpl").onclick = () => dl("wpl");
   $("dl_csv").onclick = () => dl("csv");
+  $("dl_kmz").onclick = dlKmz;
   $("l_bld").onchange = e => { G.bld.visible = e.target.checked; needRender = true; };
   $("l_nfz").onchange = e => { G.nfz.visible = e.target.checked; needRender = true; };
   $("l_floor").onchange = e => { G.floor.visible = e.target.checked; needRender = true; };

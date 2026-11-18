@@ -127,15 +127,15 @@ const c = [];
 c.push(SP(1500));
 c.push(new Paragraph({ alignment: AlignmentType.LEFT, spacing: { after: 200 }, children: [new TextRun({ text: "드론 SoC 최대화 경로계획", font: FONT, size: 52, bold: true, color: NAVY })] }));
 c.push(new Paragraph({ alignment: AlignmentType.LEFT, spacing: { after: 500 }, border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: TEAL, space: 12 } },
-  children: [new TextRun({ text: "경로 비교, 속도 갱신·안전장치, 신뢰도, X650 실증 준비 (배포판 v1.1.0)", font: FONT, size: 30, color: TEAL })] }));
+  children: [new TextRun({ text: "경로 비교, 속도 갱신·안전장치, 신뢰도, X650 실증 준비, DJI 경로 파일 (배포판 v1.2.0)", font: FONT, size: 30, color: TEAL })] }));
 c.push(P("기술 보고서", { size: 26, bold: true, after: 60 }));
-c.push(P("2026년 11월 18일 (v1.0.0 보고서의 개정판)", { size: 22, color: GRAY, after: 700 }));
+c.push(P("2026년 11월 18일 (v1.0.0 보고서의 개정판, v1.2.0 기준)", { size: 22, color: GRAY, after: 700 }));
 c.push(...table("이 문서의 범위", ["항목", "내용"], [
   ["다루는 것", "기존 경로와 제안 경로의 비교(3D 화면), DJI 경로 기능과의 차이, 안전장치와 속도 갱신, 실시간 플랫폼·미션 파일·MAVLink 연결, 폐루프 검증, 예보 시점에 따른 신뢰도, X650 실증 준비, 설치·운용 방법"],
   ["대상 기체", "Holybro X650 (ArduPilot ArduCopter). 전력 모델은 제원 기반 추정이며 비교용으로 DJI M100 실측 보정 모델을 함께 씁니다."],
   ["결과의 성격", "모든 수치는 시뮬레이션입니다. ArduPilot SITL(ArduCopter 4.7.2)에서 통신 절차와 펌웨어 동작을 확인했고, 실기체 비행은 하지 않았습니다."],
-  ["프로그램", "`drone-path-opt` 1.1.0 (명령 `dpo-server`, `dpo-plan`, `dpo-fly`, `dpo-calibrate`)"],
-  ["이번 개정", "2·3·12·13장을 새로 넣었습니다. '예보의 나이'라는 표현을 '예보 시점'으로 바꿨습니다."],
+  ["프로그램", "`drone-path-opt` 1.2.0 (명령 `dpo-server`, `dpo-plan`, `dpo-fly`, `dpo-calibrate`)"],
+  ["이번 개정", "v1.1.0: 2·3·12·13장을 새로 넣고 '예보의 나이'를 '예보 시점'으로 바꿨습니다. v1.2.0: DJI 경로 파일(WPML) 내보내기를 더했습니다 (3.3절)."],
 ], [2, 7.4], { align: [AlignmentType.LEFT, AlignmentType.LEFT] }));
 tabNo = 0;   // 표지의 표는 번호에서 뺀다
 c[c.length - 3] = new Paragraph({ spacing: { after: 70 }, children: [] });
@@ -164,12 +164,12 @@ c.push(P("이 프로그램은 출발지와 도착지를 주면 **배터리(SOC)�
 c.push(...table("한 장 요약", ["질문", "답", "근거"], [
   ["어떤 경로가 더 좋은가", `제안 경로가 기존 경로(최단 + 정속 10 m/s)보다 SOC 소모가 평균 ${rng(ex)} % 적습니다 (7일, ${nAll}건). 3D 화면에서 두 경로를 나란히 볼 수 있습니다.`, "2장, 6장"],
   ["왜 더 좋은가", "속도를 바람에 맞추고, 맞바람이 약한 고도로 날고, 건물을 넘는 대신 돌아가기 때문입니다. 대부분은 속도에서 나옵니다.", "2.3절"],
-  ["DJI 경로 기능과 무엇이 다른가", "DJI는 운용자가 정한 경로와 속도를 따라 납니다. 이 프로그램은 그 경로와 속도를 바람 예보로 계산하고, 출발 전에 가부를 판정합니다.", "3장"],
+  ["DJI 경로 기능과 무엇이 다른가", "DJI는 운용자가 정한 경로와 속도를 따라 납니다. 이 프로그램은 그 경로와 속도를 바람 예보로 계산하고, 출발 전에 가부를 판정합니다. 계산 결과는 DJI 경로 파일(.kmz)로도 내보냅니다 (DJI 기체에서는 미확인).", "3장"],
   ["비행 중에는 무엇을 하나", `기체가 잰 바람으로 구간 속도를 다시 정합니다. 연결 전 플랫폼 대비 SOC 소모가 ${rng(p3)} % 줄었습니다 (${n15}건).`, "7–11장"],
   ["안전한가", `가로지르는 장애물을 넣은 ${obsN}건에서 침범이 ${obsCol}건입니다. 속도 갱신이 위험구간과 겹치면 채택하지 않습니다 (${obsRej}회 보류).`, "11장"],
   ["예보가 틀리면", "예보 시점이 6시간 전이면 SOC 여유 4 %, 30시간 전이면 14 %가 필요합니다. 신뢰수준 95 %로 가능·주의·불가를 판정합니다.", "12장"],
   ["실증 기체에 넣을 수 있나", "ArduCopter 4.7.2 SITL에서 미션 올리기, 위치 추종, 속도 명령, 바람 수신을 확인했습니다.", "13장"],
-  ["설치해서 쓸 수 있나", "wheel을 새 가상환경에 설치해 저장소 밖에서 서버와 명령줄이 동작했습니다. 시험 56개가 통과합니다.", "14–15장"],
+  ["설치해서 쓸 수 있나", "wheel을 새 가상환경에 설치해 저장소 밖에서 서버와 명령줄이 동작했습니다. 시험 60개가 통과합니다.", "14–15장"],
   ["확인하지 못한 것", "실기체 비행, X650의 실제 전력 곡선과 최대 속도, 관측 바람과 예보의 차이, Docker 이미지 빌드입니다.", "15–16장"],
 ], [2.3, 5.6, 1.5], { align: [AlignmentType.LEFT, AlignmentType.LEFT, AlignmentType.CENTER], size: 17 }));
 c.push(H2("1.1 결과를 읽을 때 알아 둘 점"));
@@ -245,7 +245,7 @@ c.push(NUM("지도를 끌어 돌려 보면 두 경로의 고도 차이를 볼 �
 // 3 DJI 경로 기능과의 차이
 c.push(H1("3. 기존 DJI 경로 기능과의 차이"));
 c.push(P("DJI 기체의 경로 기능(웨이포인트 비행)은 **운용자가 정한 경로를 정확히 따라 나는** 기능입니다. 이 프로그램은 그 앞 단계, 곧 **어떤 경로·고도·속도로 날아야 배터리를 가장 덜 쓰는지를 계산하는** 기능입니다. 둘은 서로 대신하는 기능이 아니고 순서가 다른 기능입니다."));
-c.push(note("이 장의 DJI 쪽 내용은 DJI의 공개 개발 문서(경로 파일 규격 WPML, Mobile SDK 안내)와 공개 자료를 읽고 정리한 것입니다. DJI 기체로 직접 확인하지 않았고, 기종과 펌웨어에 따라 다를 수 있습니다. 확인이 필요한 곳은 `[확인요망]`으로 표시했습니다. 출처는 3.4절에 있습니다."));
+c.push(note("이 장의 DJI 쪽 내용은 DJI의 공개 개발 문서(경로 파일 규격 WPML, Mobile SDK 안내)와 공개 자료를 읽고 정리한 것입니다. DJI 기체로 직접 확인하지 않았고, 기종과 펌웨어에 따라 다를 수 있습니다. 확인이 필요한 곳은 `[확인요망]`으로 표시했습니다. 출처는 3.4절에 있습니다. WPML 규격([1], [2])은 같은 문서의 원본인 공개 저장소 `dji-sdk/Cloud-API-Doc`(2024-11-07 판)에서 읽었습니다."));
 c.push(H2("3.1 DJI 경로 기능이 하는 일"));
 c.push(...table("DJI 경로(웨이포인트) 기능의 구성", ["항목", "내용", "출처"], [
   ["경로 파일", "경로점, 고도, 속도, 경로점에서의 동작을 담은 파일(WPML: `template.kml`, `waylines.wpml`)을 기체가 실행합니다.", "[1], [2]"],
@@ -263,19 +263,28 @@ c.push(...table("DJI 경로 기능과 이 프로그램", ["항목", "DJI 경로 
   ["바람 예보", "경로를 만드는 데 쓰지 않습니다. `[확인요망: 공식 문서에서 바람 예보를 쓴다는 설명을 찾지 못했습니다]`", "3차원 예보 바람(GFS)을 지형에 맞춰 시각별로 씁니다.", "바람에 따라 경로와 속도가 달라집니다."],
   ["배터리 판단", "비행 중 남은 전력으로 복귀를 판단합니다.", "출발 전에 도착 SOC를 계산하고, 예보 오차를 감안한 신뢰수준으로 가능·주의·불가를 냅니다.", "되돌아오는 대신 출발 전에 고칩니다 (⑤)."],
   ["다른 항공기·금지구역", "센서가 감지한 범위에서 반응합니다.", "예측 궤적을 받아 시간과 공간에서 미리 피하는 경로를 만들고, 비행 중 바뀌면 다시 계획합니다.", "센서 범위 밖의 위험을 미리 피합니다."],
-  ["결과물", "기체가 경로 파일을 실행합니다.", "ArduPilot 미션 파일(.waypoints)과 속도 명령(MAVLink)을 냅니다. DJI 경로 파일(WPML) 내보내기는 아직 없습니다.", "3.3절"],
+  ["결과물", "기체가 경로 파일을 실행합니다.", "ArduPilot 미션 파일(.waypoints)과 속도 명령(MAVLink), 그리고 DJI 경로 파일(WPML .kmz)을 냅니다.", "3.3절"],
 ], [1.6, 2.7, 3.0, 2.2], { align: [AlignmentType.LEFT, AlignmentType.LEFT, AlignmentType.LEFT, AlignmentType.LEFT], size: 17 }));
 c.push(H2("3.3 숫자로 본 차이와 DJI 기체에 쓰는 방법"));
 c.push(B(`**2장의 '기존 경로'가 DJI 경로 기능의 일반적인 사용을 본뜬 것입니다.** 운용자가 직선 경로와 정속 10 m/s를 넣는 경우입니다. 이 기준 대비 SOC 소모가 평균 ${rng(ex)} % 줄었습니다 (7일, ${nAll}건).`));
 c.push(B("**DJI 기체로 비행해서 비교한 값이 아닙니다.** M100의 전력 모델은 공개된 실측 비행 자료로 보정했지만, 비교 자체는 시뮬레이션입니다."));
 c.push(B(`**숙련된 운용자가 바람을 보고 속도를 잘 고르면 차이는 줄어듭니다.** 그 경우의 상한이 '대조'(최단 경로 + 계산한 속도)이고, 그 대비로는 평균 ${rng(pth)} %가 남습니다. 다만 구간마다 다른 최적 속도를 손으로 정하기는 어렵습니다.`));
-c.push(B("**계산 결과는 기체와 무관합니다.** 경로점·고도·구간 속도이므로 WPML의 경로점별 속도 항목에 넣을 수 있는 형태입니다. 변환기는 만들지 않았습니다 `[확인요망: 대상 기종의 WPML 지원 범위]`."));
-c.push(B("**비행 중 속도 갱신은 따로 확인해야 합니다.** DJI 기체에서 외부 명령으로 경로 비행의 속도를 바꿀 수 있는지는 SDK에 달려 있습니다 `[확인요망: 사용 기종의 Mobile SDK·Payload SDK·Cloud API 지원]`."));
+c.push(B("**계산 결과를 DJI 경로 파일로 내보냅니다 (v1.2.0).** `dpo-plan --wpml m30 --out missions/` 또는 3D 화면의 'DJI 경로 파일 (.kmz)'. DJI Pilot 2·FlightHub 2가 읽는 `template.kml`과 MSDK V5가 읽는 `waylines.wpml`이 함께 들어갑니다."));
+c.push(...table("계획이 DJI 경로 파일에 들어가는 방식", ["계획의 값", "WPML 요소", "정한 것"], [
+  ["경로점의 고도", "`wpml:executeHeight`, `wpml:height`", "이륙점 기준 상대 고도. 해발과 타원체고의 차이(지오이드고, 한국 약 25–30 m)로 틀리지 않게 하기 위해서입니다."],
+  ["구간 대지속도", "`wpml:waypointSpeed`", "그 경로점에서 다음 경로점까지의 속도 (문서의 정의). 기종 한계(기본 15 m/s)를 넘지 않게 계획 단계에서 상한을 둡니다."],
+  ["호버 대기", "`hover` 동작 (`wpml:hoverTime`)", "그 경로점은 정지 방식으로 지납니다."],
+  ["꺾이는 경로점", "`wpml:waypointTurnMode`", "멈추지 않고 미리 돕니다. M300·M350 RTK는 `coordinateTurn`, 그 밖의 기종은 직선 유지 통과 방식입니다."],
+  ["복귀 고도", "`wpml:globalRTHHeight`", "경로 주변에서 가장 높은 지형·건물 + 20 m"],
+], [2.0, 3.0, 4.4], { align: [AlignmentType.LEFT, AlignmentType.LEFT, AlignmentType.LEFT], size: 17 }));
+c.push(B("**DJI 기체와 DJI 소프트웨어에서 이 파일을 열어 확인하지 못했습니다.** 확인한 것은 공식 문서의 구조·요소·값 범위와의 일치, 그리고 다시 읽었을 때 계획과 같은지입니다. 불러온 뒤 경로점 고도·속도·복귀 고도·신호 두절 동작을 반드시 확인해야 합니다 (`docs/dji_wpml.md`의 점검표)."));
+c.push(B("**WPML을 지원하는 DJI 기종의 전력 모델이 없습니다.** 프로그램의 DJI 기체 모델은 Matrice 100뿐이라, 내보낸 속도는 그 모델에서 최적인 값이고 SOC 예상은 대상 기종에 맞지 않습니다 `[자료필요: 대상 DJI 기종의 정속 비행 전력 기록]`."));
+c.push(B("**비행 중 속도 갱신은 경로 파일로 할 수 없습니다.** DJI 기체에서 외부 명령으로 경로 비행의 속도를 바꿀 수 있는지는 SDK에 달려 있습니다 `[확인요망: 사용 기종의 Mobile SDK·Payload SDK·Cloud API 지원]`."));
 c.push(B("**이번 실증 기체는 Holybro X650(ArduPilot)입니다.** DJI 부품이 없어 ArduPilot 미션과 MAVLink로 연결했습니다 (10장, 13장)."));
 c.push(H2("3.4 출처"));
 c.push(...table("이 장에서 참고한 자료", ["번호", "자료", "주소"], [
   ["[1]", "DJI Cloud API 문서 – WPML 개요", "developer.dji.com/doc/cloud-api-tutorial/en/api-reference/dji-wpml/overview.html"],
-  ["[2]", "DJI Cloud API 문서 – WPML 공통 요소", "developer.dji.com/doc/cloud-api-tutorial/en/api-reference/dji-wpml/common-element.html"],
+  ["[2]", "DJI Cloud API 문서 – WPML 공통 요소 외", "developer.dji.com/doc/cloud-api-tutorial/en/api-reference/dji-wpml/common-element.html"],
   ["[3]", "DJI Mobile SDK 안내 – Waypoint", "developer.dji.com/doc/mobile-sdk-tutorial/en/tutorials/waypoint.html"],
   ["[4]", "DJI SDK 포럼 – Follow surface mode", "sdk-forum.dji.net/hc/en-us/community/posts/16794598431897-Follow-surface-mode"],
   ["[5]", "heliguy – 지형 추종 기능 소개 (판매사 자료)", "heliguy.com/blogs/posts/benefits-of-terrain-mode-with-dji-drones-for-aerial-surveying"],
@@ -684,7 +693,7 @@ c.push(B("자세한 절차와 기체 설정 점검표는 `docs/field_demo_x650.m
 c.push(H1("14. 배포"));
 c.push(H2("14.1 패키지"));
 c.push(...table("패키지 구성", ["항목", "내용"], [
-  ["이름 · 버전", "`drone-path-opt` 1.1.0 (순수 파이썬 wheel)"],
+  ["이름 · 버전", "`drone-path-opt` 1.2.0 (순수 파이썬 wheel)"],
   ["명령", "`dpo-server` (플랫폼 서버), `dpo-plan` (명령줄 계획·미션 파일), `dpo-fly` (기체 연결 실행기), `dpo-calibrate` (로그로 전력 모델 보정)"],
   ["기본 의존성", "numpy, scipy, numba, matplotlib"],
   ["선택 설치", "`mavlink` (기체 연결), `data` (지형·예보 내려받기), `report` (자료 생성), `dev` (시험)"],
@@ -741,7 +750,7 @@ c.push(note("서버에는 인증이 없습니다. `0.0.0.0`으로 열 때는 신
 
 // 15 시험
 c.push(H1("15. 시험과 검증 범위"));
-c.push(...table("시험 (pytest 56개)", ["파일", "개수", "확인하는 것"], [
+c.push(...table("시험 (pytest 60개)", ["파일", "개수", "확인하는 것"], [
   ["`tests/test_core.py`", "17", "전력 모델, 계획기, 시공간 탐색, 장애물 표, 재계획"],
   ["`tests/test_live.py`", "5", "실시간 엔진: 침입기 회피, 비상 정지, 배터리 예비, 개선"],
   ["`tests/test_target.py`", "7", "X650 모델, 미션 내보내기, 3D 장면, 순회, 지역 전환"],
@@ -749,6 +758,7 @@ c.push(...table("시험 (pytest 56개)", ["파일", "개수", "확인하는 것"
   ["`tests/test_deploy.py`", "8", "속도 갱신·안전장치의 연결 (아래)"],
   ["`tests/test_reliability.py`", "8", "바람 오차 모형, 신뢰수준 계산, 출발 판정, 계절 권고"],
   ["`tests/test_field.py`", "7", "로그 보정, 실행기와 모의 기체, 틀린 바람 측정 버리기, 신뢰도 판정, 기존 경로와의 비교"],
+  ["`tests/test_wpml.py`", "4", "DJI 경로 파일: 구조와 되읽기, 기종·옵션, 미션 항목 변환, 계획과의 일치"],
 ], [3.2, 0.9, 5.3], { align: [AlignmentType.LEFT, AlignmentType.CENTER, AlignmentType.LEFT] }));
 c.push(...table("속도 갱신·안전장치 연결의 시험 (`test_deploy.py`)", ["시험", "확인하는 것"], [
   ["바람 편차", "지수평활, 상한, 잘못된 측정 버리기"],
@@ -761,7 +771,7 @@ c.push(...table("속도 갱신·안전장치 연결의 시험 (`test_deploy.py`)
   ["엔진 + 연결", "한 편을 날리며 보낸 속도 명령이 모두 수락됨"],
 ], [3.0, 6.4], { align: [AlignmentType.LEFT, AlignmentType.LEFT] }));
 c.push(...table("검증 범위", ["항목", "방법", "결과"], [
-  ["단위·통합 시험", "`pytest -q` (본 환경, CI: Python 3.10·3.12)", "56개 통과"],
+  ["단위·통합 시험", "`pytest -q` (본 환경, CI: Python 3.10·3.12)", "60개 통과"],
   ["3D 화면의 경로 비교", "브라우저 자동 조작으로 계획 → 비교 → 화면 저장 (세 사례)", "2장"],
   ["설치", "wheel → 새 가상환경 → 저장소 밖에서 `dpo-plan`, `dpo-server`", "동작, `/api/health` 200"],
   ["실시간 화면", "브라우저 자동 시험: 설정 → 비행 → 갱신 채택 → 명령 표 → 미션 내려받기", "콘솔 오류 없음"],
@@ -810,7 +820,7 @@ c.push(...table("한계", ["한계", "영향"], [
   ["바람 편차를 한 지점에서 재어 영역 전체에 적용합니다.", "장소마다 다른 국지 바람에서는 보정이 맞지 않을 수 있습니다."],
   ["실기체에서 시험하지 않았습니다. SITL의 기체는 X650이 아닙니다.", "최대 대기속도, 가감속, 바람 추정 계수가 실제와 다를 수 있습니다."],
   ["신뢰수준은 6–9시간 전 예보까지만 임무 단위로 검증했습니다.", "전날 이전 예보의 여유 값은 바람 오차 크기에서 계산한 값입니다."],
-  ["DJI 기체용 경로 파일(WPML) 내보내기가 없습니다.", "DJI 기체에 쓰려면 변환기를 만들어야 합니다."],
+  ["DJI 경로 파일(WPML)은 DJI 기체·소프트웨어에서 확인하지 못했습니다. 지원 기종의 전력 모델도 없습니다.", "불러오기 실패나 고도 해석의 차이가 있을 수 있고, SOC 예상은 그 기종에 맞지 않습니다."],
   ["순회 임무는 실시간 화면에서 지원하지 않습니다.", "계획과 미션 파일까지만 됩니다."],
 ], [5.2, 4.2], { align: [AlignmentType.LEFT, AlignmentType.LEFT] }));
 c.push(H2("16.1 다음 단계"));
@@ -820,7 +830,7 @@ c.push(...table("다음 단계 (우선순위 순)", ["순위", "할 일", "필�
   ["3", "비교 비행", "기존 경로와 제안 경로를 같은 날 번갈아 비행 (10 % 차이는 4쌍, 5 % 차이는 7쌍 필요 추정)"],
   ["4", "속도 갱신 비행", "명령 방식 미션 + `dpo-fly`"],
   ["5", "관측 바람과 예보의 차이 측정", "실증 지역의 비행 고도 바람, 기상청 고해상도 자료"],
-  ["6", "DJI 경로 파일(WPML) 내보내기", "대상 기종과 SDK 지원 범위의 확인"],
+  ["6", "DJI 경로 파일을 DJI Pilot 2에서 불러와 확인, 대상 기종의 전력 곡선 측정", "DJI 기체(M30 등), 정속 비행 기록"],
   ["7", "Docker 이미지 빌드 확인, 서버 인증", "운용 환경"],
 ], [0.8, 3.9, 4.7], { align: [AlignmentType.CENTER, AlignmentType.LEFT, AlignmentType.LEFT] }));
 
@@ -835,6 +845,8 @@ c.push(...table("`dpo-plan`의 인자", ["인자", "뜻"], [
   ["`--no-safeguard`", "안전장치 끔"],
   ["`--speed-mode file|command`", "속도 항목을 미션에 넣을지(file), 비행 중 명령으로 보낼지(command)"],
   ["`--confidence LEVEL`, `--forecast-age H`", "신뢰수준 출발 판정, 예보 시점(발표 후 경과 시간 [h])"],
+  ["`--wpml MODEL`, `--wpml-vmax`, `--wpml-finish`, `--wpml-rc-lost`", "DJI 경로 파일(.kmz)도 쓰기: 기종, 최대 경로 속도, 종료 동작, 신호 두절 동작"],
+  ["`--vg-max V`", "계획에 쓰는 대지속도 상한 [m/s]"],
   ["`--out DIR`, `--json`, `--check`", "미션 파일 폴더, JSON 출력, 점검"],
 ], [4.6, 4.8], { align: [AlignmentType.LEFT, AlignmentType.LEFT] }));
 c.push(P("종료 코드는 0(임무 가능), 1(임무 불가), 2(입력·자료 오류), 4(신뢰수준 판정이 '가능'이 아님)입니다."));
@@ -859,7 +871,8 @@ c.push(...table("산출물", ["파일", "내용"], [
   ["`scripts/exp_reliability.py` → `results/E16_*.json`", "신뢰도 실험과 결과"],
   ["`scripts/sitl_check.py`, `sitl_speed_test.py` → `results/sitl_*.json`", "SITL 검증"],
   ["`scripts/capture_compare.js` → `results/figures/platform_3d_compare_*.png`", "3D 비교 화면 저장"],
-  ["`tests/`", "시험 56개"],
+  ["`src/dpo/wpml.py`, `docs/dji_wpml.md`", "DJI 경로 파일(WPML .kmz) 내보내기와 설명"],
+  ["`tests/`", "시험 60개"],
   ["`scripts/exp_live_closed_loop.py` → `results/E15_*.json`", "폐루프 검증과 결과"],
   ["`results/missions/live_remaining_sample.*`", "남은 구간 미션의 예"],
   ["`docs/deployment.md`, `reliability.md`, `field_demo_x650.md`, `HANDOVER.md`", "배포 안내, 신뢰도, 실증 준비서, 인수인계"],
@@ -877,12 +890,13 @@ c.push(...table("용어", ["용어", "뜻"], [
   ["신뢰수준", "예보가 틀릴 것을 감안했을 때 임무가 성립할 확률의 요구값 (기본 95 %)"],
   ["기존 경로 / 대조", "최단 경로 + 지면 기준 정속 10 m/s / 같은 경로 + 계산한 속도"],
   ["SITL", "실제 비행 제어 펌웨어를 컴퓨터에서 실행하는 모의 환경"],
+  ["WPML", "DJI의 경로 파일 규격. `.kmz` 안에 편집용 `template.kml`과 실행용 `waylines.wpml`이 들어 있습니다."],
   ["폐루프 검증", "계획·비행·감시·갱신이 서로 영향을 주는 전체 과정을 돌려서 재는 것"],
 ], [2.6, 6.8], { align: [AlignmentType.LEFT, AlignmentType.LEFT] }));
 
 // ------------------------------------------------------------------ 문서
 const doc = new Document({
-  creator: "drone-path-opt", title: "드론 SoC 최대화 경로계획 – 배포판 v1.1.0 기술 보고서",
+  creator: "drone-path-opt", title: "드론 SoC 최대화 경로계획 – 배포판 v1.2.0 기술 보고서",
   styles: {
     default: {
       document: { run: { font: FONT, size: 21 } },
@@ -899,7 +913,7 @@ const doc = new Document({
   sections: [{
     properties: { page: { size: { width: 11906, height: 16838 }, margin: { top: 1300, bottom: 1250, left: 1247, right: 1247 } } },
     headers: { default: new Header({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { after: 0 },
-      children: [new TextRun({ text: "드론 SoC 최대화 경로계획 · 배포판 v1.1.0", font: FONT, size: 16, color: GRAY })] })] }) },
+      children: [new TextRun({ text: "드론 SoC 최대화 경로계획 · 배포판 v1.2.0", font: FONT, size: 16, color: GRAY })] })] }) },
     footers: { default: new Footer({ children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 0 },
       children: [new TextRun({ children: [PageNumber.CURRENT], font: FONT, size: 18, color: GRAY })] })] }) },
     children: c,

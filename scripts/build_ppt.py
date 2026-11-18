@@ -398,7 +398,7 @@ def add_v11_slides(D, title=None, hook=None, bridge=False):
             ["바람 예보", "경로 생성에 쓰지 않음 [확인요망]", "3차원 예보 바람(GFS)을 시각별로 사용"],
             ["배터리", "비행 중 남은 전력으로 복귀 판단 [확인요망]", "출발 전 도착 SOC와 신뢰수준 판정 (가능·주의·불가)"],
             ["다른 항공기", "센서 감지 범위에서 반응 [확인요망]", "예측 궤적으로 시공간에서 미리 회피, 비행 중 재계획"],
-            ["결과물", "기체가 경로 파일(WPML) 실행", "ArduPilot 미션 + MAVLink 속도 명령 (WPML 내보내기 없음)"]]
+            ["결과물", "기체가 경로 파일(WPML) 실행", "ArduPilot 미션 + MAVLink 속도 명령, DJI 경로 파일(.kmz) 내보내기 (DJI 기체 미확인)"]]
     table(s, X0, 1.2, W, rows, [1.5, 4.6, 6.05], row_h=0.5, head_size=13, body_size=12.5, first_col_center=False,
           aligns=[PP_ALIGN.LEFT, PP_ALIGN.LEFT, PP_ALIGN.LEFT])
     items(s, X0, 5.35, W, 1.5, [
@@ -409,8 +409,8 @@ def add_v11_slides(D, title=None, hook=None, bridge=False):
     source(s, "DJI Cloud API 문서 (WPML overview, common element) · DJI Mobile SDK Waypoint 안내 · DJI SDK 포럼 (follow surface) · 2026-11 열람")
     notes(s, "DJI의 경로 기능과 무엇이 다른지 묻는 경우가 많습니다. DJI의 웨이포인트 비행은 운용자가 정한 경로점과 속도를 정확히 따라 나는 "
              "기능입니다. 본 연구의 프로그램은 그 앞 단계, 곧 어떤 경로와 고도와 속도로 날아야 배터리를 가장 덜 쓰는지를 계산합니다. "
-             "그래서 둘은 서로 대신하는 기능이 아닙니다. 계산 결과는 경로점과 구간 속도이므로 DJI 경로 파일에도 넣을 수 있는 형태이지만, "
-             "변환기는 만들지 않았습니다. 이번 실증 기체는 ArduPilot을 쓰는 X650입니다. 표에서 확인요망으로 적은 칸은 공식 문서에서 "
+             "그래서 둘은 서로 대신하는 기능이 아닙니다. 계산 결과는 경로점과 구간 속도이므로 DJI 경로 파일에도 넣을 수 있는 형태입니다. "
+             "DJI 경로 파일로 내보내는 기능도 만들었습니다. 다만 DJI 기체에서 열어 확인하지는 못했습니다. 이번 실증 기체는 ArduPilot을 쓰는 X650입니다. 표에서 확인요망으로 적은 칸은 공식 문서에서 "
              "근거를 찾지 못했거나 기종에 따라 다른 내용입니다.")
 
     if E16:
@@ -1069,7 +1069,7 @@ def build(template, out):
         [("□ 향후 계획", {"size": 18, "color": INK})],
         [(" ○ X650 보정 비행(전력 곡선·최대 속도·바람 추정) → 기존 vs 제안 비교 비행", {})],
         [(" ○ 실증 지역 관측 바람으로 예보 오차 재측정, 기상청 LDAPS(1.5 km) 연동", {})],
-        [(" ○ DJI 경로 파일(WPML) 내보내기, DJI 기체에서의 속도 갱신 가능 여부 확인", {})],
+        [(" ○ DJI 경로 파일을 DJI Pilot 2에서 확인, 대상 DJI 기종의 전력 곡선 측정", {})],
         [(" ○ 감시 주기·탐지 시각·반응 시간 하한 공동 설계, 드론 원격식별 항적 검증 → 논문 투고", {})],
         [(" ○ 다중 배송지(VRP) 결합, UTM 비행승인·관제권 반영", {})]], size=12.5,
         space_after=5)
@@ -1077,7 +1077,7 @@ def build(template, out):
     textbox(s, 8.4, 4.35, 4.3, 0.35, [[("3D 경로 (지형·건물 위)", {"size": 12, "color": GRAY})]], align=PP_ALIGN.CENTER)
     sp = box(s, 8.4, 4.8, 4.3, 1.35, fill=LIGHT, shadow=False)
     box_text(sp, [[("코드·재현", {"color": TITLE, "size": 14})],
-                  [("src/dpo: 데이터·에너지·바람장·탐색기\nscripts/run_experiments.py → make_figures.py\ntests/: 시험 56종 · pip 설치 (dpo-server 등)\ndocs/: 배포 보고서 · 신뢰도 · 실증 준비서",
+                  [("src/dpo: 데이터·에너지·바람장·탐색기\nscripts/run_experiments.py → make_figures.py\ntests/: 시험 60종 · pip 설치 (dpo-server 등)\ndocs/: 배포 보고서 · 신뢰도 · 실증 준비서",
                     {"size": 11, "color": INK})]], anchor=MSO_ANCHOR.TOP)
     notes(s, "실제 운용 시 판교 일대는 서울공항 관제권으로 비행승인 필요. 비행금지구역 원은 예시(가상). 이번 추가분의 수치는 모두 "
              "시뮬레이션이며 X650 전력 모델은 추정. 자세한 내용은 docs/drone_soc_deployment_report.docx.")

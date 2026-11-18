@@ -16,6 +16,7 @@ API
   GET  /api/wind3d?hour=15       고도 레이어별 바람 벡터
   POST /api/plan {..., drone: m100|x650}   기체 선택 (x650 = 실증 대상 기체, 탑재 0~2.2 kg)
   POST /api/mission {}           마지막 계획 → ArduPilot 미션(QGC WPL 110)·경로표(CSV)
+  POST /api/wpml {model}         마지막 계획 → DJI 경로 파일(WPML .kmz, base64)
 
 실시간 운용 (/live 화면, dpo.live.LiveEngine)
   POST /api/live/start   {임무 설정, obstacles}     비행 시작 (시계·감시·재계획 스레드)
@@ -294,6 +295,18 @@ class App:
             if str(eps) not in ADSB["q"]:
                 raise ValueError("실측 분위수 모양은 ε = " + " / ".join(ADSB["q"]) + " 만 지원")
         d = self.drones[dkey]
+        vg_cap = req.get("vg_max")
+        if vg_cap not in (None, ""):                         # 대지속도 상한 (예: DJI 경로 파일로 내보낼 때 기종 한계 15 m/s)
+            vg_cap = float(vg_cap)
+            if not (5.0 <= vg_cap <= 30.0):
+                raise ValueError("대지속도 상한은 5~30 m/s")
+            if vg_cap < d.vg_max:
+                import dataclasses
+                d = dataclasses.replace(d, vg_max=vg_cap)
+            else:
+                vg_cap = None
+        else:
+            vg_cap = None
         m0 = d.m_empty
         m_out, m_back = (m0 + payload, m0) if kind == "delivery" else (m0, m0 + payload)
         if tour:
@@ -307,13 +320,13 @@ class App:
             legs_req = [("out", hub, dst, m_out)]
             if req.get("round_trip", True):
                 legs_req.append(("back", dst, hub, m_back))
-        pkey = (wind, dkey)
+        pkey = (wind, dkey, vg_cap)
         if pkey not in self.planners:
             self.planners[pkey] = STPlanner(site, d)
         return dict(site=site, wind=wind, d=d, t_dep=(dep_hour - KST) * 3600.0, dep_hour=dep_hour, legs_req=legs_req,
                     E_usable=d.battery_wh * 3600 * (1 - reserve / 100.0), reserve=reserve, max_wait=max_wait,
                     weight=weight, eps=eps, shape=shape, SP=self.planners[pkey], dkey=dkey, payload=payload,
-                    tour=bool(tour), dwell=dwell, tour_pts=tour, safeguard=safeguard)
+                    tour=bool(tour), dwell=dwell, tour_pts=tour, safeguard=safeguard, vg_max=float(d.vg_max))
 
     def _fly_legs(self, cx, legs_req, t, e_used, first=None, reuse=None):
         """legs_req 를 순서대로 계획·시뮬레이션. first=(시작노드, 시작시각, 실행된 앞부분 sim, 이륙에너지, 이륙시간)
@@ -592,6 +605,50 @@ class App:
             return dict(drone=DR.LABEL[cx["dkey"]], drone_key=cx["dkey"], dep_hour=cx["dep_hour"], t_dep=cx["t_dep"], speed_mode=mode,
                         legs=[dict(name=m["name"], legs=m["legs"], wpl=m["wpl"], csv=m["csv"], summary=m["summary"],
                                    items=m["items"], plan=m["plan"]) for m in ms])
+
+    def wpml(self, req=None):
+        """마지막으로 계획한 경로를 DJI 경로 파일(WPML, .kmz)로 내보낸다. 이륙~착륙 한 번이 파일 하나다.
+
+        req: model (m30 | m30t | m300 | m350 | m3e | m3t | m3m | m3d | m3td), finish, rc_lost, v_max, turn, rth_height
+        고도는 이륙점 기준 상대 고도. 복귀 고도를 주지 않으면 경로를 둘러싼 직사각형(+100 m) 안의 가장 높은 지형·건물 + 20 m 로 한다.
+        DJI 기체나 DJI 소프트웨어에서 열어 본 적은 없다 (dpo.wpml 의 설명 참고)."""
+        import base64
+        from .. import wpml as WP
+        from ..ardupilot import mission_from_legs
+        req = req or {}
+        with self.lock:
+            ss = getattr(self, "session", None)
+            if ss is None:
+                raise ValueError("먼저 경로를 생성하세요")
+            cx = ss["cx"]
+            site = cx["site"]
+            ms = mission_from_legs(site, cx["d"], ss["legs"], cx["t_dep"], speed_items=True)
+            if not ms:
+                raise ValueError("내보낼 수 있는 경로가 없습니다")
+            opt = {k: req[k] for k in ("model", "finish", "rc_lost", "turn", "dock") if req.get(k) is not None}
+            if req.get("v_max") is not None:
+                opt["v_max"] = float(req["v_max"])
+            legs = []
+            for m in ms:
+                path = m["plan"]["path"]
+                j0, i0 = path[0][1], path[0][2]
+                pad = int(math.ceil(100.0 / site.dx))
+                js, is_ = [p[1] for p in path], [p[2] for p in path]
+                box = site.surface[max(min(js) - pad, 0):max(js) + pad + 1, max(min(is_) - pad, 0):max(is_) + pad + 1]
+                h_route = max(it["alt"] for it in m["items"] if it["frame"] == 3)
+                rth = float(req["rth_height"]) if req.get("rth_height") is not None else \
+                    math.ceil(max(float(np.nanmax(box)) - float(site.ground[j0, i0]) + 20.0, h_route))
+                w = WP.from_items(m["items"], rth_height=rth, **opt)
+                sm = dict(w["summary"], soc_end=m["summary"]["soc_end"], duration_s=m["summary"]["duration_s"], check=WP.check(w["kmz"], w["summary"]["v_max"]))
+                if sm["n_clamped"]:
+                    sm["soc_end"] = None                       # 속도를 깎으면 계획의 SOC 예상이 맞지 않는다
+                legs.append(dict(name=m["name"], legs=m["legs"], kmz_b64=base64.b64encode(w["kmz"]).decode("ascii"),
+                                 template=w["template"], waylines=w["waylines"], summary=sm))
+            note = [f"계획에 쓴 전력 모델은 {DR.LABEL[cx['dkey']]} 입니다. 내보내는 기종({legs[0]['summary']['model_label']})의 전력 모델이 아니므로 "
+                    "SOC 예상과 최적 속도는 그 기종에 맞지 않습니다.",
+                    "DJI 기체·DJI Pilot 2 에서 이 파일을 열어 확인하지 못했습니다. 불러온 뒤 경로점 고도·속도·복귀 고도·신호 두절 동작을 반드시 확인하세요.",
+                    "비행 중 속도 갱신은 이 파일로 할 수 없습니다. 계획한 구간 속도만 들어 있습니다."]
+            return dict(drone=DR.LABEL[cx["dkey"]], drone_key=cx["dkey"], dep_hour=cx["dep_hour"], legs=legs, notes=note)
 
     def compare(self, req=None):
         """마지막 계획(제안 경로)을 기존 방식과 나란히 놓는다 – 발주처 설명용.
@@ -1051,6 +1108,8 @@ def make_handler(app):
                     return self._send(200, app.mission(req))
                 if self.path == "/api/compare":
                     return self._send(200, app.compare(req))
+                if self.path == "/api/wpml":
+                    return self._send(200, app.wpml(req))
                 if self.path == "/api/confidence":
                     return self._send(200, app.confidence(req))
                 if self.path == "/api/replan":

@@ -124,6 +124,8 @@
       <div class="row"><label>출발 시각</label><select id="hour"></select><span class="hint" id="windinfo"></span></div>
       <div class="row"><label>예비 SOC</label><input type="number" id="reserve" min="0" max="50" step="5" value="20"> %
         <label class="inl" style="margin-left:8px">바람 <select id="wind"><option value="full">3D 예보</option><option value="linear">고도별 선형</option></select></label></div>
+      <div class="row"><label>대지속도 상한</label><input type="number" id="vgmax" min="5" max="30" step="1" placeholder="기체 기본"> m/s
+        <span class="hint">DJI 경로 파일로 내보낼 계획이면 15</span></div>
       <div class="row"><label>위험 한도 ε</label><select id="eps"><option value="">쓰지 않음 (예측 그대로)</option><option value="0.05">0.05</option><option value="0.01">0.01</option></select>
         <span class="hint">장애물 위치 오차를 고려한 팽창</span></div>
       <div class="row"><label>위치</label><button id="pickhub">출발지 찍기</button><button id="pickdst">도착지 찍기</button>
@@ -179,6 +181,17 @@
         고도는 <b>출발지 지면 기준 상대 고도</b>입니다. 계획기는 상승 <span id="m_up"></span> m/s, 하강 <span id="m_dn"></span> m/s를 가정했으므로
         기체의 WP_SPD_UP·WP_SPD_DN(구버전 WPNAV_SPEED_UP·DN)을 이 값 이상으로 맞추세요.<br>
         이동 장애물을 피하려고 넣은 대기·출발 지연은 시각에 맞춰 비행해야 유효합니다. 실제 비행 전에는 반드시 현장 확인과 비행승인이 필요합니다.
+      </div>
+      <h2 style="margin-top:12px">DJI 경로 파일 내보내기 (WPML)</h2>
+      <div class="row"><button id="dl_kmz">DJI 경로 파일 (.kmz)</button>
+        <label class="inl">기종 <select id="dji_model"><option value="m30">Matrice 30</option><option value="m30t">Matrice 30T</option>
+          <option value="m350">Matrice 350 RTK</option><option value="m300">Matrice 300 RTK</option><option value="m3e">Mavic 3E</option>
+          <option value="m3t">Mavic 3T</option><option value="m3m">Mavic 3M</option><option value="m3d">Matrice 3D</option><option value="m3td">Matrice 3TD</option></select></label></div>
+      <table class="res" id="k_tab" style="display:none"><thead><tr><th>구간</th><th>경로점</th><th>상대 고도</th><th>속도</th><th>깎은 구간</th><th>복귀 고도</th><th>검사</th></tr></thead><tbody id="k_rows"></tbody></table>
+      <ul id="k_notes" class="hint" style="margin:6px 0 0 16px;padding:0"></ul>
+      <div class="hint" style="margin-top:6px">
+        DJI Pilot 2·FlightHub 2가 읽는 형식입니다. 고도는 <b>이륙점 기준 상대 고도</b>, 속도는 구간별 대지속도입니다. 기종의 최대 속도(15 m/s)를 넘는 구간은 깎습니다.<br>
+        <b>DJI 기체와 DJI 소프트웨어에서 열어 확인하지 못한 파일입니다.</b> 불러온 뒤 경로점 고도, 속도, 복귀 고도, 신호 두절 동작을 반드시 확인하세요.
       </div>
     </div>
   </aside>

@@ -8,6 +8,7 @@
 |---|---|---|
 | 안전장치 (최단 경로 후보 비교) | 계획 API(`/api/plan`), 명령줄(`dpo-plan`), 실시간 엔진의 초기 계획·재계획. 미션 파일은 채택한 경로로 만들어집니다. | 켬 |
 | 기존 경로와의 비교 | 3D 화면(`/3d`)의 '기존 경로와 비교', API `POST /api/compare` (`speed`: 기존 경로의 정속 3–20 m/s, 기본 10). 방식별 수치·구간별 바람과 높이·근거 문장을 냅니다. | – |
+| DJI 경로 파일(WPML .kmz) 내보내기 | 명령줄 `dpo-plan --wpml MODEL --out DIR`, 3D 화면의 'DJI 경로 파일 (.kmz)', API `POST /api/wpml`. 설명과 한계는 [`dji_wpml.md`](dji_wpml.md). DJI 기체에서는 확인하지 못했습니다. | 요청할 때만 |
 | 속도 갱신 (바람 편차 → 구간 속도) | 실시간 엔진(`/live`). 순항 시작 5초 뒤 처음 재고, 이후 30초마다 다시 판단합니다. | 30초 |
 | 속도 명령 | 화면의 명령 표, `/api/live/mission`, MAVLink `DO_CHANGE_SPEED` 송신 | 연결했을 때만 송신 |
 | 남은 구간 미션 | `/api/live/mission.waypoints`, `.csv`, `/api/live/upload` | 요청할 때만 |
