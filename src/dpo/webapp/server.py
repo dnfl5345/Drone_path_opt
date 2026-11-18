@@ -662,7 +662,7 @@ class App:
 
             ex, exv = fly("const"), fly("opt")
             names = [L["name"] for L in legs]
-            ko = lambda n: {"out": "가는 편", "back": "오는 편"}.get(n, f"구간 {n[1:]}" if n[:1] == "s" and n[1:].isdigit() else n)
+            ko = lambda n: {"out": "가는 편", "back": "오는 편"}.get(n, f"구간 {n[1:]}" if n[1:].isdigit() else n)
             wtxt = lambda v: ("뒷바람 " if v >= 0 else "맞바람 ") + f"{abs(v):.1f} m/s"
             prop = dict(legs=[dict(name=L["name"], samples=_samples(L["sim"], t_dep, e_offset=L["e_before"] + L["e_to"], drone=d)) for L in legs],
                         **stats([(L["sim"], L["e_to"], L["e_ld"], L["t_ld"]) for L in legs]))

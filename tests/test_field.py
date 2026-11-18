@@ -185,3 +185,12 @@ def test_compare_existing_vs_proposed():
     assert c8["speed"] == 8.0 and c8["methods"][0]["label"].endswith("8 m/s)")
     with pytest.raises(ValueError):
         app.compare(dict(speed=40.0))
+    # 순회 임무에서도 구간마다 비교가 나온다
+    hub = app.hub0
+    tour = [(hub[0] + 700.0, hub[1] + 100.0), (hub[0] + 500.0, hub[1] - 800.0)]
+    r = app.plan(dict(obstacles=[], dep_hour=15, payload=0.0, drone="x650", tour=tour, dwell=10.0))
+    assert r["feasible"]
+    ct = app.compare()
+    mt = {x["key"]: x for x in ct["methods"]}
+    assert len(mt["proposed"]["per"]) == len(mt["existing"]["per"]) == len(r["legs"]) == 3
+    assert all(q["label"].startswith("구간") for q in mt["proposed"]["per"]) and ct["by"]["total_pct"] < 0
