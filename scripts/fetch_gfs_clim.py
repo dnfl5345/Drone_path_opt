@@ -181,4 +181,5 @@ def main(days, workers=4):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:] or sample_days())
+    import os
+    main(sys.argv[1:] or sample_days(), workers=int(os.environ.get("E16_WORKERS", 4)))
