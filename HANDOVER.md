@@ -66,6 +66,13 @@
 - **만든 파일**: `docs/user_manual.md`, `docs/drone_soc_user_manual.docx`(`scripts/build_user_manual.js`, 그림 압축은 `MANUAL_JPG`), `docs/manual_img/`, `scripts/capture_manual.js`, `scripts/make_data_bundle.py`, 시험 4개(`tests/test_deploy.py` 끝).
 - **시험하지 못한 것**: Windows·macOS, 오프라인 설치.
 
+## 2026-11-19 발주처 시험비행 로그 (2026-11-13, X650)
+
+- **받은 것**: `.bin` 로그, 미션 `.waypoints`, 정리 PPT, 수신 범위 정리 DOCX (원본은 저장소에 넣지 않음 – 발주처 자료, 시험장 위치 포함). 분석 결과 JSON·그림에는 위도·경도를 쓰지 않는다.
+- **알게 된 것**: 호버 515 W (모델 4.1 kg 434 W) → 제원 중량 모델은 16 % 적게 예측, 4.66 kg으로 두면 2 %. 상승 구간은 모델이 17–20 % 크게 봄(상승 전력 항). 시간 예측(가감속 보정 포함) 3 %. 내부저항 0.028 Ω. `EK3_DRAG_BCOEF=0`(바람 추정 꺼짐), `BATT_CAPACITY=3300`(실제 10,000), `WP_SPD=3`.
+- **정한 것**: 기본 X650 모델은 이륙 중량을 받기 전까지 바꾸지 않는다. 임시로는 탑재중량 +0.56 kg.
+- **다음**: 이륙 중량 실측, 고성 시험에서 5·7·10 m/s 같은 속도 왕복 + 30초 호버 → `dpo-calibrate --save`. 상승 전력 항 재검토(자료가 더 쌓이면).
+
 ## ③ 다음에 할 일
 
 1. **X650 보정 비행** (호버 + 5–15 m/s 정속 왕복): `dpo-calibrate --save` 로 전력 곡선, 최대 대기속도, `EK3_DRAG_BCOEF` 를 정한다. 실증 기체의 펌웨어 판도 이때 확인한다.
