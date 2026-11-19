@@ -68,6 +68,7 @@
 5. **실측 바람과 예보의 차이 측정**, 기상청 고해상도 자료 연동.
 6. 순회 임무의 실시간 운용, 서버 인증.
 7. **DJI 경로 파일 확인**: 내보낸 `.kmz` 를 DJI Pilot 2 에서 불러와 고도·속도·꺾임 방식이 뜻대로 읽히는지 본다 (`docs/dji_wpml.md` 5절). 대상 DJI 기종의 전력 곡선이 있어야 SOC 예상이 맞는다.
+8. **발주처 실험 자료 받기**: 요청서 `docs/data_request.md` (Word `docs/drone_soc_data_request.docx`, 비행별 기록 양식 `docs/drone_soc_flight_log_template.xlsx`). ArduPilot `.bin`·`.tlog` 는 `dpo-calibrate` 가 바로 읽는다. DJI 비행 기록(`.txt`, 버전 13)은 암호화되어 DJI FlightRecordParsingLib 와 앱 키가 있어야 읽히므로 CSV 변환본을 받는 편이 빠르다. DJI CSV 읽기 함수는 아직 없다.
 
 ## 확인 방법
 
