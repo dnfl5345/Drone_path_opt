@@ -728,8 +728,12 @@ async function doPlan() {
 
 function showResult(res) {
   $("rescard").style.display = "block";
-  $("r_soc").textContent = `${res.soc_end.toFixed(1)} %`;
-  $("r_feas").innerHTML = res.feasible ? `<span class="ok">임무 가능 (예비 ${$("reserve").value} % 이상)</span>` : `<span class="bad">임무 불가</span>`;
+  const allLegs = res.legs.every(L => L.feasible);
+  // 경로를 찾지 못한 구간이 있으면 도착 SOC 는 없다 (앞 구간까지의 값은 오해를 부른다)
+  $("r_soc").textContent = allLegs ? `${res.soc_end.toFixed(1)} %` : "–";
+  $("r_feas").innerHTML = res.feasible ? `<span class="ok">임무 가능 (예비 ${$("reserve").value} % 이상)</span>`
+    : `<span class="bad">임무 불가</span><div class="hint" style="margin-top:4px">탑재중량을 줄이거나, 예비 SOC를 낮추거나, 바람이 약한 출발 시각을 고르거나, 거리를 줄여 보십시오.` +
+      (allLegs ? ` 끝까지 날면 도착 SOC가 ${res.soc_end.toFixed(1)} %로 예비 ${$("reserve").value} %보다 낮습니다.` : "") + `</div>`;
   const rows = res.legs.map(L => {
     if (!L.feasible) return `<tr><td>${legKo(L.name)}</td><td colspan="6" class="bad">${L.reason}</td></tr>`;
     const zs = L.samples.map(p => p.z), cf = L.conflicts;
@@ -750,6 +754,7 @@ function showResult(res) {
   $("r_note").textContent = `${res.drone.label} · 탑재 ${res.drone.payload} kg · ${res.dep_hour}시 출발` + (waits.length ? ` · ${waits.join(" · ")}` : "") +
     (res.obstacles.length ? ` · 장애물을 무시한 경로는 ${nb}개 구간에서 충돌` : "");
   $("miscard").style.display = ok.length ? "block" : "none";
+  $("cmpbtn").parentElement.style.display = res.feasible ? "" : "none";   // 비교는 제안 경로가 성립할 때만 된다
   $("m_tab").style.display = "none";
   const d = S.site.drones.find(x => x.key === res.drone.key);
   $("m_up").textContent = d.vz_up; $("m_dn").textContent = d.vz_dn;

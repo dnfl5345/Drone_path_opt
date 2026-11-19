@@ -38,7 +38,7 @@ pip install -e ".[dev]"
 
 ### 자료 폴더 (`DPO_HOME`)
 
-프로그램은 `DPO_HOME` 아래에서 자료를 찾습니다. 지정하지 않으면 소스 저장소(개발 설치) 또는 현재 폴더를 씁니다.
+프로그램은 `DPO_HOME` 아래에서 자료를 찾습니다. 지정하지 않으면 소스 저장소(개발 설치), 현재 폴더의 `dpo_data`(자료 묶음을 푼 폴더), 현재 폴더 순으로 찾습니다. 배포용 자료 묶음은 `python scripts/make_data_bundle.py` 로 만듭니다 (`dist/dpo_data_<판>.zip`, 약 20 MB). 사용자 쪽 순서는 [`user_manual.md`](user_manual.md) 1장에 있습니다.
 
 | 경로 | 내용 | 필수 |
 |---|---|---|
@@ -67,6 +67,8 @@ dpo-plan --drone x650 --payload 1.0 --dep-hour 15 --out missions/
 ```bash
 dpo-server --host 0.0.0.0 --port 8765 --site pangyo
 ```
+
+`--open` 을 주면 준비된 뒤 브라우저로 3D 지도 화면을 엽니다. 정상 요청은 터미널에 찍지 않습니다 (`DPO_VERBOSE=1` 이면 전부).
 
 | 화면 | 주소 |
 |---|---|

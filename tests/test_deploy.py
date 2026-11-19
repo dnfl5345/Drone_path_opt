@@ -220,3 +220,81 @@ def test_live_sends_speed_commands_over_link(site):
     finally:
         link.close()
         veh.stop()
+
+
+# ------------------------------------------------------------------ 구동 시험에서 고친 것 (사용자 매뉴얼 8장)
+def _copy_pkg(tmp_path):
+    """설치된 것처럼: 패키지만 자료 없는 곳에 복사한다 (소스 저장소의 data/ 를 찾지 못하게)."""
+    import shutil
+    from pathlib import Path
+    src = Path(__file__).resolve().parents[1] / "src" / "dpo"
+    dst = tmp_path / "pkg" / "dpo"
+    shutil.copytree(src, dst, ignore=shutil.ignore_patterns("__pycache__"))
+    return tmp_path / "pkg"
+
+
+def _run(code_or_args, cwd, pkg, env_extra=None, module=False, timeout=180):
+    import os
+    import subprocess
+    import sys
+    env = {k: v for k, v in os.environ.items() if k not in ("DPO_HOME", "DPO_SITE", "PYTHONPATH")}
+    env.update(PYTHONPATH=str(pkg), **(env_extra or {}))
+    cmd = [sys.executable, "-m", *code_or_args] if module else [sys.executable, "-c", code_or_args]
+    return subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout)
+
+
+def test_data_root_found_next_to_working_dir_and_no_empty_dirs(tmp_path):
+    pkg = _copy_pkg(tmp_path)
+    work = tmp_path / "work"
+    (work / "dpo_data" / "data" / "processed").mkdir(parents=True)
+    r = _run("from dpo import config as C; print(C.ROOT)", work, pkg)
+    assert r.returncode == 0 and r.stdout.strip() == str((work / "dpo_data").resolve())
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    r = _run("from dpo import config as C; print(C.ROOT)", empty, pkg)
+    assert r.stdout.strip() == str(empty) and list(empty.iterdir()) == []           # 자료가 없는 곳에 빈 폴더를 만들지 않는다
+    r = _run("from dpo import config as C; print(C.ROOT)", work, pkg, env_extra=dict(DPO_HOME=str(empty)))
+    assert r.stdout.strip() == str(empty.resolve())                                  # DPO_HOME 이 먼저다
+
+
+def test_cli_and_server_give_plain_messages_without_data(tmp_path):
+    pkg = _copy_pkg(tmp_path)
+    work = tmp_path / "w"
+    work.mkdir()
+    r = _run(["dpo.cli", "--check"], work, pkg, module=True)
+    assert r.returncode == 2 and "필수 자료가 없습니다" in r.stderr and "dpo_data" in r.stderr
+    r = _run(["dpo.webapp.server", "--port", "0"], work, pkg, module=True)
+    assert r.returncode == 2 and "Traceback" not in r.stderr and "dpo_data" in r.stderr
+
+
+@pytest.mark.skipif(not HAVE_DATA, reason="지형·바람 자료 없음")
+def test_server_reports_busy_port(capsys):
+    import socket
+    from dpo.webapp.server import main
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    s.listen(1)
+    try:
+        assert main(["--port", str(s.getsockname()[1])]) == 2
+    finally:
+        s.close()
+    err = capsys.readouterr().err
+    assert "를 열 수 없습니다" in err and "--port" in err
+
+
+@pytest.mark.skipif(not HAVE_DATA, reason="지형·바람 자료 없음")
+def test_data_bundle_is_self_sufficient(tmp_path):
+    """배포용 자료 묶음만 풀어도 판교·창원 모두 필수 자료가 있다."""
+    import subprocess
+    import sys
+    import zipfile
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    r = subprocess.run([sys.executable, str(root / "scripts" / "make_data_bundle.py"), str(tmp_path)], capture_output=True, text=True, timeout=300)
+    assert r.returncode == 0, r.stderr
+    z = next(tmp_path.glob("dpo_data_*.zip"))
+    zipfile.ZipFile(z).extractall(tmp_path / "x")
+    pkg = _copy_pkg(tmp_path)
+    for site in ("pangyo", "changwon"):
+        r = _run(f"from dpo import config as C; C.use_site('{site}'); print(C.check_data())", tmp_path / "x", pkg)
+        assert r.stdout.strip() == "[]", (site, r.stdout, r.stderr)

@@ -4,7 +4,8 @@ from pathlib import Path
 
 
 def _find_root():
-    """자료 폴더의 위치. 우선순위: 환경변수 DPO_HOME → 소스 저장소(개발 설치) → 현재 폴더.
+    """자료 폴더의 위치. 우선순위: 환경변수 DPO_HOME → 소스 저장소(개발 설치) → 현재 폴더의 dpo_data (자료 묶음을 푼 폴더)
+    → 현재 폴더.
 
     그 아래에 data/processed (지형 격자), data/raw (예보 바람), results (실측 오차 모델 등), scenarios 가 있어야 한다."""
     env = _os.environ.get("DPO_HOME")
@@ -13,6 +14,9 @@ def _find_root():
     repo = Path(__file__).resolve().parents[2]
     if (repo / "data" / "processed").is_dir():
         return repo
+    bundle = Path.cwd() / "dpo_data"
+    if (bundle / "data" / "processed").is_dir():
+        return bundle.resolve()
     return Path.cwd()
 
 
@@ -21,11 +25,12 @@ RAW = ROOT / "data" / "raw"
 PROC = ROOT / "data" / "processed"
 FIG = ROOT / "results" / "figures"
 RES = ROOT / "results"
-for _p in (RAW, PROC, FIG, RES):
-    try:
-        _p.mkdir(parents=True, exist_ok=True)
-    except OSError:                    # 읽기 전용 설치 위치 – 읽기만 하는 운용에는 문제없다
-        pass
+if (ROOT / "data").is_dir():           # 자료 폴더가 아닌 곳(자료를 못 찾은 경우)에 빈 폴더를 만들지 않는다
+    for _p in (RAW, PROC, FIG, RES):
+        try:
+            _p.mkdir(parents=True, exist_ok=True)
+        except OSError:                # 읽기 전용 설치 위치 – 읽기만 하는 운용에는 문제없다
+            pass
 
 
 def check_data(site_key=None):

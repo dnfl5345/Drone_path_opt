@@ -70,7 +70,8 @@ def main(argv=None):
     C.use_site(a.site)
     missing = C.check_data()
     if missing:
-        print("필수 자료가 없습니다:\n  " + "\n  ".join(missing) + f"\n자료 폴더(DPO_HOME): {C.ROOT}", file=sys.stderr)
+        print("필수 자료가 없습니다:\n  " + "\n  ".join(missing) + f"\n자료 폴더(DPO_HOME): {C.ROOT}\n"
+              "자료 묶음(dpo_data_<판>.zip)을 풀어 생긴 dpo_data 폴더 옆에서 실행하거나, 환경변수 DPO_HOME 을 그 폴더로 지정하십시오 (사용자 매뉴얼 1장).", file=sys.stderr)
         return 2
     from .webapp.server import App
     app = App()

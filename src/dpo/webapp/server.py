@@ -54,6 +54,9 @@ KST = 9
 MAX_TOUR = 12            # 순회 경유점 최대 개수
 
 
+RTH_LIMIT = 150.0     # DJI 경로 파일의 복귀 고도 상한 [m, 이륙점 기준] – 국내 일반 비행 고도 제한 (지면 위 150 m)
+
+
 class App:
     def __init__(self):
         S = C.SITE
@@ -61,7 +64,7 @@ class App:
         if missing:
             raise FileNotFoundError(
                 "필수 자료가 없습니다: " + ", ".join(missing) + f"\n자료 폴더(DPO_HOME)는 지금 {C.ROOT} 입니다. "
-                "저장소의 data/ 를 복사하거나 scripts/build_site.py 로 만드십시오 (docs/deployment.md).")
+                "자료 묶음(dpo_data_<판>.zip)을 풀어 생긴 dpo_data 폴더 옆에서 실행하거나, 환경변수 DPO_HOME 을 그 폴더로 지정하십시오 (사용자 매뉴얼 1장).")
         g = dict(np.load(C.PROC / S["grid"]))
         f0 = dict(np.load(C.RAW / S["gfs"], allow_pickle=True))
         self.g = g
@@ -636,9 +639,13 @@ class App:
                 js, is_ = [p[1] for p in path], [p[2] for p in path]
                 box = site.surface[max(min(js) - pad, 0):max(js) + pad + 1, max(min(is_) - pad, 0):max(is_) + pad + 1]
                 h_route = max(it["alt"] for it in m["items"] if it["frame"] == 3)
-                rth = float(req["rth_height"]) if req.get("rth_height") is not None else \
-                    math.ceil(max(float(np.nanmax(box)) - float(site.ground[j0, i0]) + 20.0, h_route))
+                rth_need = math.ceil(max(float(np.nanmax(box)) - float(site.ground[j0, i0]) + 20.0, h_route))
+                rth = float(req["rth_height"]) if req.get("rth_height") is not None else min(rth_need, RTH_LIMIT)
                 w = WP.from_items(m["items"], rth_height=rth, **opt)
+                if req.get("rth_height") is None and rth_need > RTH_LIMIT:
+                    w["summary"]["warnings"].append(
+                        f"복귀 고도를 {RTH_LIMIT:.0f} m 로 제한했습니다 (일반 비행 고도 제한). 경로 주변에 이륙점보다 {rth_need - 20:.0f} m 높은 "
+                        "지형·건물이 있어, 복귀 직선이 그 위를 지나면 부딪힐 수 있습니다. 복귀 경로를 지도에서 확인하십시오.")
                 sm = dict(w["summary"], soc_end=m["summary"]["soc_end"], duration_s=m["summary"]["duration_s"], check=WP.check(w["kmz"], w["summary"]["v_max"]))
                 if sm["n_clamped"]:
                     sm["soc_end"] = None                       # 속도를 깎으면 계획의 SOC 예상이 맞지 않는다
@@ -1006,7 +1013,10 @@ def make_handler(app):
             self.wfile.write(body)
 
         def log_message(self, fmt, *args):
-            sys.stderr.write("[platform] " + fmt % args + "\n")
+            # 정상 요청은 기록하지 않는다 (화면이 초당 여러 번 묻기 때문에 터미널이 넘친다). DPO_VERBOSE=1 이면 모두 기록
+            msg = fmt % args
+            if os.environ.get("DPO_VERBOSE") or not (len(args) >= 2 and str(args[1])[:1] in "23"):
+                sys.stderr.write("[platform] " + msg + "\n")
 
         def do_GET(self):
             path = self.path.split("?")[0]
@@ -1148,22 +1158,37 @@ def main(argv=None):
     ap.add_argument("--host", default=os.environ.get("DPO_HOST", "127.0.0.1"),
                     help="바인드 주소 (환경변수 DPO_HOST). 외부에 열려면 0.0.0.0 – 인증이 없으므로 신뢰하는 망에서만")
     ap.add_argument("--site", default=C.SITE_KEY, choices=list(C.SITES), help="대상 지역 (기본: 환경변수 DPO_SITE 또는 pangyo)")
+    ap.add_argument("--open", action="store_true", help="준비되면 브라우저로 3D 지도 화면을 연다")
     ap.add_argument("--mavlink", default=os.environ.get("DPO_MAVLINK"), metavar="URL",
                     help="기체 MAVLink 연결 (예: udpin:0.0.0.0:14550). 주면 속도 명령을 기체로 보낸다")
     a = ap.parse_args(argv)
     C.use_site(a.site)
-    print(f"[platform] 지역: {C.SITE['label']}")
-    app = App()
+    print(f"[platform] 지역: {C.SITE['label']} · 자료 폴더: {C.ROOT}")
+    print("[platform] 준비 중… (설치 후 처음 한 번은 계산 코드를 컴파일하느라 수십 초 걸립니다)", flush=True)
+    try:
+        app = App()
+    except FileNotFoundError as ex:
+        print(f"[platform] {ex}", file=sys.stderr)
+        return 2
     if a.mavlink:
         try:
             print(f"[platform] MAVLink: {app.connect_link(a.mavlink)}")
         except Exception as ex:  # noqa
             print(f"[platform] MAVLink 연결 실패 – 연결 없이 계속합니다: {ex}")
-    srv = ThreadingHTTPServer((a.host, a.port), make_handler(app))
+    try:
+        srv = ThreadingHTTPServer((a.host, a.port), make_handler(app))
+    except OSError as ex:
+        print(f"[platform] 포트 {a.port} 를 열 수 없습니다 ({ex.strerror}). 이미 실행 중인 서버가 있거나 다른 프로그램이 쓰고 있습니다. "
+              f"--port {a.port + 1} 처럼 다른 포트를 주십시오.", file=sys.stderr)
+        return 2
     srv.daemon_threads = True
     print(f"[platform] 3D 지도:    http://{a.host}:{a.port}/3d")
     print(f"[platform] 실시간 운용: http://{a.host}:{a.port}/live")
     print(f"[platform] http://{a.host}:{a.port}  (Ctrl+C 종료)")
+    if a.open:
+        import webbrowser
+        host = "127.0.0.1" if a.host in ("0.0.0.0", "") else a.host
+        threading.Timer(0.5, lambda: webbrowser.open(f"http://{host}:{a.port}/3d")).start()
     import signal
     try:
         signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=srv.shutdown, daemon=True).start())
@@ -1183,4 +1208,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

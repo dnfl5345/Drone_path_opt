@@ -59,6 +59,13 @@
 - **만든·고친 파일**: `src/dpo/wpml.py`, `tests/test_wpml.py`, `docs/dji_wpml.md`, `src/dpo/webapp/server.py` (`wpml`, `/api/wpml`, 계획 요청의 `vg_max`), `static/map3d.*`, `src/dpo/cli.py` (`--wpml*`, `--vg-max`)
 - **확인하지 못한 것**: DJI Pilot 2·FlightHub 2·기체에서 파일이 열리는지, `wpml:ellipsoidHeight` 의 해석, 기종별 최대 경로 속도, 경로점 최소 간격. WPML 지원 기종(M30 등)의 전력 모델이 없다.
 
+## 2026-11-19 구동 시험과 사용자 매뉴얼
+
+- **정한 것**: 배포는 프로그램 wheel + 자료 묶음 zip 두 파일. 자료 묶음을 실행 위치 옆에 풀면 `DPO_HOME` 없이 찾는다. 서버는 자료 없음·포트 사용 중일 때 오류 추적 대신 한두 줄 안내를 내고 종료 코드 2. shapely 는 기본 의존성(3D 건물 모양).
+- **고친 화면**: 임무 불가일 때 도착 SOC 를 '–'로, 바꿔 볼 것을 안내, 비교 줄을 숨김. DJI 경로 파일 복귀 고도는 150 m 로 제한(`RTH_LIMIT`).
+- **만든 파일**: `docs/user_manual.md`, `docs/drone_soc_user_manual.docx`(`scripts/build_user_manual.js`, 그림 압축은 `MANUAL_JPG`), `docs/manual_img/`, `scripts/capture_manual.js`, `scripts/make_data_bundle.py`, 시험 4개(`tests/test_deploy.py` 끝).
+- **시험하지 못한 것**: Windows·macOS, 오프라인 설치.
+
 ## ③ 다음에 할 일
 
 1. **X650 보정 비행** (호버 + 5–15 m/s 정속 왕복): `dpo-calibrate --save` 로 전력 곡선, 최대 대기속도, `EK3_DRAG_BCOEF` 를 정한다. 실증 기체의 펌웨어 판도 이때 확인한다.

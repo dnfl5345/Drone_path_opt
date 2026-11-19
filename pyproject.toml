@@ -13,6 +13,7 @@ dependencies = [
     "scipy>=1.10",
     "numba>=0.58",
     "matplotlib>=3.7",
+    "shapely>=2.0",                 # 3D 화면의 건물 모양 (없으면 격자 상자로 그림)
 ]
 
 [project.optional-dependencies]
