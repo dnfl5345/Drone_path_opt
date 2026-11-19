@@ -15,9 +15,10 @@ FILES = [
     "data/processed/site_grid.npz", "data/processed/site_grid_changwon.npz",             # 지형·건물 격자 (필수)
     "data/raw/gfs_20261027_00z.npz", "data/raw/gfs_20261027_06z.npz",                    # 판교 예보 바람 (필수 / 실시간 모의용)
     "data/raw/gfs_changwon_20261027_00z.npz", "data/raw/gfs_changwon_20261027_06z.npz",  # 창원
-    "data/raw/overture_buildings.json", "data/raw/overture_buildings_changwon.json",    # 3D 화면의 건물 모양
     "results/adsb_error_model.json", "results/wind_error_model.json", "results/seasonal_table.json",
 ]
+# 있으면 넣는다: 3D 화면의 건물 모양 (원본이 커서 저장소에는 없다. 없으면 화면이 격자 높이로 상자를 그린다)
+OPTIONAL = ["data/raw/overture_buildings.json", "data/raw/overture_buildings_changwon.json"]
 DIRS = ["data/raw/adsb", "scenarios"]
 
 
@@ -29,6 +30,11 @@ def main(out_dir=None):
     missing = [str(p.relative_to(ROOT)) for p in paths if not p.exists()]
     if missing:
         sys.exit("없는 파일: " + ", ".join(missing))
+    opt = [ROOT / f for f in OPTIONAL]
+    paths += [p for p in opt if p.exists()]
+    for p in opt:
+        if not p.exists():
+            print(f"참고: {p.relative_to(ROOT)} 이 없어 넣지 않았습니다 (3D 화면의 건물이 상자 모양으로 그려집니다)")
     with zipfile.ZipFile(z_path, "w", zipfile.ZIP_DEFLATED) as z:
         for p in paths:
             z.write(p, Path("dpo_data") / p.relative_to(ROOT))
