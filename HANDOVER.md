@@ -1,0 +1,91 @@
+# 인수인계 (2026-11-18 기준, v1.2.0)
+
+## ① 지금까지 정한 것
+
+- **비교 기준:** 기존 경로 = 최단 경로 + 정속 10 m/s. '최단 + 속도 최적화'도 함께 보고한다 (`docs/review_gaps.md`).
+- **속도 갱신:** 순항 5초 뒤 첫 측정, 이후 30초 주기. 예상 에너지가 0.3 % 넘게 줄고 새 궤적이 위험구간과 겹치지 않을 때만 채택. 경로는 바람 때문에 바꾸지 않는다.
+- **안전장치:** 에너지 탐색 경로와 '비행 가능하게 고친 최단 경로 + 속도 최적화'를 예보 기준으로 비교. 최단 후보는 위험구간 검사를 통과해야 한다.
+- **기체 연결:** 명령 방식(`DO_CHANGE_SPEED`)이 기본. 남은 구간 미션 올리기는 운용자가 명시적으로 부를 때만.
+- **배포 형태:** pip 패키지 `drone-path-opt` + 자료 폴더 `DPO_HOME`. 기본 의존성은 numpy·scipy·numba·matplotlib.
+
+## ② 만든 파일 (이번 작업)
+
+| 파일 | 내용 |
+|---|---|
+| `src/dpo/speed_update.py` | 바람 편차 추정, 남은 경로 자르기, 속도 재결정, 속도 명령 목록 |
+| `src/dpo/mission.py` | `st_safeguard`, `make_flyable`(직선 통과 검사·대기 보존) |
+| `src/dpo/planner.py` | `simulate`에 명령 속도(`vcmd`)·바람 보정(`bias`)·구간 기록 |
+| `src/dpo/live.py` | 실제 바람, 속도 갱신 루프, 안전장치, 속도 명령 대기열, `mission()` |
+| `src/dpo/ardupilot.py` | `remaining_mission` (비행 중 남은 구간 미션) |
+| `src/dpo/mavlink_bridge.py` | `MavBridge`, `FakeVehicle` |
+| `src/dpo/cli.py`, `pyproject.toml`, `Dockerfile`, `.github/workflows/ci.yml` | 명령줄, 패키징, 이미지, CI |
+| `src/dpo/webapp/` | 계획 API 안전장치, 실시간 시작 옵션, `/api/live/mission*`, `/api/health`, 화면 |
+| `tests/test_deploy.py` | 8개 시험 |
+| `scripts/exp_live_closed_loop.py` | E15 → `results/E15_*.json`, F30 |
+| `scripts/make_deploy_figures.py` | F31–F33 |
+| `scripts/build_deploy_report.js` | Word 보고서 생성 |
+| `docs/deployment.md`, `docs/drone_soc_deployment_report.docx` | 배포 안내, 보고서 |
+
+## v1.1.0 에서 더한 것 (2026-11-18)
+
+- **정한 것**
+  - 실증 기체는 Holybro X650 (Pixhawk 6X, ArduPilot). 사양서에 DJI 부품은 없다.
+  - 비행 중 속도 갱신을 쓰는 비행은 '명령 방식' 미션(속도 항목은 첫 구간만)으로 올린다. ArduCopter 는 미션의 속도 항목과 외부 명령이 같은 값을 덮어쓴다 (4.7.2 소스·SITL 확인).
+  - 출발 판정은 신뢰수준 95 % 를 기본으로 한다. 예보 시점(발표 후 경과 시간)을 `--forecast-age` 로 넣는다.
+  - 계절별로 알고리즘을 바꾸지 않는다. 설정은 하나, 여유와 출발 시각만 계절에 맞춘다 (E16).
+  - `dpo-fly` 는 시동·이륙·모드 전환을 하지 않는다. 예보와 8 m/s 넘게 다른 바람 측정은 버린다.
+- **만든 파일**: `src/dpo/reliability.py`, `flight.py`, `sim_vehicle.py`, `logcal.py`, `scripts/exp_reliability.py`, `fetch_gfs_clim.py`, `sitl_check.py`, `sitl_speed_test.py`, `tests/test_reliability.py`, `test_field.py`, `docs/reliability.md`, `field_demo_x650.md`, `results/E16_*`, `wind_error_model.json`, `seasonal_table.json`, `sitl_check.json`, `sitl_speed.json`, 그림 F34–F36
+- **SITL 에서 알게 된 것**: 한계를 넘는 속도 명령은 수락되지만 느리게 난다 / 90° 꺾임은 경로점당 약 1.8 s, 출발·도착 합 약 9.7 s (8 m/s) / EKF 바람 추정의 크기는 `EK3_DRAG_BCOEF` 에 따라 0.9–3.2배
+
+## 2026-11-18 추가 (보고서·발표자료 개정)
+
+- **정한 것**
+  - 발주처 설명용 비교는 '기존 = 최단 + 지면 기준 정속 10 m/s', '대조 = 최단 + 계산한 속도', '제안' 세 가지로 한다. 화면의 근거 문장은 수치에서 만든다 (`App.compare`).
+  - 3D 화면의 예시(2026-10-27)는 바람이 센 날이다. 경로·고도의 몫(12–21 %)이 평균(1–5 %)보다 크다는 점을 항상 함께 적는다.
+  - 용어는 '예보 시점'(발표 후 경과 시간)으로 통일한다. 명령줄 인자 이름 `--forecast-age` 는 그대로 둔다.
+  - DJI 쪽 설명은 공개 문서에서 확인한 것만 적고 나머지는 `[확인요망]` 으로 둔다.
+- **만든·고친 파일**: `src/dpo/webapp/server.py` (`compare`, `/api/compare`), `static/map3d.*`, `scripts/capture_compare.js`, `results/compare_examples.json`, `results/platform_3d_compare_*.json`, `results/figures/platform_3d_compare_*.png`, `scripts/build_deploy_report.js` (2·3·12·13장), `scripts/build_academic_ppt.py` (슬라이드 5장), `tests/test_field.py` (비교 시험).
+- **확인하지 못한 것**: DJI 기체에서의 동작 전부, DJI 의 복귀 판단이 바람을 쓰는지 여부.
+- **회의용 발표자료에도 반영** (31 → 37장): 두 발표자료가 같은 슬라이드 코드(`scripts/build_ppt.py` 의 `add_v11_slides`)를 쓴다. 회의자료에는 대상 기체·여러 날 통계 한 장(`bridge=True`)을 앞에 더 넣는다. 수치를 고치면 두 자료를 모두 다시 만든다.
+
+## v1.2.0: DJI 경로 파일(WPML) 내보내기 (2026-11-18)
+
+- **정한 것**
+  - 규격은 DJI Cloud API 문서의 원본 저장소(`dji-sdk/Cloud-API-Doc`, 2024-11-07 판)에서 읽었다. `developer.dji.com` 은 이 환경의 네트워크에서 열리지 않는다.
+  - 고도는 이륙점 기준 상대 고도(`relativeToStartPoint`)로만 쓴다. 지오이드 자료가 없어 절대 고도를 쓰면 25–30 m 틀릴 수 있다.
+  - `wpml:waypointSpeed` = 그 경로점에서 다음 경로점까지의 속도. ArduPilot 미션 항목(`speed_items=True`)에서 만든다.
+  - `--wpml` 을 주면 계획 단계의 대지속도 상한을 15 m/s 로 낮춘다 (`vg_max`). 깎인 구간이 있으면 SOC 예상을 내지 않는다.
+  - 기본 동작: 종료 `autoLand`, 신호 두절 `goBack`. 운용자가 바꿀 수 있다.
+- **만든·고친 파일**: `src/dpo/wpml.py`, `tests/test_wpml.py`, `docs/dji_wpml.md`, `src/dpo/webapp/server.py` (`wpml`, `/api/wpml`, 계획 요청의 `vg_max`), `static/map3d.*`, `src/dpo/cli.py` (`--wpml*`, `--vg-max`)
+- **확인하지 못한 것**: DJI Pilot 2·FlightHub 2·기체에서 파일이 열리는지, `wpml:ellipsoidHeight` 의 해석, 기종별 최대 경로 속도, 경로점 최소 간격. WPML 지원 기종(M30 등)의 전력 모델이 없다.
+
+## 2026-11-19 구동 시험과 사용자 매뉴얼
+
+- **정한 것**: 배포는 프로그램 wheel + 자료 묶음 zip 두 파일. 자료 묶음을 실행 위치 옆에 풀면 `DPO_HOME` 없이 찾는다. 서버는 자료 없음·포트 사용 중일 때 오류 추적 대신 한두 줄 안내를 내고 종료 코드 2. shapely 는 기본 의존성(3D 건물 모양).
+- **고친 화면**: 임무 불가일 때 도착 SOC 를 '–'로, 바꿔 볼 것을 안내, 비교 줄을 숨김. DJI 경로 파일 복귀 고도는 150 m 로 제한(`RTH_LIMIT`).
+- **만든 파일**: `docs/user_manual.md`, `docs/drone_soc_user_manual.docx`(`scripts/build_user_manual.js`, 그림 압축은 `MANUAL_JPG`), `docs/manual_img/`, `scripts/capture_manual.js`, `scripts/make_data_bundle.py`, 시험 4개(`tests/test_deploy.py` 끝).
+- **시험하지 못한 것**: Windows·macOS, 오프라인 설치.
+
+## 2026-11-19 발주처 시험비행 로그 (2026-11-13, X650)
+
+- **받은 것**: `.bin` 로그, 미션 `.waypoints`, 정리 PPT, 수신 범위 정리 DOCX (원본은 저장소에 넣지 않음 – 발주처 자료, 시험장 위치 포함). 분석 결과 JSON·그림에는 위도·경도를 쓰지 않는다.
+- **알게 된 것**: 호버 515 W (모델 4.1 kg 434 W) → 제원 중량 모델은 16 % 적게 예측, 4.66 kg으로 두면 2 %. 상승 구간은 모델이 17–20 % 크게 봄(상승 전력 항). 시간 예측(가감속 보정 포함) 3 %. 내부저항 0.028 Ω. `EK3_DRAG_BCOEF=0`(바람 추정 꺼짐), `BATT_CAPACITY=3300`(실제 10,000), `WP_SPD=3`.
+- **정한 것**: 기본 X650 모델은 이륙 중량을 받기 전까지 바꾸지 않는다. 임시로는 탑재중량 +0.56 kg.
+- **다음**: 이륙 중량 실측, 고성 시험에서 5·7·10 m/s 같은 속도 왕복 + 30초 호버 → `dpo-calibrate --save`. 상승 전력 항 재검토(자료가 더 쌓이면).
+
+## ③ 다음에 할 일
+
+1. **X650 보정 비행** (호버 + 5–15 m/s 정속 왕복): `dpo-calibrate --save` 로 전력 곡선, 최대 대기속도, `EK3_DRAG_BCOEF` 를 정한다. 실증 기체의 펌웨어 판도 이때 확인한다.
+2. **지상 점검과 비교 비행** (`docs/field_demo_x650.md` 5–7절). SITL 은 통과했지만 SITL 의 기체는 X650 이 아니다.
+3. **관측 바람으로 예보 오차 다시 재기.** E16 은 예보끼리의 비교라 실제 오차보다 작을 수 있다.
+4. **Docker 이미지 빌드 확인** (이 환경에는 데몬이 없었다).
+5. **실측 바람과 예보의 차이 측정**, 기상청 고해상도 자료 연동.
+6. 순회 임무의 실시간 운용, 서버 인증.
+7. **DJI 경로 파일 확인**: 내보낸 `.kmz` 를 DJI Pilot 2 에서 불러와 고도·속도·꺾임 방식이 뜻대로 읽히는지 본다 (`docs/dji_wpml.md` 5절). 대상 DJI 기종의 전력 곡선이 있어야 SOC 예상이 맞는다.
+8. **발주처 실험 자료 받기**: 요청서 `docs/data_request.md` (Word `docs/drone_soc_data_request.docx`, 비행별 기록 양식 `docs/drone_soc_flight_log_template.xlsx`). ArduPilot `.bin`·`.tlog` 는 `dpo-calibrate` 가 바로 읽는다. DJI 비행 기록(`.txt`, 버전 13)은 암호화되어 DJI FlightRecordParsingLib 와 앱 키가 있어야 읽히므로 CSV 변환본을 받는 편이 빠르다. DJI CSV 읽기 함수는 아직 없다.
+
+## 확인 방법
+
+```bash
+pip install -e ".[dev]" && dpo-plan --check && pytest -q
+```

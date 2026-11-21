@@ -1,0 +1,125 @@
+{
+ "lead": 25.0,
+ "rows": [
+  {
+   "mode": "onboard",
+   "latency": 1.0,
+   "n": 16,
+   "intrusions": 0,
+   "p": 0.0,
+   "lo": 0.0,
+   "hi": 0.19361341827271994,
+   "min_sep_median": 374.92532138729894,
+   "min_sep_min": 146.44729977617465,
+   "holds_per_flight": 0.0
+  },
+  {
+   "mode": "onboard",
+   "latency": 3.0,
+   "n": 16,
+   "intrusions": 0,
+   "p": 0.0,
+   "lo": 0.0,
+   "hi": 0.19361341827271994,
+   "min_sep_median": 372.8140374008051,
+   "min_sep_min": 79.48435872804765,
+   "holds_per_flight": 0.0
+  },
+  {
+   "mode": "onboard",
+   "latency": 10.0,
+   "n": 16,
+   "intrusions": 2,
+   "p": 0.125,
+   "lo": 0.034976749337057134,
+   "hi": 0.3602333143674828,
+   "min_sep_median": 156.66095305198107,
+   "min_sep_min": -52.75864842659048,
+   "holds_per_flight": 2.0
+  },
+  {
+   "mode": "onboard",
+   "latency": 20.0,
+   "n": 16,
+   "intrusions": 1,
+   "p": 0.0625,
+   "lo": 0.01111905730833121,
+   "hi": 0.2832926836802987,
+   "min_sep_median": 295.39469927844834,
+   "min_sep_min": -49.747372719924286,
+   "holds_per_flight": 1.6875
+  },
+  {
+   "mode": "onboard",
+   "latency": 30.0,
+   "n": 16,
+   "intrusions": 2,
+   "p": 0.125,
+   "lo": 0.034976749337057134,
+   "hi": 0.3602333143674828,
+   "min_sep_median": 195.72428380558202,
+   "min_sep_min": -73.24246512459239,
+   "holds_per_flight": 1.625
+  },
+  {
+   "mode": "remote",
+   "latency": 1.0,
+   "n": 16,
+   "intrusions": 0,
+   "p": 0.0,
+   "lo": 0.0,
+   "hi": 0.19361341827271994,
+   "min_sep_median": 374.92532138729894,
+   "min_sep_min": 146.44729977617465,
+   "holds_per_flight": 0.0
+  },
+  {
+   "mode": "remote",
+   "latency": 3.0,
+   "n": 16,
+   "intrusions": 0,
+   "p": 0.0,
+   "lo": 0.0,
+   "hi": 0.19361341827271994,
+   "min_sep_median": 372.8140374008051,
+   "min_sep_min": 79.48435872804765,
+   "holds_per_flight": 0.0
+  },
+  {
+   "mode": "remote",
+   "latency": 10.0,
+   "n": 16,
+   "intrusions": 1,
+   "p": 0.0625,
+   "lo": 0.01111905730833121,
+   "hi": 0.2832926836802987,
+   "min_sep_median": 134.4142502041591,
+   "min_sep_min": -22.245152055295904,
+   "holds_per_flight": 0.0
+  },
+  {
+   "mode": "remote",
+   "latency": 20.0,
+   "n": 16,
+   "intrusions": 6,
+   "p": 0.375,
+   "lo": 0.18480982554752806,
+   "hi": 0.613593529020652,
+   "min_sep_median": 11.985062944365197,
+   "min_sep_min": -75.50094190960368,
+   "holds_per_flight": 0.0
+  },
+  {
+   "mode": "remote",
+   "latency": 30.0,
+   "n": 16,
+   "intrusions": 14,
+   "p": 0.875,
+   "lo": 0.6397666856325173,
+   "hi": 0.9650232506629428,
+   "min_sep_median": -61.9434407127454,
+   "min_sep_min": -75.72996254338628,
+   "holds_per_flight": 0.0
+  }
+ ]
+}

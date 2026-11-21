@@ -1,0 +1,395 @@
+"""계획 경로 → ArduPilot(ArduCopter) AUTO 미션 파일.
+
+출력 형식: Mission Planner / QGroundControl 이 읽는 'QGC WPL 110' 텍스트 (.waypoints)
+  <index> <current> <frame> <command> <p1> <p2> <p3> <p4> <lat> <lon> <alt> <autocontinue>
+
+쓰는 명령 (MAVLink common.xml, ArduCopter mode_auto.cpp 에서 지원 확인)
+  16  NAV_WAYPOINT     경로 꼭짓점
+  19  NAV_LOITER_TIME  호버 대기 (p1 = 초)
+  21  NAV_LAND         도착지 착륙
+  22  NAV_TAKEOFF      이륙 (alt = 홈 기준 고도)
+  93  NAV_DELAY        이륙 전 지상 대기 (p1 = 초)
+  178 DO_CHANGE_SPEED  구간 대지속도 (p1 = 1 대지속도, p2 = m/s)
+
+고도 기준: frame 3 (MAV_FRAME_GLOBAL_RELATIVE_ALT) – 홈(시동 위치) 지면 기준 상대 고도.
+  계획기의 고도는 DSM 해발고도이므로 '노드 고도 − 출발지 지면 고도' 로 바꾼다.
+  (절대 고도는 DSM·기압계·지오이드 차이로 수 m 어긋날 수 있어 쓰지 않는다)
+
+한 구간 = 한 번의 이륙~착륙. 왕복은 가는 편·오는 편 두 파일로 나눈다(오는 편의 홈은 배송지).
+"""
+from __future__ import annotations
+
+import math
+
+import numpy as np
+
+from .data_terrain import site_frame, xy2ll
+from .energy import soc_drop
+from .planner import simulate
+
+CMD = dict(WAYPOINT=16, LOITER_TIME=19, LAND=21, TAKEOFF=22, DELAY=93, CHANGE_SPEED=178)
+FRAME_ABS, FRAME_REL = 0, 3
+
+
+def _node_xyz(site, p):
+    return (p[2] + .5) * site.dx, (p[1] + .5) * site.dx, float(site.z[0] + p[0] * site.dz)
+
+
+def _speed_groups(sim, lh, t0, dv=1.0, min_len=75.0):
+    """한 직선 구간 안에서 최적 대지속도가 바뀌는 지점을 찾아 구간을 나눈다.
+    반환: [(끝 지점의 구간 내 비율 f, 평균 대지속도, 소요시간, 누적 에너지)]"""
+    n = len(sim["t"])
+    d = np.full(n, lh / n)                       # 부분 구간의 수평 길이 (simulate 는 등분할)
+    dt = np.diff(np.concatenate([[t0], sim["t"]]))
+    groups, s = [], 0
+    for q in range(1, n + 1):
+        if q == n or abs(sim["vg"][q] - sim["vg"][s]) >= dv:
+            groups.append([s, q])
+            s = q
+    k = 0
+    while k < len(groups) and len(groups) > 1:   # 너무 짧은 묶음은 이웃과 합친다
+        a, b_ = groups[k]
+        if d[a:b_].sum() < min_len:
+            if k + 1 < len(groups):
+                groups[k + 1][0] = a
+            else:
+                groups[k - 1][1] = b_
+            groups.pop(k)
+        else:
+            k += 1
+    out = []
+    for a, b_ in groups:
+        T = dt[a:b_].sum()
+        out.append((b_ / n, float(d[a:b_].sum() / T), float(T), float(sim["e"][b_ - 1])))
+    return out
+
+
+def kinematic_overhead(segs):
+    """ArduCopter 의 가감속 때문에 계획보다 더 걸리는 시간 [s] 의 근사.
+
+    계획기는 구간마다 속도가 곧바로 바뀐다고 본다. 실제 펌웨어는 출발·도착과 급하게 꺾이는 점에서 가감속한다.
+    ArduCopter 4.7.2 SITL (기본 기체, 기본 WP 매개변수, 8 m/s) 에서 잰 값 (scripts/sitl_speed_test.py):
+      출발 + 도착 9.7 s · 30° 꺾임 약 0.1 s · 90° 꺾임 약 1.8 s (구간 길이 100–400 m 와 무관)
+    속도에 비례한다고 두고 맞춘 식이다. 실기체의 값은 가속·저크 설정에 따라 다르다.
+    segs: [(ax, ay, az, bx, by, bz, v)] – v 는 그 구간의 대지속도 (수직 이동이면 None)."""
+    hs = [g for g in segs if g[6]]
+    if not hs:
+        return 0.0
+    t = 0.6 * hs[0][6] + 0.6 * hs[-1][6]
+    for a, b in zip(hs[:-1], hs[1:]):
+        u = np.array([a[3] - a[0], a[4] - a[1]]); v = np.array([b[3] - b[0], b[4] - b[1]])
+        nu, nv = np.linalg.norm(u), np.linalg.norm(v)
+        if nu < 1e-6 or nv < 1e-6:
+            continue
+        c = float(np.clip(np.dot(u, v) / (nu * nv), -1.0, 1.0))
+        t += 0.23 * min(a[6], b[6]) * (1.0 - c) ** 2
+    return float(t)
+
+
+def merge_collinear(path, waits):
+    """일직선 위의 중간 노드를 없앤다 (그 노드에서 호버 대기가 없을 때만).
+    ArduCopter 는 경로점 사이를 직선으로 비행하므로 중간 점은 필요 없다."""
+    path = [tuple(int(v) for v in p) for p in path]
+    waits = [float(w) for w in waits]
+    keep = [0]
+    for n in range(1, len(path) - 1):
+        a, b_, c = np.array(path[keep[-1]]), np.array(path[n]), np.array(path[n + 1])
+        u, v = b_ - a, c - b_
+        collinear = not np.cross(u, v).any() and np.dot(u, v) > 0
+        if not (collinear and waits[n + 1] == 0.0):
+            keep.append(n)
+    keep.append(len(path) - 1)
+    new_w = [0.0] + [waits[keep[q - 1] + 1] for q in range(1, len(keep))]
+    return [path[k] for k in keep], new_w
+
+
+def leg_items(site, drone, path, waits, t_cruise0, mass, ground_delay=0.0, e_before=0.0, e_takeoff=0.0,
+              t_takeoff=0.0, t_land=0.0, e_land=0.0, t_ref=0.0, fr=None, simplify=True, speed_items=True):
+    """경로(노드 목록) → 미션 항목과 경로표.
+
+    t_cruise0 : 첫 노드(이륙을 마친 고도)에서 수평 비행을 시작하는 시각 [s]
+    t_ref     : 경로표의 시각 기준 (보통 임무 출발 시각)
+    speed_items : False 면 '명령 방식' 미션 – 속도 항목은 첫 구간 하나만 넣고 속도 변경점으로 경로를 나누지 않는다.
+                  ArduCopter 는 미션의 DO_CHANGE_SPEED 와 외부 COMMAND 의 속도가 같은 값을 덮어써 나중 것이 이긴다
+                  (4.7.2 소스 mode_auto.cpp · GCS_MAVLink_Copter.cpp). 비행 중 속도 갱신을 쓰려면 미션에 속도 항목이 없어야 한다.
+    반환: dict(items=[...], rows=[...], summary={...})
+    """
+    fr = fr or site_frame()
+    path = [tuple(int(v) for v in p) for p in path]
+    n_nodes = len(path)
+    if simplify:
+        path, waits = merge_collinear(path, waits)
+    x0, y0, z0 = _node_xyz(site, path[0])
+    gh = float(site.ground[path[0][1], path[0][2]])                     # 홈(출발지) 지면 고도
+    lon0, lat0 = (float(v) for v in xy2ll(x0, y0, fr))
+    items, rows = [], []
+
+    def soc(e):
+        return float(100.0 - soc_drop(e_before + e, drone))
+
+    def add(cmd, frame, p1=0.0, p2=0.0, p3=0.0, p4=0.0, lat=0.0, lon=0.0, alt=0.0, xy=None, **row):
+        items.append(dict(seq=len(items), frame=frame, cmd=cmd, p=[p1, p2, p3, p4], lat=lat, lon=lon, alt=alt))
+        if xy is not None and row.get("alt_msl") is not None:      # 지형·건물 표면 위 높이 (참고용)
+            i = min(max(int(xy[0] // site.dx), 0), site.nx - 1)
+            j = min(max(int(xy[1] // site.dx), 0), site.ny - 1)
+            row["agl"] = float(row["alt_msl"] - site.ground[j, i])
+            row["clear"] = float(row["alt_msl"] - site.surface[j, i])
+        rows.append(dict(seq=len(items) - 1, cmd=cmd, lat=lat, lon=lon, alt_rel=alt if frame == FRAME_REL else None,
+                         **row))
+
+    add(CMD["WAYPOINT"], FRAME_ABS, lat=lat0, lon=lon0, alt=gh, note="홈 (출발지 지면)", alt_msl=gh,
+        t=t_cruise0 - t_takeoff - ground_delay - t_ref, soc=soc(0.0))
+    if ground_delay > 0.5:
+        add(CMD["DELAY"], FRAME_ABS, p1=round(ground_delay, 1), p2=-1, p3=-1, p4=-1, note="이륙 전 지상 대기",
+            t=t_cruise0 - t_takeoff - t_ref, soc=soc(0.0))
+    add(CMD["TAKEOFF"], FRAME_REL, lat=lat0, lon=lon0, alt=round(z0 - gh, 1), note="이륙", alt_msl=z0, xy=(x0, y0),
+        t=t_cruise0 - t_ref, soc=soc(e_takeoff))
+    t, e, v_prev, dist = t_cruise0, e_takeoff, None, 0.0
+    v_used, segs = [], []
+    for n in range(len(path) - 1):
+        xa, ya, za = _node_xyz(site, path[n])
+        xb, yb, zb = _node_xyz(site, path[n + 1])
+        if waits[n + 1] > 0:
+            lon, lat = (float(v) for v in xy2ll(xa, ya, fr))
+            s1 = simulate(site, drone, [path[n], path[n + 1]], [0.0, float(waits[n + 1])], t, mass)
+            # 대기 구간의 에너지만 떼어 낸다 (simulate 는 대기 뒤 이동까지 계산)
+            s0 = simulate(site, drone, [path[n], path[n + 1]], [0.0, 0.0], t + float(waits[n + 1]), mass)
+            e_wait = float(s1["e"][-1] - s0["e"][-1])
+            t += float(waits[n + 1]); e += e_wait
+            add(CMD["LOITER_TIME"], FRAME_REL, p1=round(float(waits[n + 1]), 1), lat=lat, lon=lon,
+                alt=round(za - gh, 1), note="호버 대기", alt_msl=za, xy=(xa, ya), t=t - t_ref, soc=soc(e))
+        sim = simulate(site, drone, [path[n], path[n + 1]], [0.0, 0.0], t, mass)
+        if sim is None:
+            raise ValueError("미션 변환 중 비행 불가 구간")
+        lh = math.hypot(xb - xa, yb - ya)
+        dist += math.sqrt(lh * lh + (zb - za) ** 2)
+        segs.append((xa, ya, za, xb, yb, zb, None if lh < 1e-6 else lh / max(float(sim["t"][-1] - t), 1e-9)))
+        if lh < 1e-6:                                    # 순수 수직 이동
+            groups = [(1.0, None, float(sim["t"][-1] - t), float(sim["e"][-1]))]
+        elif speed_items:
+            groups = _speed_groups(sim, lh, t)
+        else:                                            # 명령 방식: 구간을 나누지 않는다 (속도는 실행기가 보낸다)
+            T_seg = float(sim["t"][-1] - t)
+            groups = [(1.0, lh / max(T_seg, 1e-9), T_seg, float(sim["e"][-1]))]
+        for f, v, T, e_cum in groups:
+            if v is not None:
+                v_cmd = round(v * 2) / 2.0
+                v_used.append(v_cmd)
+                if v_prev is None or (speed_items and abs(v_cmd - v_prev) >= 0.5):
+                    add(CMD["CHANGE_SPEED"], FRAME_ABS, p1=1, p2=v_cmd, p3=-1, note="구간 대지속도 [m/s]",
+                        t=t - t_ref, soc=soc(e), speed=v_cmd)
+                    v_prev = v_cmd
+            x, y, z = xa + (xb - xa) * f, ya + (yb - ya) * f, za + (zb - za) * f
+            lon, lat = (float(u) for u in xy2ll(x, y, fr))
+            t += T
+            add(CMD["WAYPOINT"], FRAME_REL, lat=lat, lon=lon, alt=round(z - gh, 1),
+                note="경로점" if f >= 1.0 else "속도 변경점", alt_msl=z, xy=(x, y), t=t - t_ref, soc=soc(e + e_cum),
+                speed=None if v is None else round(v * 2) / 2.0)
+        e += float(sim["e"][-1])
+    xe, ye, ze = _node_xyz(site, path[-1])
+    lon, lat = (float(u) for u in xy2ll(xe, ye, fr))
+    add(CMD["LAND"], FRAME_REL, lat=lat, lon=lon, alt=0.0, note="착륙", alt_msl=float(site.ground[path[-1][1], path[-1][2]]),
+        t=t + t_land - t_ref, soc=soc(e + e_land))
+    alts = [it["alt"] for it in items if it["frame"] == FRAME_REL and it["cmd"] != CMD["LAND"]]
+    from .energy import power_w
+    ov_t = kinematic_overhead(segs)
+    ov_e = ov_t * power_w(0.0, 0.0, mass, 1.2, drone.params())      # 가감속 구간을 호버 전력으로 본 보수적 값
+    summary = dict(n_items=len(items), n_plan_nodes=n_nodes, n_waypoints=sum(1 for it in items if it["cmd"] == CMD["WAYPOINT"]) - 1,
+                   n_speed_changes=sum(1 for it in items if it["cmd"] == CMD["CHANGE_SPEED"]),
+                   n_loiter=sum(1 for it in items if it["cmd"] == CMD["LOITER_TIME"]),
+                   home=dict(lat=lat0, lon=lon0, alt_msl=gh), alt_rel_min=float(min(alts)), alt_rel_max=float(max(alts)),
+                   speed_min=float(min(v_used)) if v_used else None, speed_max=float(max(v_used)) if v_used else None,
+                   distance_m=float(dist), duration_s=float(t + t_land - (t_cruise0 - t_takeoff - ground_delay)),
+                   soc_end=soc(e + e_land), speed_mode="file" if speed_items else "command",
+                   overhead_s=round(ov_t, 1), soc_end_adj=soc(e + e_land + ov_e),
+                   params=dict(WP_SPD_UP=drone.vz_up, WP_SPD_DN=drone.vz_dn,
+                               note="계획기는 이 상승·하강률을 가정했다. 4.6 이하의 이름: WPNAV_SPEED_UP/DN [cm/s]"))
+    return dict(items=items, rows=rows, summary=summary)
+
+
+def to_wpl(items) -> str:
+    """QGC WPL 110 텍스트."""
+    lines = ["QGC WPL 110"]
+    for it in items:
+        p = it["p"]
+        lines.append("\t".join([str(it["seq"]), "1" if it["seq"] == 0 else "0", str(it["frame"]), str(it["cmd"]),
+                                f"{p[0]:.6f}", f"{p[1]:.6f}", f"{p[2]:.6f}", f"{p[3]:.6f}",
+                                f"{it['lat']:.8f}", f"{it['lon']:.8f}", f"{it['alt']:.6f}", "1"]))
+    return "\n".join(lines) + "\n"
+
+
+def to_csv(rows) -> str:
+    """경로표: 항목별 예상 도착 시각·SOC (운용자 확인용)."""
+    name = {16: "WAYPOINT", 19: "LOITER_TIME", 21: "LAND", 22: "TAKEOFF", 93: "DELAY", 178: "CHANGE_SPEED"}
+    out = ["seq,command,lat,lon,alt_rel_m,alt_msl_m,above_ground_m,above_surface_m,speed_ms,t_s,soc_pct,note"]
+    f = lambda v, n=1: "" if v is None else f"{v:.{n}f}"  # noqa: E731
+    for r in rows:
+        out.append(",".join([str(r["seq"]), name[r["cmd"]], f(r["lat"], 7) if r["lat"] else "", f(r["lon"], 7) if r["lon"] else "",
+                             f(r.get("alt_rel")), f(r.get("alt_msl")), f(r.get("agl")), f(r.get("clear")), f(r.get("speed")),
+                             f(r.get("t")), f(r.get("soc")), r.get("note", "")]))
+    return "\n".join(out) + "\n"
+
+
+def mission_from_legs(site, drone, legs, t_dep, fr=None, speed_items=True):
+    """webapp 의 leg 목록(App._fly_legs 결과) → 미션 목록.
+
+    이륙~착륙 한 번이 미션 하나다. 왕복은 구간마다 하나씩, 순회(중간 착륙 없음)는 전체가 하나의 미션이 된다."""
+    groups = []
+    for L in legs:
+        if not L.get("feasible"):
+            break
+        if L.get("air_start") and groups:
+            groups[-1].append(L)
+        else:
+            groups.append([L])
+    out = []
+    for G in groups:
+        if G[-1].get("air_end"):          # 착륙까지 이어지지 않은 묶음(중간에 계획 실패)은 내보내지 않는다
+            continue
+        L0, Ln = G[0], G[-1]
+        gd = float(L0["r"].get("ground_delay", 0.0))
+        path = [tuple(int(v) for v in p) for p in L0["r"]["path"]]
+        waits = [float(w) for w in L0.get("waits", L0["r"]["wait_before"])]
+        for L in G[1:]:                   # 이어 붙이기: 다음 구간의 첫 노드는 앞 구간의 끝 노드와 같다
+            path += [tuple(int(v) for v in p) for p in L["r"]["path"]][1:]
+            waits += [float(w) for w in L["waits"]][1:]
+        m = leg_items(site, drone, path, waits, L0["t_leg0"] + L0["t_to"] + gd, L0["m"], ground_delay=gd,
+                      e_before=L0["e_before"], e_takeoff=L0["e_to"], t_takeoff=L0["t_to"], t_land=Ln["t_ld"],
+                      e_land=Ln["e_ld"], t_ref=t_dep, fr=fr, speed_items=speed_items)
+        name = L0["name"] if len(G) == 1 else "tour"
+        out.append(dict(name=name, legs=[L["name"] for L in G], wpl=to_wpl(m["items"]), csv=to_csv(m["rows"]),
+                        plan=dict(path=path, waits=waits, mass=float(L0["m"]), t_cruise0=float(L0["t_leg0"] + L0["t_to"] + gd),
+                                  a=[float(v) for v in L0["a"]], b=[float(v) for v in Ln["b"]]), **m))
+    return out
+
+
+def remaining_mission(site, drone, plan, T, leg, e_used=0.0, t_ref=0.0, truth=None, fr=None, dv=0.5, min_len=75.0):
+    """비행 중: 지금 위치에서 남은 구간의 미션 (이륙 항목 없음). 속도 갱신 뒤의 새 속도 명령이 반영된다.
+
+    plan : LiveEngine 의 계획 dict(path, waits, sim, cmd, t0, track) – sim 은 seg·frac·hov 를 가진 실행 시뮬레이션
+    T    : 지금 시각 (절대)
+    leg  : dict(a=(x, y) 출발지, b=(x, y) 도착지, gl=도착 노드, m=질량, z0=출발지 지면 고도)
+    반환: dict(items, rows, wpl, csv, summary, speed_cmds) – speed_cmds 는 MAV_CMD_DO_CHANGE_SPEED 로 보낼 목록.
+
+    쓰는 법 두 가지 (docs/deployment.md):
+      ① 명령 방식(권장): 기체의 미션은 그대로 두고 speed_cmds 를 그 지점에서 COMMAND_LONG 으로 보낸다.
+      ② 파일 방식: wpl 을 지상국에서 다시 올린다 (첫 경로점이 지금 위치). 비행 중 미션 교체는 운용자가 판단한다.
+    """
+    from .planner import vertical_energy
+    fr = fr or site_frame()
+    sim, cmd, pts, waits = plan["sim"], np.asarray(plan["cmd"], float), np.asarray(plan["path"], float), plan["waits"]
+    tk = plan["track"]
+    q0 = int(np.clip(np.searchsorted(sim["t"], T, side="right"), 0, len(sim["t"]) - 1))
+    e_now = float(np.interp(T, tk["t"], tk["e"]))
+    gh = float(leg["z0"])
+    ax, ay = leg["a"]
+    lon0, lat0 = (float(v) for v in xy2ll(ax, ay, fr))
+    items, rows, speed_cmds = [], [], []
+
+    def soc(e):
+        return float(100.0 - soc_drop(e_used + (e - e_now), drone))
+
+    def add(cmd_id, frame, p1=0.0, p2=0.0, p3=0.0, p4=0.0, lat=0.0, lon=0.0, alt=0.0, xy=None, **row):
+        items.append(dict(seq=len(items), frame=frame, cmd=cmd_id, p=[p1, p2, p3, p4], lat=lat, lon=lon, alt=alt))
+        if xy is not None and row.get("alt_msl") is not None:
+            i = min(max(int(xy[0] // site.dx), 0), site.nx - 1)
+            j = min(max(int(xy[1] // site.dx), 0), site.ny - 1)
+            row["agl"] = float(row["alt_msl"] - site.ground[j, i])
+            row["clear"] = float(row["alt_msl"] - site.surface[j, i])
+        rows.append(dict(seq=len(items) - 1, cmd=cmd_id, lat=lat, lon=lon, alt_rel=alt if frame == FRAME_REL else None, **row))
+
+    def wp(x, y, z, t, e, note, speed=None):
+        lon, lat = (float(u) for u in xy2ll(x, y, fr))
+        # 일직선 위의 연속 경로점은 하나로 합친다 (사이에 속도 변경·대기가 없을 때)
+        if len(items) >= 2 and items[-1]["cmd"] == CMD["WAYPOINT"] and items[-2]["cmd"] == CMD["WAYPOINT"] and len(items) > 2:
+            a, b_ = rows[-2], rows[-1]
+            u = np.array([b_["x"] - a["x"], b_["y"] - a["y"], b_["alt_msl"] - a["alt_msl"]])
+            v = np.array([x - b_["x"], y - b_["y"], z - b_["alt_msl"]])
+            nu, nv = np.linalg.norm(u), np.linalg.norm(v)
+            if nu > 1e-6 and nv > 1e-6 and float(np.dot(u, v) / (nu * nv)) > 1 - 1e-9:
+                items.pop(); rows.pop()
+        add(CMD["WAYPOINT"], FRAME_REL, lat=lat, lon=lon, alt=round(z - gh, 1), note=note, alt_msl=z, xy=(x, y), x=x, y=y,
+            t=t - t_ref, soc=soc(e), speed=speed)
+
+    x, y, z = (float(np.interp(T, tk["t"], tk[c])) for c in "xyz")
+    add(CMD["WAYPOINT"], FRAME_ABS, lat=lat0, lon=lon0, alt=gh, note="홈 (출발지 지면)", alt_msl=gh, x=ax, y=ay,
+        t=T - t_ref, soc=soc(e_now))
+    wp(x, y, z, T, e_now, "지금 위치")
+    t_prev = np.concatenate([[plan["t0"]], sim["t"][:-1]])
+    v_prev, q, n_rec, dist = None, q0, len(sim["t"]), 0.0
+    px, py, pz = x, y, z
+    while q < n_rec:
+        n = int(sim["seg"][q])
+        b_ = q
+        while b_ < n_rec and int(sim["seg"][b_]) == n and bool(sim["hov"][b_]) == bool(sim["hov"][q]):
+            b_ += 1
+        xa, ya, za = _node_xyz(site, pts[n])
+        if bool(sim["hov"][q]):                                    # 구간 n 출발 전 호버 (남은 시간)
+            T_rem = float(sim["t"][b_ - 1] - max(t_prev[q], T))
+            if T_rem > 0.5:
+                lon, lat = (float(u) for u in xy2ll(xa, ya, fr))
+                add(CMD["LOITER_TIME"], FRAME_REL, p1=round(T_rem, 1), lat=lat, lon=lon, alt=round(za - gh, 1), note="호버 대기",
+                    alt_msl=za, xy=(xa, ya), x=xa, y=ya, t=float(sim["t"][b_ - 1]) - t_ref, soc=soc(float(sim["e"][b_ - 1])))
+            q = b_
+            continue
+        xb, yb, zb = _node_xyz(site, pts[n + 1])
+        lh = math.hypot(xb - xa, yb - ya)
+        # 이 구간의 남은 기록을 명령 속도(0.5 m/s 반올림)가 같은 묶음으로 나눈다
+        f0 = float(sim["frac"][q - 1]) if q > 0 and int(sim["seg"][q - 1]) == n and not bool(sim["hov"][q - 1]) else 0.0
+        fr_end = np.asarray(sim["frac"][q:b_], float)
+        length = np.diff(np.concatenate([[f0], fr_end])) * lh
+        vr = np.round(cmd[q:b_] / dv) * dv
+        groups, s0 = [], 0
+        for u in range(1, b_ - q + 1):
+            if u == b_ - q or vr[u] != vr[s0]:
+                groups.append([s0, u]); s0 = u
+        k = 0
+        while k < len(groups) and len(groups) > 1:
+            g = groups[k]
+            if length[g[0]:g[1]].sum() < min_len:
+                if k + 1 < len(groups):
+                    groups[k + 1][0] = g[0]
+                else:
+                    groups[k - 1][1] = g[1]
+                groups.pop(k)
+            else:
+                k += 1
+        for g0, g1 in groups:
+            f1 = float(fr_end[g1 - 1])
+            gx, gy, gz = xa + (xb - xa) * f1, ya + (yb - ya) * f1, za + (zb - za) * f1
+            if lh > 1e-6:
+                Lg = float(length[g0:g1].sum())
+                v = float(np.round(np.average(cmd[q + g0:q + g1], weights=np.maximum(length[g0:g1], 1e-9)) / dv) * dv) if Lg > 0 \
+                    else float(vr[g0])
+                short = Lg < min_len and v_prev is not None and abs(v - v_prev) < 1.5    # 짧은 조각의 작은 변화는 건너뜀
+                if v_prev is None or (abs(v - v_prev) >= dv - 1e-9 and not short):
+                    t_c = float(max(t_prev[q + g0], T))
+                    add(CMD["CHANGE_SPEED"], FRAME_ABS, p1=1, p2=v, p3=-1, note="구간 대지속도 [m/s]", t=t_c - t_ref,
+                        soc=soc(float(np.interp(t_c, tk["t"], tk["e"]))), speed=v, x=px, y=py)
+                    lon, lat = (float(u) for u in xy2ll(px, py, fr))
+                    speed_cmds.append(dict(t=float(t_c - t_ref), v=float(v), x=float(px), y=float(py), z=float(pz),
+                                           lat=lat, lon=lon))
+                    v_prev = v
+            dist += math.sqrt((gx - px) ** 2 + (gy - py) ** 2 + (gz - pz) ** 2)
+            wp(gx, gy, gz, float(sim["t"][q + g1 - 1]), float(sim["e"][q + g1 - 1]), "경로점" if f1 >= 1 - 1e-9 else "속도 변경점",
+               speed=v_prev if lh > 1e-6 else None)
+            px, py, pz = gx, gy, gz
+        q = b_
+    bx, by = leg["b"]
+    e_ld, t_ld = vertical_energy(truth or site, drone, bx, by, leg["gl"][0], float(sim["t"][-1]), leg["m"], up=False)
+    lon, lat = (float(u) for u in xy2ll(px, py, fr))
+    add(CMD["LAND"], FRAME_REL, lat=lat, lon=lon, alt=0.0, note="착륙",
+        alt_msl=float(site.ground[int(by // site.dx), int(bx // site.dx)]), x=px, y=py,
+        t=float(sim["t"][-1]) + t_ld - t_ref, soc=soc(float(sim["e"][-1]) + e_ld))
+    for it in items:                                                   # 합치면서 바뀐 번호를 다시 매긴다
+        it["seq"] = items.index(it)
+    for n_, r in enumerate(rows):
+        r["seq"] = n_
+    v_used = [c["v"] for c in speed_cmds]
+    summary = dict(n_items=len(items), n_waypoints=sum(1 for it in items if it["cmd"] == CMD["WAYPOINT"]) - 1,
+                   n_speed_changes=len(speed_cmds), n_loiter=sum(1 for it in items if it["cmd"] == CMD["LOITER_TIME"]),
+                   home=dict(lat=lat0, lon=lon0, alt_msl=gh), distance_m=float(dist),
+                   duration_s=float(sim["t"][-1] + t_ld - T), soc_now=soc(e_now), soc_end=soc(float(sim["e"][-1]) + e_ld),
+                   speed_min=min(v_used) if v_used else None, speed_max=max(v_used) if v_used else None,
+                   airborne=True, note="이륙 항목 없음: 비행 중 교체용. 첫 경로점이 지금 위치다.")
+    return dict(items=items, rows=rows, wpl=to_wpl(items), csv=to_csv(rows), summary=summary, speed_cmds=speed_cmds)

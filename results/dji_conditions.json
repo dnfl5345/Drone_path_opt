@@ -1,0 +1,895 @@
+{
+ "n_total": 200,
+ "n_by_sdk": {
+  "Onboard SDK": 47,
+  "Payload SDK": 56,
+  "Mobile SDK V5 · 비행제어기": 82,
+  "Mobile SDK V5 · 배터리": 15
+ },
+ "counts_by_sdk": {
+  "Onboard SDK": {
+   "DEC": 19,
+   "FIX": 3,
+   "ETC": 11,
+   "MON": 12,
+   "OBJ": 1,
+   "ENV": 1
+  },
+  "Payload SDK": {
+   "DEC": 21,
+   "FIX": 3,
+   "ETC": 16,
+   "MON": 12,
+   "OBJ": 3,
+   "ENV": 1
+  },
+  "Mobile SDK V5 · 비행제어기": {
+   "ETC": 31,
+   "MON": 14,
+   "FIX": 23,
+   "DEC": 5,
+   "ENV": 5,
+   "OBJ": 4
+  },
+  "Mobile SDK V5 · 배터리": {
+   "ETC": 4,
+   "FIX": 6,
+   "OBJ": 5
+  }
+ },
+ "counts_by_role": {
+  "DEC": 45,
+  "FIX": 35,
+  "ETC": 62,
+  "MON": 38,
+  "OBJ": 13,
+  "ENV": 7
+ },
+ "counts_by_group": {
+  "att": 4,
+  "acc": 6,
+  "vel": 7,
+  "gyro": 4,
+  "alt": 8,
+  "home": 9,
+  "pos": 9,
+  "time": 7,
+  "gnss": 14,
+  "heading": 5,
+  "rc": 5,
+  "gimbal": 17,
+  "mode": 13,
+  "fault": 11,
+  "soc": 6,
+  "esc": 2,
+  "obst": 2,
+  "ident": 11,
+  "history": 3,
+  "cmd": 22,
+  "wind_warn": 1,
+  "wind_speed": 1,
+  "wind_dir": 1,
+  "limits": 18,
+  "battwarn": 4,
+  "traffic": 2,
+  "aging": 4,
+  "batt_temp": 1,
+  "power": 3
+ },
+ "roles": {
+  "OBJ": "목적·제약 상태 (배터리)",
+  "DEC": "결정 변수와 그 결과 (위치·속도·자세·모터)",
+  "ENV": "외생 환경 (바람·주변 비행체·장애물)",
+  "FIX": "임무 전 고정 입력·설정",
+  "MON": "상태·안전 감시",
+  "ETC": "명령·조종 입력·식별"
+ },
+ "groups": {
+  "soc": {
+   "role": "OBJ",
+   "name": "배터리 잔량 (%, mAh)",
+   "n": 6,
+   "items": [
+    "Onboard:BATTERY_INFO",
+    "Payload:BATTERY_INFO",
+    "Payload:BATTERY_SINGLE_INFO_INDEX1",
+    "Payload:BATTERY_SINGLE_INFO_INDEX2",
+    "Mobile:KeyChargeRemaining",
+    "Mobile:KeyChargeRemainingInPercent"
+   ]
+  },
+  "power": {
+   "role": "OBJ",
+   "name": "배터리 전압·전류 (→ 전력)",
+   "n": 3,
+   "items": [
+    "Mobile:KeyVoltage",
+    "Mobile:KeyCurrent",
+    "Mobile:KeyCellVoltages"
+   ]
+  },
+  "battwarn": {
+   "role": "OBJ",
+   "name": "저전압 경고·귀환 판단",
+   "n": 4,
+   "items": [
+    "Mobile:KeyIsLowBatteryWarning",
+    "Mobile:KeyIsSeriousLowBatteryWarning",
+    "Mobile:KeyGoHomeInfo",
+    "Mobile:KeyLowBatteryRTHInfo"
+   ]
+  },
+  "pos": {
+   "role": "DEC",
+   "name": "수평 위치",
+   "n": 9,
+   "items": [
+    "Onboard:GPS_FUSED",
+    "Onboard:GPS_POSITION",
+    "Onboard:RTK_POSITION",
+    "Onboard:POSITION_VO",
+    "Payload:POSITION_FUSED",
+    "Payload:GPS_POSITION",
+    "Payload:RTK_POSITION",
+    "Payload:POSITION_VO",
+    "Mobile:KeyAircraftLocation3D"
+   ]
+  },
+  "alt": {
+   "role": "DEC",
+   "name": "고도·높이",
+   "n": 8,
+   "items": [
+    "Onboard:ALTITUDE_FUSIONED",
+    "Onboard:ALTITUDE_BAROMETER",
+    "Onboard:HEIGHT_FUSION",
+    "Payload:ALTITUDE_FUSED",
+    "Payload:ALTITUDE_BAROMETER",
+    "Payload:HEIGHT_FUSION",
+    "Payload:HEIGHT_RELATIVE",
+    "Mobile:KeyUltrasonicHeight"
+   ]
+  },
+  "vel": {
+   "role": "DEC",
+   "name": "대지속도 벡터",
+   "n": 7,
+   "items": [
+    "Onboard:VELOCITY",
+    "Onboard:GPS_VELOCITY",
+    "Onboard:RTK_VELOCITY",
+    "Payload:VELOCITY",
+    "Payload:GPS_VELOCITY",
+    "Payload:RTK_VELOCITY",
+    "Mobile:KeyAircraftVelocity"
+   ]
+  },
+  "att": {
+   "role": "DEC",
+   "name": "자세",
+   "n": 4,
+   "items": [
+    "Onboard:QUATERNION",
+    "Payload:QUATERNION",
+    "Payload:IMU_ATTI_NAVI_DATA_WITH_TIMESTAMP",
+    "Mobile:KeyAircraftAttitude"
+   ]
+  },
+  "acc": {
+   "role": "DEC",
+   "name": "가속도",
+   "n": 6,
+   "items": [
+    "Onboard:ACCELERATION_GROUND",
+    "Onboard:ACCELERATION_BODY",
+    "Onboard:ACCELERATION_RAW",
+    "Payload:ACCELERATION_GROUND",
+    "Payload:ACCELERATION_BODY",
+    "Payload:ACCELERATION_RAW"
+   ]
+  },
+  "gyro": {
+   "role": "DEC",
+   "name": "각속도",
+   "n": 4,
+   "items": [
+    "Onboard:ANGULAR_RATE_FUSIONED",
+    "Onboard:ANGULAR_RATE_RAW",
+    "Payload:ANGULAR_RATE_FUSIONED",
+    "Payload:ANGULAR_RATE_RAW"
+   ]
+  },
+  "heading": {
+   "role": "DEC",
+   "name": "기수 방위",
+   "n": 5,
+   "items": [
+    "Onboard:RTK_YAW",
+    "Onboard:COMPASS",
+    "Payload:RTK_YAW",
+    "Payload:COMPASS",
+    "Mobile:KeyCompassHeading"
+   ]
+  },
+  "esc": {
+   "role": "DEC",
+   "name": "모터·ESC (전류·회전수·온도)",
+   "n": 2,
+   "items": [
+    "Onboard:ESC_DATA",
+    "Payload:ESC_DATA"
+   ]
+  },
+  "wind_speed": {
+   "role": "ENV",
+   "name": "풍속",
+   "n": 1,
+   "items": [
+    "Mobile:KeyWindSpeed"
+   ]
+  },
+  "wind_dir": {
+   "role": "ENV",
+   "name": "풍향",
+   "n": 1,
+   "items": [
+    "Mobile:KeyWindDirection"
+   ]
+  },
+  "wind_warn": {
+   "role": "ENV",
+   "name": "강풍 경고 등급",
+   "n": 1,
+   "items": [
+    "Mobile:KeyWindWarning"
+   ]
+  },
+  "traffic": {
+   "role": "ENV",
+   "name": "주변 유인기 (AirSense, ADS-B)",
+   "n": 2,
+   "items": [
+    "Mobile:KeyAirSenseSystemSupported",
+    "Mobile:KeyAirSenseSystemInformation"
+   ]
+  },
+  "obst": {
+   "role": "ENV",
+   "name": "장애물 거리",
+   "n": 2,
+   "items": [
+    "Onboard:AVOID_DATA",
+    "Payload:AVOID_DATA"
+   ]
+  },
+  "home": {
+   "role": "FIX",
+   "name": "홈포인트·이륙 고도",
+   "n": 9,
+   "items": [
+    "Onboard:ALTITUDE_OF_HOMEPOINT",
+    "Onboard:HOME_POINT_SET_STATUS",
+    "Onboard:HOME_POINT_INFO",
+    "Payload:ALTITUDE_OF_HOMEPOINT",
+    "Payload:HOME_POINT_SET_STATUS",
+    "Payload:HOME_POINT_INFO",
+    "Mobile:KeyTakeoffLocationAltitude",
+    "Mobile:KeyIsHomeLocationSet",
+    "Mobile:KeyHomeLocation"
+   ]
+  },
+  "limits": {
+   "role": "FIX",
+   "name": "고도·거리 제한, 귀환·경고 설정",
+   "n": 18,
+   "items": [
+    "Mobile:KeyMultipleFlightModeEnabled",
+    "Mobile:KeyFailsafeAction",
+    "Mobile:KeyLowBatteryWarningThreshold",
+    "Mobile:KeySeriousLowBatteryWarningThreshold",
+    "Mobile:KeyLEDsSettings",
+    "Mobile:KeyLockMotors",
+    "Mobile:KeyESCBeepEnabled",
+    "Mobile:KeyCoordinatedTurnEnabled",
+    "Mobile:KeyNavigationSatelliteSystemSource",
+    "Mobile:KeyHeightLimitRange",
+    "Mobile:KeyHeightLimit",
+    "Mobile:KeyDistanceLimitEnabled",
+    "Mobile:KeyDistanceLimitRange",
+    "Mobile:KeyDistanceLimit",
+    "Mobile:KeyGoHomeHeight",
+    "Mobile:KeyGoHomeHeightRange",
+    "Mobile:KeyLowBatteryRTHEnabled",
+    "Mobile:KeyBatterySelfDischargeInDays"
+   ]
+  },
+  "aging": {
+   "role": "FIX",
+   "name": "배터리 노화 (완충 용량·방전 횟수)",
+   "n": 4,
+   "items": [
+    "Mobile:KeyFullChargeCapacity",
+    "Mobile:KeyBatteryHighVoltageStorageTime",
+    "Mobile:KeyNumberOfDischarges",
+    "Mobile:KeyBatteryManufacturedDate"
+   ]
+  },
+  "batt_temp": {
+   "role": "FIX",
+   "name": "배터리 온도",
+   "n": 1,
+   "items": [
+    "Mobile:KeyBatteryTemperature"
+   ]
+  },
+  "history": {
+   "role": "FIX",
+   "name": "누적 비행 이력",
+   "n": 3,
+   "items": [
+    "Mobile:KeyAircraftTotalFlightDuration",
+    "Mobile:KeyAircraftTotalFlightDistance",
+    "Mobile:KeyAircraftTotalFlightTimes"
+   ]
+  },
+  "mode": {
+   "role": "MON",
+   "name": "비행 상태·모드",
+   "n": 13,
+   "items": [
+    "Onboard:STATUS_FLIGHT",
+    "Onboard:STATUS_DISPLAYMODE",
+    "Onboard:STATUS_LANDINGGEAR",
+    "Onboard:CONTROL_DEVICE",
+    "Payload:STATUS_FLIGHT",
+    "Payload:STATUS_DISPLAYMODE",
+    "Payload:STATUS_LANDINGGEAR",
+    "Payload:CONTROL_DEVICE",
+    "Mobile:KeyIsFlying",
+    "Mobile:KeyIsLandingConfirmationNeeded",
+    "Mobile:KeyRemoteControllerFlightMode",
+    "Mobile:KeyFlightMode",
+    "Mobile:KeyGoHomeStatus"
+   ]
+  },
+  "gnss": {
+   "role": "MON",
+   "name": "GNSS·RTK 품질",
+   "n": 14,
+   "items": [
+    "Onboard:GPS_DETAILS",
+    "Onboard:RTK_POSITION_INFO",
+    "Onboard:RTK_YAW_INFO",
+    "Onboard:GPS_SIGNAL_LEVEL",
+    "Onboard:GPS_CONTROL_LEVEL",
+    "Onboard:RTK_CONNECT_STATUS",
+    "Payload:GPS_DETAILS",
+    "Payload:GPS_SIGNAL_LEVEL",
+    "Payload:RTK_POSITION_INFO",
+    "Payload:RTK_YAW_INFO",
+    "Payload:GPS_CONTROL_LEVEL",
+    "Payload:RTK_CONNECT_STATUS",
+    "Mobile:KeyGPSSatelliteCount",
+    "Mobile:KeyGPSSignalLevel"
+   ]
+  },
+  "fault": {
+   "role": "MON",
+   "name": "이상·오류 플래그",
+   "n": 11,
+   "items": [
+    "Onboard:STATUS_MOTOR_START_ERROR",
+    "Onboard:FLIGHT_ANOMALY",
+    "Payload:STATUS_MOTOR_START_ERROR",
+    "Payload:FLIGHT_ANOMALY",
+    "Mobile:KeyCompassHasError",
+    "Mobile:KeyIsCompassCalibrating",
+    "Mobile:KeyCompassCalibrationStatus",
+    "Mobile:KeyIMUCalibrationInfo",
+    "Mobile:KeyIsFailSafe",
+    "Mobile:KeyIsNearHeightLimit",
+    "Mobile:KeyIsNearDistanceLimit"
+   ]
+  },
+  "cmd": {
+   "role": "ETC",
+   "name": "명령 키 (이륙·착륙·귀환·보정 등)",
+   "n": 22,
+   "items": [
+    "Mobile:KeyStartCompassCalibration",
+    "Mobile:KeyStopCompassCalibration",
+    "Mobile:KeyStartIMUCalibration",
+    "Mobile:KeyStartTakeoff",
+    "Mobile:KeyStopTakeoff",
+    "Mobile:KeyStartAutoLanding",
+    "Mobile:KeyStopAutoLanding",
+    "Mobile:KeyConfirmLanding",
+    "Mobile:KeyRebootDevice",
+    "Mobile:KeyLookAt",
+    "Mobile:KeyStartMultiGimbalSyncControl",
+    "Mobile:KeyStopMultiGimbalSyncControl",
+    "Mobile:KeyPropellerRotation",
+    "Mobile:KeyHomeLocationUsingCurrentAircraftLocation",
+    "Mobile:KeyStartGoHome",
+    "Mobile:KeyStopGoHome",
+    "Mobile:KeyGoHomeConfirm",
+    "Mobile:KeyLowBatteryRTHConfirm",
+    "Mobile:KeyAccessLockerSetSecurityCode",
+    "Mobile:KeyAccessLockerVerifySecurityCode",
+    "Mobile:KeyAccessLockerModifySecurityCode",
+    "Mobile:KeyAccessLockerResetSecurityCode"
+   ]
+  },
+  "rc": {
+   "role": "ETC",
+   "name": "조종기 입력",
+   "n": 5,
+   "items": [
+    "Onboard:RC",
+    "Onboard:RC_FULL_RAW_DATA",
+    "Onboard:RC_WITH_FLAG_DATA",
+    "Payload:RC",
+    "Payload:RC_WITH_FLAG_DATA"
+   ]
+  },
+  "gimbal": {
+   "role": "ETC",
+   "name": "짐벌",
+   "n": 17,
+   "items": [
+    "Onboard:GIMBAL_ANGLES",
+    "Onboard:GIMBAL_STATUS",
+    "Onboard:GIMBAL_CONTROL_MODE",
+    "Onboard:DUAL_GIMBAL_DATA",
+    "Onboard:THREE_GIMBAL_DATA",
+    "Payload:GIMBAL_ANGLES",
+    "Payload:GIMBAL_STATUS",
+    "Payload:GIMBAL_CONTROL_MODE",
+    "Payload:THREE_GIMBAL_DATA",
+    "Payload:GIMBAL_ANGLES_ON_POS_NO1",
+    "Payload:GIMBAL_ANGLES_ON_POS_NO2",
+    "Payload:GIMBAL_ANGLES_ON_POS_NO3",
+    "Payload:GIMBAL_ANGLES_ON_POS_NO4",
+    "Payload:GIMBAL_ANGLES_ON_POS_NO5",
+    "Payload:GIMBAL_ANGLES_ON_POS_NO6",
+    "Payload:GIMBAL_ANGLES_ON_POS_NO7",
+    "Mobile:KeyMultiGimbalSyncStatus"
+   ]
+  },
+  "ident": {
+   "role": "ETC",
+   "name": "식별·연결 정보",
+   "n": 11,
+   "items": [
+    "Mobile:KeyConnection",
+    "Mobile:KeyFlightLogIndex",
+    "Mobile:KeySerialNumber",
+    "Mobile:KeyFirmwareVersion",
+    "Mobile:KeyCompassCount",
+    "Mobile:KeyIMUCount",
+    "Mobile:KeyAccessLockerAllDeviceStatus",
+    "Mobile:KeyConnection",
+    "Mobile:KeyNumberOfCells",
+    "Mobile:KeySerialNumber",
+    "Mobile:KeyFirmwareVersion"
+   ]
+  },
+  "time": {
+   "role": "ETC",
+   "name": "시각·동기",
+   "n": 7,
+   "items": [
+    "Onboard:GPS_DATE",
+    "Onboard:GPS_TIME",
+    "Onboard:HARD_SYNC",
+    "Payload:GPS_DATE",
+    "Payload:GPS_TIME",
+    "Payload:HARD_SYNC",
+    "Mobile:KeyFlightTimeInSeconds"
+   ]
+  }
+ },
+ "screening": [
+  {
+   "name": "풍속·풍향",
+   "src": "MSDK KeyWindSpeed [dm/s], KeyWindDirection (지구 좌표)",
+   "q": [
+    1,
+    1,
+    1,
+    1,
+    1
+   ],
+   "role": "비용 변인 (바람장)",
+   "ev": "모델: 10 m/s에서 방향에 따라 -38 ~ +150 %"
+  },
+  {
+   "name": "강풍 경고 등급",
+   "src": "MSDK KeyWindWarning, OSDK·PSDK FLIGHT_ANOMALY.strongWindLevel1/2",
+   "q": [
+    1,
+    0.5,
+    1,
+    1,
+    0
+   ],
+   "role": "안전 감시",
+   "ev": "등급(2–3단계)만 제공, 현재 위치만"
+  },
+  {
+   "name": "주변 유인기",
+   "src": "MSDK KeyAirSenseSystemInformation (ADS-B 수신)",
+   "q": [
+    1,
+    0,
+    1,
+    1,
+    0.5
+   ],
+   "role": "제약 변인 (동적 장애물)",
+   "ev": "에너지에는 우회·대기로만 작용"
+  },
+  {
+   "name": "장애물 거리",
+   "src": "OSDK·PSDK AVOID_DATA",
+   "q": [
+    1,
+    0,
+    1,
+    1,
+    0.5
+   ],
+   "role": "제약 (지형·건물 지도)",
+   "ev": "감지 거리 수십 m, 계획에는 지도를 사용"
+  },
+  {
+   "name": "탑재중량",
+   "src": "DJI 키 없음 (주문 정보로 입력)",
+   "q": [
+    1,
+    1,
+    0,
+    0,
+    1
+   ],
+   "role": "고정 입력 (구간별 질량)",
+   "ev": "실측: 0→500 g 평균 전력 +21 % · 모델: -9 ~ +5 %"
+  },
+  {
+   "name": "공기밀도 (기온·기압)",
+   "src": "직접 키 없음 (ALTITUDE_BAROMETER로 간접)",
+   "q": [
+    1,
+    0.5,
+    0.5,
+    0.5,
+    1
+   ],
+   "role": "고정 입력 (고도별 밀도)",
+   "ev": "모델: -3 ~ +4 %"
+  },
+  {
+   "name": "배터리 온도·노화",
+   "src": "MSDK KeyBatteryTemperature, KeyFullChargeCapacity, KeyNumberOfDischarges",
+   "q": [
+    1,
+    null,
+    0,
+    0,
+    1
+   ],
+   "role": "고정 입력 (용량 보정)",
+   "ev": "모델 미반영 (향후 과제)"
+  },
+  {
+   "name": "GNSS·RTK 품질",
+   "src": "GPS_SIGNAL_LEVEL, GPS_DETAILS, RTK_*_INFO, KeyGPSSatelliteCount",
+   "q": [
+    1,
+    0,
+    1,
+    0.5,
+    0
+   ],
+   "role": "안전 감시",
+   "ev": "에너지와 무관"
+  },
+  {
+   "name": "배터리 잔량·전압·전류",
+   "src": "BATTERY_INFO, BATTERY_SINGLE_INFO, KeyChargeRemainingInPercent, KeyVoltage, KeyCurrent",
+   "q": [
+    0,
+    null,
+    null,
+    null,
+    null
+   ],
+   "role": "목적·제약 (SOC)",
+   "ev": "조건이 아니라 결과"
+  },
+  {
+   "name": "대지속도·고도·위치",
+   "src": "VELOCITY, ALTITUDE_FUSED, GPS_FUSED, KeyAircraftVelocity, KeyAircraftLocation3D",
+   "q": [
+    0,
+    1,
+    null,
+    null,
+    null
+   ],
+   "role": "결정 변수 (경로·고도·속도)",
+   "ev": "실측: 속도 4→12 m/s 미터당 에너지 -33 % · 모델: 속도 고정 +23 %"
+  },
+  {
+   "name": "자세·가속도·각속도·모터",
+   "src": "QUATERNION, ACCELERATION_*, ANGULAR_RATE_*, ESC_DATA, KeyAircraftAttitude",
+   "q": [
+    0,
+    null,
+    null,
+    null,
+    null
+   ],
+   "role": "제어 결과 (관측용)",
+   "ev": "경로·바람이 정해지면 따라오는 값"
+  },
+  {
+   "name": "비행 모드·이상 플래그",
+   "src": "STATUS_FLIGHT, STATUS_DISPLAYMODE, FLIGHT_ANOMALY, KeyFlightMode",
+   "q": [
+    0,
+    null,
+    null,
+    null,
+    null
+   ],
+   "role": "안전 감시",
+   "ev": "이산 상태"
+  }
+ ],
+ "cmu": {
+  "n_all": 209,
+  "n": 181,
+  "filter": "경로 R1, 설정 속도 > 0, 탑재 0·250·500 g",
+  "targets": {
+   "mean_power_w": {
+    "r2_full": 0.5712792340818718,
+    "mean": 407.5060318060245,
+    "drop_r2": {
+     "탑재중량": {
+      "v": 0.4305130511433293,
+      "lo": 0.3090339535605221,
+      "hi": 0.5248092243675928
+     },
+     "설정 속도": {
+      "v": 0.047417203299642274,
+      "lo": 0.014761149591683523,
+      "hi": 0.10335127990182111
+     },
+     "설정 고도": {
+      "v": 0.0716380607884246,
+      "lo": 0.027308750311947773,
+      "hi": 0.12970890506916077
+     },
+     "풍속 (기체 풍속계, 스칼라)": {
+      "v": 0.06679527059871271,
+      "lo": 0.01982356887835059,
+      "hi": 0.13358031435555873
+     },
+     "배터리 전압": {
+      "v": 0.004491758491487419,
+      "lo": 8.050507374351979e-06,
+      "hi": 0.026252279111155002
+     }
+    },
+    "range_effect_pct": {
+     "탑재중량": {
+      "v": 19.113238100385406,
+      "lo": 16.48943590173199,
+      "hi": 21.670271591504857
+     },
+     "설정 속도": {
+      "v": 7.631216221518991,
+      "lo": 4.137766698195407,
+      "hi": 12.114155603124074
+     },
+     "설정 고도": {
+      "v": 8.613690940320357,
+      "lo": 5.279363771074405,
+      "hi": 11.992694095759767
+     },
+     "풍속 (기체 풍속계, 스칼라)": {
+      "v": 10.417485590790568,
+      "lo": 5.345678931589942,
+      "hi": 16.443665434757108
+     },
+     "배터리 전압": {
+      "v": -2.601321380323299,
+      "lo": -6.640271237934046,
+      "hi": 1.2852102878170992
+     }
+    }
+   },
+   "specific_energy_j_m": {
+    "r2_full": 0.9536320586787584,
+    "mean": 130.33220150427783,
+    "drop_r2": {
+     "탑재중량": {
+      "v": 0.16731684035086347,
+      "lo": 0.1243370399608909,
+      "hi": 0.20769168201441174
+     },
+     "설정 속도": {
+      "v": 0.5923176752081426,
+      "lo": 0.48326052494543664,
+      "hi": 0.6750107300501037
+     },
+     "설정 고도": {
+      "v": 0.07063267336655366,
+      "lo": 0.04683826659189149,
+      "hi": 0.09873474489812355
+     },
+     "풍속 (기체 풍속계, 스칼라)": {
+      "v": 5.736311706627806e-05,
+      "lo": 2.637825053525278e-07,
+      "hi": 0.0021292596688400308
+     },
+     "배터리 전압": {
+      "v": 0.0001044397733237501,
+      "lo": 3.369378892142949e-07,
+      "hi": 0.0017178029575228152
+     }
+    },
+    "range_effect_pct": {
+     "탑재중량": {
+      "v": 18.76912871950622,
+      "lo": 17.37756307870923,
+      "hi": 20.07924603267483
+     },
+     "설정 속도": {
+      "v": 41.813312311390085,
+      "lo": 39.41945553320951,
+      "hi": 44.17002624272169
+     },
+     "설정 고도": {
+      "v": 13.472660714083915,
+      "lo": 11.569185805303203,
+      "hi": 15.37738334534389
+     },
+     "풍속 (기체 풍속계, 스칼라)": {
+      "v": 0.48088319360694776,
+      "lo": -2.119042866025732,
+      "hi": 2.971530600392941
+     },
+     "배터리 전압": {
+      "v": -0.624815720936088,
+      "lo": -2.514206588047276,
+      "hi": 1.4470100987640129
+     }
+    }
+   }
+  },
+  "ranges": {
+   "탑재중량": [
+    0.0,
+    500.0
+   ],
+   "설정 속도": [
+    4.0,
+    12.0
+   ],
+   "설정 고도": [
+    25.0,
+    100.0
+   ],
+   "풍속 (기체 풍속계, 스칼라)": [
+    3.2755130035178444,
+    5.998580653282904
+   ],
+   "배터리 전압": [
+    21.267081290011305,
+    23.742821324389915
+   ]
+  },
+  "by_payload": {
+   "0": {
+    "mean_power_w": 364.5,
+    "specific_energy_j_m": 116.88
+   },
+   "250": {
+    "mean_power_w": 414.96,
+    "specific_energy_j_m": 130.25
+   },
+   "500": {
+    "mean_power_w": 440.0,
+    "specific_energy_j_m": 142.79
+   }
+  },
+  "by_speed": {
+   "4": {
+    "mean_power_w": 421.07,
+    "specific_energy_j_m": 169.54,
+    "mean_wind_speed_ms": 4.03,
+    "max_wind_speed_ms": 8.67
+   },
+   "6": {
+    "mean_power_w": 415.22,
+    "specific_energy_j_m": 136.46,
+    "mean_wind_speed_ms": 4.42,
+    "max_wind_speed_ms": 10.24
+   },
+   "8": {
+    "mean_power_w": 400.94,
+    "specific_energy_j_m": 122.34,
+    "mean_wind_speed_ms": 4.63,
+    "max_wind_speed_ms": 12.05
+   },
+   "10": {
+    "mean_power_w": 401.6,
+    "specific_energy_j_m": 113.89,
+    "mean_wind_speed_ms": 4.74,
+    "max_wind_speed_ms": 13.58
+   },
+   "12": {
+    "mean_power_w": 399.98,
+    "specific_energy_j_m": 113.23,
+    "mean_wind_speed_ms": 4.82,
+    "max_wind_speed_ms": 14.86
+   }
+  },
+  "by_alt": {
+   "25": {
+    "mean_power_w": 393.26,
+    "specific_energy_j_m": 119.72
+   },
+   "50": {
+    "mean_power_w": 399.6,
+    "specific_energy_j_m": 129.19
+   },
+   "75": {
+    "mean_power_w": 413.93,
+    "specific_energy_j_m": 133.83
+   },
+   "100": {
+    "mean_power_w": 422.95,
+    "specific_energy_j_m": 138.3
+   }
+  },
+  "effects": {
+   "payload_0_500_pct": 20.71296085825345,
+   "payload_0_500_spec_pct": 22.16710300650224,
+   "alt_25_100_pct": 7.549994670469351,
+   "speed_4_12_spec_pct": -33.21072523199763,
+   "speed_power_span_pct": 5.2737511633936585
+  },
+  "wind_sensor": {
+   "mean": 4.537045560436624,
+   "p5": 3.2755130035178444,
+   "p95": 5.998580653282904,
+   "min": 2.566422540243243,
+   "max": 6.670192316150627,
+   "corr_mean_vs_speed": 0.3141381733117219,
+   "corr_max_vs_speed": 0.8160735843588506,
+   "corr_std_vs_speed": 0.8732538058368985,
+   "max_at_4": 8.673529442618875,
+   "max_at_12": 14.859459516164419,
+   "n_days": 16,
+   "day_mean_range": [
+    3.6938944245494127,
+    5.848790109415805
+   ]
+  }
+ },
+ "wind_sources": {
+  "msdk": [
+   "KeyWindSpeed (Integer, dm/s)",
+   "KeyWindDirection (WindDirection, 지구 좌표)",
+   "KeyWindWarning (WindWarning, 풍속 등급)"
+  ],
+  "osdk_psdk": [
+   "FLIGHT_ANOMALY.strongWindLevel1",
+   "FLIGHT_ANOMALY.strongWindLevel2"
+  ],
+  "note": "Onboard·Payload SDK에는 풍속·풍향 수치 토픽이 없고 강풍 플래그 2개만 있다."
+ }
+}

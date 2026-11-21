@@ -1,0 +1,59 @@
+{
+ "load_s": 3.583,
+ "plan_s": 13.23,
+ "downloads": [
+  "pangyo_x650_15h_out.waypoints",
+  "pangyo_x650_15h_back.waypoints",
+  "pangyo_x650_15h_out_m30.kmz",
+  "pangyo_x650_15h_back_m30.kmz"
+ ],
+ "errors": [],
+ "steps": [
+  {
+   "name": "01_start",
+   "note": "첫 화면 (3.6 s)"
+  },
+  {
+   "name": "02_drone",
+   "note": ""
+  },
+  {
+   "name": "03_mission",
+   "note": ""
+  },
+  {
+   "name": "04_points",
+   "note": ""
+  },
+  {
+   "name": "05_time",
+   "note": ""
+  },
+  {
+   "name": "06_plan",
+   "note": ""
+  },
+  {
+   "name": "06b_computing",
+   "note": ""
+  },
+  {
+   "name": "07_result",
+   "note": "경로 생성 13.2 s"
+  },
+  {
+   "name": "08_play",
+   "note": ""
+  },
+  {
+   "name": "09_compare",
+   "note": ""
+  },
+  {
+   "name": "10_export",
+   "note": ""
+  }
+ ],
+ "soc": "51.8 %",
+ "feas": "임무 가능 (예비 20 % 이상)"
+}

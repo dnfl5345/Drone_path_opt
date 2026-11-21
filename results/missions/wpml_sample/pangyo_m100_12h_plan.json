@@ -1,0 +1,119 @@
+{
+ "feasible": true,
+ "soc_used": 75.67640966763588,
+ "soc_end": 24.32359033236412,
+ "legs": [
+  {
+   "name": "out",
+   "feasible": true,
+   "soc": 25.968117908893127,
+   "T": 225.69092170375734,
+   "L": 2464.4956688634047,
+   "wait": 0.0,
+   "chosen": "shortest"
+  },
+  {
+   "name": "back",
+   "feasible": true,
+   "soc": 49.70829175874275,
+   "T": 373.2273354438057,
+   "L": 2618.0455926822547,
+   "wait": 0.0,
+   "chosen": "energy"
+  }
+ ],
+ "errors": [],
+ "safeguard": {
+  "on": true,
+  "shortest": 1,
+  "energy": 1
+ },
+ "drone": "DJI Matrice 100 (실측 보정)",
+ "site": "성남 판교·분당",
+ "dep_hour": 12,
+ "files": [
+  "results/missions/wpml_sample/pangyo_m100_12h_out.waypoints",
+  "results/missions/wpml_sample/pangyo_m100_12h_out.csv",
+  "results/missions/wpml_sample/pangyo_m100_12h_back.waypoints",
+  "results/missions/wpml_sample/pangyo_m100_12h_back.csv",
+  "results/missions/wpml_sample/pangyo_m100_12h_out_m30.kmz",
+  "results/missions/wpml_sample/pangyo_m100_12h_back_m30.kmz"
+ ],
+ "wpml": {
+  "notes": [
+   "계획에 쓴 전력 모델은 DJI Matrice 100 (실측 보정) 입니다. 내보내는 기종(Matrice 30)의 전력 모델이 아니므로 SOC 예상과 최적 속도는 그 기종에 맞지 않습니다.",
+   "DJI 기체·DJI Pilot 2 에서 이 파일을 열어 확인하지 못했습니다. 불러온 뒤 경로점 고도·속도·복귀 고도·신호 두절 동작을 반드시 확인하세요.",
+   "비행 중 속도 갱신은 이 파일로 할 수 없습니다. 계획한 구간 속도만 들어 있습니다."
+  ],
+  "legs": [
+   {
+    "name": "out",
+    "model": "m30",
+    "model_label": "Matrice 30",
+    "drone_enum": 67,
+    "drone_sub_enum": 0,
+    "payload_enum": 52,
+    "n_waypoints": 10,
+    "n_hover": 0,
+    "hover_s": 0.0,
+    "n_pass": 8,
+    "turn_mode": "toPointAndPassWithContinuityCurvature",
+    "height_mode": "relativeToStartPoint",
+    "height_min": 60.2,
+    "height_max": 100.2,
+    "speed_min": 11.0,
+    "speed_max": 15.0,
+    "v_max": 15.0,
+    "n_clamped": 0,
+    "distance_m": 2481.0893012635297,
+    "takeoff_security_height": 20.0,
+    "rth_height": 113.0,
+    "finish": "autoLand",
+    "rc_lost": "goBack",
+    "warnings": [],
+    "home": {
+     "lat": 37.402143028543584,
+     "lon": 127.10564695097356
+    },
+    "ground_delay_s": 0.0,
+    "soc_end": 74.0321012150243,
+    "duration_s": 225.69092170372824,
+    "check": []
+   },
+   {
+    "name": "back",
+    "model": "m30",
+    "model_label": "Matrice 30",
+    "drone_enum": 67,
+    "drone_sub_enum": 0,
+    "payload_enum": 52,
+    "n_waypoints": 24,
+    "n_hover": 0,
+    "hover_s": 0.0,
+    "n_pass": 22,
+    "turn_mode": "toPointAndPassWithContinuityCurvature",
+    "height_mode": "relativeToStartPoint",
+    "height_min": 42.3,
+    "height_max": 82.3,
+    "speed_min": 7.5,
+    "speed_max": 10.0,
+    "v_max": 15.0,
+    "n_clamped": 0,
+    "distance_m": 2653.237867393557,
+    "takeoff_security_height": 20.0,
+    "rth_height": 115.0,
+    "finish": "autoLand",
+    "rc_lost": "goBack",
+    "warnings": [],
+    "home": {
+     "lat": 37.38862782760902,
+     "lon": 127.12711393967393
+    },
+    "ground_delay_s": 0.0,
+    "soc_end": 24.32359033236412,
+    "duration_s": 373.2273354438057,
+    "check": []
+   }
+  ]
+ }
+}
