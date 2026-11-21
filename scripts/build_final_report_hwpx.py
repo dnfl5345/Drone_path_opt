@@ -225,7 +225,8 @@ def build(out: Path) -> None:
             ["세부 주제", "SoC를 명시 상태 변수로 포함한 무인 운반 드론 에너지 인식 경로 최적화"],
             ["수행 기간", "[자료필요: 협약 기간]"],
             ["수행 기관 · 책임자", "[자료필요]"],
-            ["실증 기체", "Holybro X650 (Pixhawk 6X + ArduCopter), 개발용 Holybro X500, 검토 기체 DJI Matrice 4 시리즈"],
+            ["실증 기체", "DJI Matrice 4T"],
+            ["시험비행 · 개발 기체", "Holybro X650 (Pixhawk 6X + ArduCopter), Holybro X500"],
             ["작성일", "2026. 11. 20."],
         ],
         widths=[1, 3.2],
@@ -243,8 +244,8 @@ def build(out: Path) -> None:
         [
             ["최종목표", "· SoC를 명시 상태 변수로 포함한 무인 운반 드론 특화 에너지 인식 경로 최적화 알고리즘 개발\n· 가상 시뮬레이션 및 하드웨어 실증을 통한 알고리즘 성능 검증"],
             ["개발 내용", "· 경로 탐색 알고리즘 5종 비교 후 Lazy Theta* 선정, 바람·시간·고도를 더한 3차원 시공간 에너지 탐색(WE-LT*)으로 확장\n· 회전익 전력 모델 + 배터리 내부저항 기반 SoC 환산, DJI M100 실측 보정, X650 제원 모델\n· 수치예보(GFS) 바람장, 실제 지형·건물·비행 금지 구역(판교·창원), 이동 장애물 안전 구간\n· 비행 중 30초 주기 속도 갱신, 예보 시점별 오차 모형에 따른 출발 판정(go / caution / no-go)\n· ArduPilot 미션(.waypoints)·MAVLink 실시간 연동, DJI 경로 파일(WPML .kmz) 내보내기, 웹 3D 계획 화면"],
-            ["주요 결과", "· 기존 경로(최단 + 정속 10 m/s) 대비 SoC 소모 17.5–21.2 % 감소 (지역·기체 3개 조합 × 7일, 모두 630건)\n· 틀린 예보로 생긴 손해를 30초 속도 갱신이 42–73 % 회복, 이동 장애물 144건 침범 0건\n· 95 % 신뢰 상한 포함률 409/432 (94.7 %)\n· ArduCopter SITL: 미션 13항목 업로드·읽기 일치, 속도 명령 전부 수락\n· X650 시험비행(2026-11-13): 시간 예측 오차 3 %, 에너지는 제원 중량 기준 16 % 과소 예측(중량 보정 시 2 % 이내)"],
-            ["남은 과제", "· 이륙 중량 실측과 5 m/s 이상 속도별 전력 보정, 기체 바람 추정(EK3_DRAG_BCOEF) 활성화\n· 실비행 중 속도 명령 폐루프 시험, DJI Matrice 4 시리즈 전력 모델·경로 파일 기종 추가"],
+            ["주요 결과", "· 기존 경로(최단 + 정속 10 m/s) 대비 SoC 소모 17.5–21.2 % 감소 (지역·기체 3개 조합 × 7일, 모두 630건)\n· 틀린 예보로 생긴 손해를 30초 속도 갱신이 42–73 % 회복, 이동 장애물 144건 침범 0건\n· 95 % 신뢰 상한 포함률 409/432 (94.7 %)\n· ArduCopter SITL: 미션 13항목 업로드·읽기 일치, 속도 명령 전부 수락\n· X650 시험비행(2026-11-13): 시간 예측 오차 3 %, 에너지는 제원 중량 기준 16 % 과소 예측(중량 보정 시 2 % 이내)\n· 위 정량 결과는 X650·M100 전력 모델 기준이며, 실증 기체 M4T의 전력 모델은 아직 없음"],
+            ["남은 과제", "· 실증 기체 DJI Matrice 4T: 정속 비행 전력 기록으로 전력 모델 구축, 경로 파일(WPML) 기종 추가와 DJI Pilot 2 불러오기 확인, Mobile SDK V5 기반 비행 중 속도 갱신\n· 시험비행 기체 X650: 이륙 중량 실측, 5 m/s 이상 속도별 전력 보정, 기체 바람 추정(EK3_DRAG_BCOEF) 활성화"],
         ],
         widths=[1, 5],
         width_mm=165,
@@ -260,7 +261,7 @@ def build(out: Path) -> None:
         ("3. 기술개발의 목표 및 내용", ["3-1. 최종목표 및 평가방법", "3-2. 기술개발 내용", "3-3. 추진 경과"]),
         ("4. 연구개발 수행 내용 및 결과", ["4-1. 경로 탐색 알고리즘 비교 및 선정", "4-2. 최단 경로와 에너지 최적 경로", "4-3. 에너지·SoC 모델",
                                      "4-4. 실제 지도 기반 3차원 시공간 경로계획", "4-5. 기존 경로 대비 성능", "4-6. 비행 중 갱신과 신뢰도",
-                                     "4-7. 대상 기체와 취득 데이터", "4-8. 가상 시뮬레이션(SITL) 검증", "4-9. 하드웨어 실증(시험비행)", "4-10. 운용 소프트웨어"]),
+                                     "4-7. 대상 기체와 취득 데이터", "4-8. 가상 시뮬레이션(SITL) 검증", "4-9. 하드웨어 시험비행 (Holybro X650)", "4-10. 운용 소프트웨어"]),
         ("5. 목표 달성도 및 관련 분야 기여도", ["5-1. 목표 달성도", "5-2. 관련 분야 기여도"]),
         ("6. 연구개발 결과의 활용계획 및 향후 과제", ["6-1. 활용 계획", "6-2. 향후 과제", "6-3. 한계"]),
         ("7. 참고문헌", []),
@@ -285,7 +286,7 @@ def build(out: Path) -> None:
     w.h3("(2) 경제·산업적 필요성")
     w.b("배송 드론의 에너지 소비는 운용 거리, 배터리 용량, 예비 전력 설계를 좌우하며, 이에 관한 에너지 모델·운용 계획 연구가 활발히 보고됨 [17, 18, 19]")
     w.b("주문이 정해진 뒤 운용자가 바꿀 수 있는 것은 경로·고도·속도뿐이므로, 이를 에너지 기준으로 정하는 계획 도구가 같은 배터리로 더 먼 거리와 더 큰 예비 전력을 확보하는 수단이 됨")
-    w.b("실증 기체(ArduPilot 계열)와 상용 기체(DJI 계열)에 공통으로 적용할 수 있는 경로 파일·실시간 연동 체계가 필요함")
+    w.b("시험비행 기체(ArduPilot 계열 Holybro X650)와 실증 기체(DJI Matrice 4T)에 공통으로 적용할 수 있는 경로 파일·실시간 연동 체계가 필요함")
     w.h2("1-2. 연구개발의 범위")
     w.table(
         "연구개발 범위",
@@ -375,7 +376,8 @@ def build(out: Path) -> None:
     w.b("지역: 성남 판교(6.2 × 5.5 km), 창원 창이대로 71 주변(4.4 × 4.0 km)의 실제 지형·건물·비행 금지 구역")
     w.b("바람: 미국 해양대기청(NOAA) GFS 수치예보, 계획에는 00Z 발표분, 평가에는 6시간 뒤 06Z 발표분 사용(계획 때는 모르는 값으로 취급)")
     w.b("기체: Holybro X650(제원 기반 전력 모델, 탑재 1.0 kg), DJI M100(CMU 실측 비행으로 보정한 전력 모델, 탑재 0.5 kg)")
-    w.b("실증: ArduCopter 4.7.2 SITL, Holybro X650 실기체(ArduCopter 4.7.1, Pixhawk 6X)")
+    w.b("SITL·시험비행: ArduCopter 4.7.2 SITL, Holybro X650 실기체(ArduCopter 4.7.1, Pixhawk 6X)")
+    w.b("실증 기체: DJI Matrice 4T (경로 파일 WPML 연동, 전력 모델은 6-2절 과제)")
 
     w.h2("3-2. 기술개발 내용")
     w.h3("(1) 경로 탐색 알고리즘 선정")
@@ -473,7 +475,7 @@ def build(out: Path) -> None:
     w.h3("(2) 보정과 검증")
     w.b("DJI M100은 CMU 공개 실측 비행 198회로 계수를 보정하고, 보정에 쓰지 않은 날짜 56회로 예측을 확인함 [7]")
     w.figure(FIG / "F3_energy_validation.png", "DJI M100 실측 비행에 대한 에너지 모델 검증", 155)
-    w.h3("(3) 실증 기체 Holybro X650 모델")
+    w.h3("(3) 시험비행 기체 Holybro X650 모델")
     w.table(
         "Holybro X650 전력 모델의 계수와 출처",
         ["계수", "값", "출처"],
@@ -594,7 +596,61 @@ def build(out: Path) -> None:
     w.figure(FIG / "F34_forecast_age.png", "예보 시점에 따른 바람 오차와 필요 SoC 여유", 160)
 
     w.h2("4-7. 대상 기체와 취득 데이터")
-    w.h3("(1) 실증 기체 Holybro X650")
+    w.h3("(1) 실증 기체 DJI Matrice 4T 사양")
+    w.table(
+        "실증 기체 DJI Matrice 4T 주요 사양",
+        ["항목", "사양"],
+        [
+            ["이륙 무게 / 최대 이륙 무게", "1219 g (표준 프로펠러) / 1420 g"],
+            ["최대 페이로드", "200 g"],
+            ["크기 (펼침)", "307.0 × 387.5 × 149.5 mm, 대각선 축간거리 438.8 mm, 프로펠러 10.8 in"],
+            ["최대 상승 / 하강 속도", "10 m/s / 8 m/s (액세서리 사용 시 6 / 6 m/s)"],
+            ["최대 수평 속도", "21 m/s (전진), 18 m/s (후진), 19 m/s (측면)"],
+            ["최대 비행 / 호버 시간", "49 분 / 42 분 (무풍, 표준 프로펠러)"],
+            ["최대 비행 거리", "35 km (무풍)"],
+            ["내풍 최대 풍속 · 최대 피치각", "12 m/s · 35°"],
+            ["작동 온도 · 최고 고도", "−10–40 °C · 6000 m"],
+            ["GNSS · RTK 정확도", "GPS + Galileo + BeiDou + GLONASS, RTK 1 cm + 1 ppm (수평), 1.5 cm + 1 ppm (수직)"],
+            ["호버링 정확도", "±0.1 m (비전·RTK), ±0.5 m (GNSS)"],
+            ["확장 포트", "E-Port × 1, E-Port Lite × 1 (타사 PSDK 기기 지원)"],
+            ["레이저 거리계", "1800 m (1 Hz, 반사율 20 %)"],
+            ["카메라", "광각 1/1.3″ 48 MP, 미디엄 망원 1/1.3″ 48 MP (70 mm), 망원 1/1.5″ 48 MP (168 mm)"],
+            ["열화상 카메라", "비냉각 VOx, 640 × 512 (초해상도 1280 × 1024), 30 Hz [21]"],
+        ],
+        widths=[2, 5],
+        font_pt=8.5,
+        align=["L", "L"],
+    )
+    w.note("※ 기체·비행 성능은 첨부 사양서의 값(Matrice 4 시리즈 공통)이며, 첨부 사양서 본문은 'Matrice 4E 사양'으로 표기되어 있어 카메라는 4T의 DJI 공식 사양 [21]으로 적음")
+    w.b("최대 수평 속도 21 m/s, 내풍 12 m/s, 최대 페이로드 200 g을 계획기의 대지속도 상한·운용 풍속·탑재 조건에 반영해야 함")
+    w.b("이륙 무게 약 1.2 kg으로 시험비행 기체 X650(4.1 kg)이나 M100과 전력 특성이 크게 다르므로, 4-3절~4-6절의 절감률을 M4T에 그대로 적용할 수 없음. M4T 정속 비행 전력 기록으로 전력 모델을 따로 구축해야 함 [자료필요: M4T 호버·속도별 전력 기록]")
+    w.h3("(2) 실증 기체(M4T)에서 얻을 수 있는 데이터")
+    w.b("DJI 공식 SDK 3종(Mobile SDK V5, Onboard SDK, Payload SDK)의 비행 관련 항목 200개를 모두 검토하여 경로계획에서의 역할로 분류함")
+    w.b("Mobile SDK V5는 v5.12.0(2025-01-08)부터 Matrice 4E/4T를 지원하며 [23], M4T는 E-Port를 통한 Payload SDK 기기도 지원함")
+    w.table(
+        "DJI SDK 항목과 경로계획에서의 역할",
+        ["구분", "DJI 항목 (예)", "역할"],
+        [
+            ["풍속 · 풍향", "MSDK KeyWindSpeed (dm/s), KeyWindDirection", "비용 변인 (바람장 보정)"],
+            ["강풍 경고", "MSDK KeyWindWarning, PSDK FLIGHT_ANOMALY", "안전 감시 (등급만 제공)"],
+            ["주변 유인기", "MSDK KeyAirSenseSystemInformation (ADS-B)", "제약 (이동 장애물)"],
+            ["배터리", "KeyChargeRemainingInPercent, KeyVoltage (mV), KeyCurrent (mA), KeyCellVoltages", "목적·제약 (SoC)"],
+            ["배터리 노화 · 온도", "KeyFullChargeCapacity, KeyNumberOfDischarges, KeyBatteryTemperature", "고정 입력 (용량 보정)"],
+            ["위치 · 속도 · 자세", "KeyAircraftLocation3D, KeyAircraftVelocity, KeyAircraftAttitude", "결정 변수의 결과 (추종 확인)"],
+            ["비행 상태 · GNSS", "KeyFlightMode, KeyGPSSatelliteCount", "안전 감시"],
+            ["탑재중량", "해당 키 없음", "주문 정보로 입력"],
+        ],
+        widths=[1.4, 3.6, 1.8],
+        font_pt=8.5,
+        align=["C", "L", "L"],
+    )
+    w.b("M4T는 MAVLink를 쓰지 않으므로, 비행 중 속도 갱신을 하려면 Mobile SDK V5 기반 조종기 앱이 필요함 (현재 실시간 연동은 MAVLink만 구현)")
+    w.b("DJI가 주는 외생 조건은 바람(비용)과 주변 비행체·장애물(제약) 두 가지이며, 본 계획기는 정확히 이 둘을 다룸")
+    w.b("풍속·풍향 키는 현재 위치의 기체 추정값만 주며, M4T에서 실제로 값을 주는지와 추정 정확도는 실기체에서 확인해야 함 [확인요망]")
+    w.h3("(3) 실증 기체용 경로 파일(WPML) 내보내기")
+    w.b("계획 경로를 DJI Pilot 2·FlightHub 2·MSDK V5가 읽는 경로 파일(.kmz: template.kml, waylines.wpml)로 내보냄. 고도는 이륙점 기준 상대 고도, 구간 대지속도는 경로점 속도로 기록")
+    w.b("DJI WPML 문서는 Matrice 4E/4T를 경로 파일 지원 기종으로 명시함 [24, 25]. 본 도구의 현재 지원 기종은 M30·M300·M350·Mavic 3 계열로, M4T의 기종·카메라 번호를 넣고 DJI Pilot 2에서 불러오기를 확인해야 함 [자료필요: M4T 기종 번호, DJI Pilot 2 불러오기 결과]")
+    w.h3("(4) 시험비행 기체 Holybro X650")
     w.table(
         "Holybro X650 구성",
         ["구분", "내용"],
@@ -609,7 +665,7 @@ def build(out: Path) -> None:
         widths=[1, 5],
         align=["C", "L"],
     )
-    w.h3("(2) 비행 중 실시간 수신 데이터 (MAVLink)")
+    w.h3("(5) X650 비행 중 실시간 수신 데이터 (MAVLink)")
     w.b("Mission Planner의 MAVLink Inspector(Ctrl+F)로 개발 기체의 수신 메시지와 주기를 지상에서 점검함 (2026. 6. 30.–7. 1.)")
     w.table(
         "MAVLink 수신 메시지와 경로계획에서의 활용",
@@ -636,60 +692,11 @@ def build(out: Path) -> None:
         align=["L", "C", "L", "L"],
     )
     w.note("※ 주기 '–'는 점검 화면에서 확인하지 못한 항목. WIND는 점검 화면 목록에는 없었고, 시험비행 정리 문서(발주처)에서 약 2 Hz 수신이 확인됨. 멀티콥터는 EK3_DRAG_BCOEF_X/Y를 설정해야 바람 추정이 켜짐(기본 0 = 꺼짐)")
-    w.h3("(3) 착륙 후 비행 로그 (DataFlash .bin)")
+    w.h3("(6) X650 착륙 후 비행 로그 (DataFlash .bin)")
     w.b("배터리(전압·전류·누적 사용량) 10 Hz, GPS 5 Hz, 제어·EKF 기록을 담으며, 비행 후 전력 모델 보정과 경로 추종 분석에 사용")
-    w.h3("(4) DJI Matrice 4T 사양")
-    w.table(
-        "DJI Matrice 4 시리즈 주요 사양 (첨부 사양서)",
-        ["항목", "사양"],
-        [
-            ["이륙 무게 / 최대 이륙 무게", "1219 g (표준 프로펠러) / 1420 g"],
-            ["최대 페이로드", "200 g"],
-            ["크기 (펼침)", "307.0 × 387.5 × 149.5 mm, 대각선 축간거리 438.8 mm, 프로펠러 10.8 in"],
-            ["최대 상승 / 하강 속도", "10 m/s / 8 m/s (액세서리 사용 시 6 / 6 m/s)"],
-            ["최대 수평 속도", "21 m/s (전진), 18 m/s (후진), 19 m/s (측면)"],
-            ["최대 비행 / 호버 시간", "49 분 / 42 분 (무풍, 표준 프로펠러)"],
-            ["최대 비행 거리", "35 km (무풍)"],
-            ["내풍 최대 풍속 · 최대 피치각", "12 m/s · 35°"],
-            ["작동 온도 · 최고 고도", "−10–40 °C · 6000 m"],
-            ["GNSS · RTK 정확도", "GPS + Galileo + BeiDou + GLONASS, RTK 1 cm + 1 ppm (수평), 1.5 cm + 1 ppm (수직)"],
-            ["호버링 정확도", "±0.1 m (비전·RTK), ±0.5 m (GNSS)"],
-            ["확장 포트", "E-Port × 1, E-Port Lite × 1 (타사 PSDK 기기 지원)"],
-            ["레이저 거리계", "1800 m (1 Hz, 반사율 20 %)"],
-            ["카메라 (4T)", "광각 1/1.3″ 48 MP, 미디엄 망원 1/1.3″ 48 MP (70 mm), 망원 1/1.5″ 48 MP (168 mm), 적외선 열화상 640 × 512 (30 Hz) [21]"],
-        ],
-        widths=[2, 5],
-        font_pt=8.5,
-        align=["L", "L"],
-    )
-    w.note("※ 첨부 사양서의 본문 제목은 'Matrice 4E 사양'이며 광각 카메라가 4/3″ 20 MP(4E 사양)로 적혀 있음. 기체·비행 성능은 시리즈 공통이고, 4T의 카메라는 DJI 공식 사양 [21]으로 적음 [확인요망: 실증·검토 기체가 4T인지 4E인지]")
-    w.h3("(5) DJI 기체에서 얻을 수 있는 데이터")
-    w.b("DJI 공식 SDK 3종(Mobile SDK V5, Onboard SDK, Payload SDK)의 비행 관련 항목 200개를 모두 검토하여 경로계획에서의 역할로 분류함")
-    w.table(
-        "DJI SDK 항목과 경로계획에서의 역할",
-        ["구분", "DJI 항목 (예)", "역할"],
-        [
-            ["풍속 · 풍향", "MSDK KeyWindSpeed (dm/s), KeyWindDirection", "비용 변인 (바람장 보정)"],
-            ["강풍 경고", "MSDK KeyWindWarning, PSDK FLIGHT_ANOMALY", "안전 감시 (등급만 제공)"],
-            ["주변 유인기", "MSDK KeyAirSenseSystemInformation (ADS-B)", "제약 (이동 장애물)"],
-            ["배터리", "KeyChargeRemainingInPercent, KeyVoltage (mV), KeyCurrent (mA), KeyCellVoltages", "목적·제약 (SoC)"],
-            ["배터리 노화 · 온도", "KeyFullChargeCapacity, KeyNumberOfDischarges, KeyBatteryTemperature", "고정 입력 (용량 보정)"],
-            ["위치 · 속도 · 자세", "KeyAircraftLocation3D, KeyAircraftVelocity, KeyAircraftAttitude", "결정 변수의 결과 (추종 확인)"],
-            ["비행 상태 · GNSS", "KeyFlightMode, KeyGPSSatelliteCount", "안전 감시"],
-            ["탑재중량", "해당 키 없음", "주문 정보로 입력"],
-        ],
-        widths=[1.4, 3.6, 1.8],
-        font_pt=8.5,
-        align=["C", "L", "L"],
-    )
-    w.b("DJI가 주는 외생 조건은 바람(비용)과 주변 비행체·장애물(제약) 두 가지이며, 본 계획기는 정확히 이 둘을 다룸")
-    w.b("풍속·풍향 키는 현재 위치의 기체 추정값만 주며, Matrice 4 시리즈의 지원 여부와 추정 정확도는 문서로 확인하지 못함 [확인요망]")
-    w.h3("(6) DJI 경로 파일(WPML) 내보내기")
-    w.b("계획 경로를 DJI Pilot 2·FlightHub 2·MSDK V5가 읽는 경로 파일(.kmz: template.kml, waylines.wpml)로 내보냄. 고도는 이륙점 기준 상대 고도, 구간 대지속도는 경로점 속도로 기록")
-    w.b("현재 지원 기종은 M30·M300·M350·Mavic 3 계열이며 Matrice 4 시리즈 기종 번호는 아직 넣지 않았고, DJI 소프트웨어에서 불러오기는 확인하지 못함 [자료필요: Matrice 4 기종 번호, DJI Pilot 2 불러오기 결과]")
     w.h3("(7) 개발용 기체 Holybro X500")
     w.b("PX4 Development Kit X500: 휠베이스 500 mm, 프레임 610 g, 2216 KV920 모터, 4S 배터리, PM02 V3 전원 모듈, M10 GPS, SiK 텔레메트리, 무탑재 호버 약 18분(5000 mAh), 최대 탑재 약 1 kg")
-    w.b("MAVLink 수신 점검(4-7절 (2))과 지상 시험에 사용")
+    w.b("MAVLink 수신 점검(4-7절 (5))과 지상 시험에 사용")
 
     w.h2("4-8. 가상 시뮬레이션(SITL) 검증")
     s = j("sitl_check.json")
@@ -710,7 +717,7 @@ def build(out: Path) -> None:
         align=["L", "L"],
     )
 
-    w.h2("4-9. 하드웨어 실증(시험비행)")
+    w.h2("4-9. 하드웨어 시험비행 (Holybro X650)")
     w.h3("(1) 시험 개요 (2026. 11. 13.)")
     f = j("flight_20261113.json")
     w.b("Holybro X650(ArduCopter 4.7.1)으로 이륙 15 m → 경로점 4개(30, 30, 30, 20 m) → 자동 복귀(RTL) 미션을 3 m/s로 비행하고 기체 로그를 분석")
@@ -791,7 +798,8 @@ def build(out: Path) -> None:
             ["6", "실기체 시간 예측", "±10 %", "+3 %", "달성"],
             ["7", "운용성", "1분 이내", "설치 후 계획까지 약 46 s", "달성"],
             ["–", "실비행 중 속도 갱신", "실기체 폐루프", "미실시", "미검증"],
-            ["–", "DJI 기체 연동", "경로 파일 불러오기", "파일 생성만 확인, Matrice 4 기종 미지원", "미검증"],
+            ["–", "실증 기체(M4T) 경로 파일", "DJI Pilot 2 불러오기", "M4T 기종 번호 미반영, 불러오기 미확인", "미검증"],
+            ["–", "실증 기체(M4T) SoC 예측", "±10 %", "M4T 전력 모델 없음 (기록 필요)", "미검증"],
         ],
         widths=[0.6, 1.7, 1.5, 3, 1.2],
         font_pt=8.5,
@@ -812,6 +820,7 @@ def build(out: Path) -> None:
     # ===== 6장 =====
     w.h1("6. 연구개발 결과의 활용계획 및 향후 과제")
     w.h2("6-1. 활용 계획")
+    w.b("실증 기체 DJI Matrice 4T에 경로 파일(WPML)로 계획 경로와 구간 속도를 적용하여 실증")
     w.b("실증 지역(고성) 왕복 시험에 계획기와 미션 내보내기를 적용하여 운용 절차를 검증")
     w.b("배송·점검 운용 계획 도구로 활용: 출발 전 경로·속도·출발 판정, 비행 중 속도 갱신")
     w.b("학술지 투고: 영문 원고 초안 준비(docs/paper) [확인요망: 투고 대상 학술지]")
@@ -821,14 +830,13 @@ def build(out: Path) -> None:
         "다음 시험에서 수행할 항목",
         ["순위", "할 일", "이유"],
         [
-            ["1", "이륙 중량을 저울로 측정 (배터리·카메라 포함, 탑재물 별도)", "4.66 kg 추정을 확인하고 중량 문제와 효율 문제를 구분"],
-            ["2", "같은 왕복을 속도만 바꿔 3회 (5, 7, 10 m/s)", "정속 구간으로 고속 전력 곡선(항력 면적) 보정, 왕복으로 바람 영향 상쇄"],
-            ["3", "시작 전 30초 호버 (지면 위 10 m 이상)", "전력 곡선의 기준점"],
-            ["4", "BATT_CAPACITY = 10000 설정", "잔량 %를 실제 배터리에 맞춤"],
-            ["5", "EK3_DRAG_BCOEF_X/Y 설정 + 지상 풍속계 기록", "기체 바람 추정을 켜고 정확도 확인"],
-            ["6", "지상국 기록(.tlog) 확보", "비행 중 실제 수신 값과 주기 확인"],
-            ["7", "실비행 중 속도 명령(DO_CHANGE_SPEED) 송신 시험", "폐루프 속도 갱신의 실기체 검증"],
-            ["8", "DJI Matrice 4 시리즈 정속 비행 전력 기록과 WPML 기종 추가", "DJI 기체의 SoC 예측과 경로 파일 지원"],
+            ["1", "M4T 정속 비행 전력 기록 (30초 호버, 같은 왕복을 5·7·10 m/s로 각 1회, 비행 기록 내려받기)", "실증 기체의 전력 모델 구축 (현재 없음)"],
+            ["2", "M4T 기종·카메라 번호를 경로 파일에 넣고 DJI Pilot 2에서 불러오기 시험", "실증 기체에 계획 경로 적용"],
+            ["3", "M4T 풍속·풍향 키(KeyWindSpeed 등) 값 기록 + 지상 풍속계 비교", "기체 바람 추정의 사용 가능 여부와 정확도 확인"],
+            ["4", "Mobile SDK V5 기반 속도 갱신 앱 개발", "M4T에서 비행 중 속도 갱신 (현재 MAVLink만 구현)"],
+            ["5", "X650 이륙 중량 측정과 속도별 왕복 3회 (5, 7, 10 m/s)", "4.66 kg 추정 확인, 고속 전력 곡선(항력 면적) 보정"],
+            ["6", "X650 BATT_CAPACITY = 10000, EK3_DRAG_BCOEF_X/Y 설정", "잔량 % 보정, 기체 바람 추정 활성화"],
+            ["7", "X650 지상국 기록(.tlog) 확보와 속도 명령(DO_CHANGE_SPEED) 송신 시험", "실제 수신 주기 확인, 폐루프 속도 갱신의 실기체 검증"],
         ],
         widths=[0.6, 3.2, 3.2],
         font_pt=8.5,
@@ -837,7 +845,7 @@ def build(out: Path) -> None:
     w.h2("6-3. 한계")
     w.b("X650 전력 모델의 항력 면적·형상 동력은 가정값이며, 속도 선택에 따른 절감 크기가 이 가정에 크게 좌우됨")
     w.b("기존 경로 대비 비교와 폐루프 시험의 평가 바람은 실측이 아닌 더 새 예보이며, 비행 고도의 실측 바람과 예보의 차이는 아직 재지 못함 [자료필요: 비행 고도 실측 바람]")
-    w.b("DJI 기체용 전력 모델은 M100뿐이어서 DJI 경로 파일의 SoC 예상은 해당 기종에 맞지 않음")
+    w.b("본 보고서의 정량 결과(4-4절~4-6절)는 X650·M100 전력 모델 기준이며, 실증 기체 M4T의 전력 모델이 없어 M4T 경로 파일의 SoC 예상은 아직 맞지 않음")
 
     # ===== 7장 =====
     w.h1("7. 참고문헌")
@@ -864,6 +872,9 @@ def build(out: Path) -> None:
         "MAVLink Developer Guide, Common Message Set. https://mavlink.io/en/messages/common.html",
         "DJI, Matrice 4 Series Specs. https://enterprise.dji.com/matrice-4-series/specs",
         "DJI, Cloud API Documentation – DJI WPML (공개 저장소 dji-sdk/Cloud-API-Doc, 2024-11-07 판)",
+        "DJI, Mobile SDK V5 Release Note (v5.12.0, 2025-01-08: Matrice 4E/4T 지원 추가). https://developer.dji.com/doc/mobile-sdk-tutorial/en",
+        "DJI, Cloud API – Product Supported. https://developer.dji.com/doc/cloud-api-tutorial/en/overview/product-support.html",
+        "DJI, Cloud API – DJI WPML Common Elements. https://developer.dji.com/doc/cloud-api-tutorial/en/api-reference/dji-wpml/common-element.html",
     ]
     pr = w.para("ref", left=9, hang=9, before=2, after=0, line=140, align="LEFT", autotab=True)
     for i, r in enumerate(refs, 1):
