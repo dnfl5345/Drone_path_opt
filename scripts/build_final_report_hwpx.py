@@ -166,7 +166,7 @@ class Writer:
             for c in range(nc):
                 raw = str(vals[c])
                 bold = r == 0 or raw.startswith("**")
-                txt = raw.strip("*")
+                txt = raw[2:] if raw.startswith("**") else raw
                 t.set_cell_text(r, c, txt)
                 cell = t.cell(r, c)
                 for para in cell.paragraphs:
