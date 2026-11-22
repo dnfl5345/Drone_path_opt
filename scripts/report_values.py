@@ -131,3 +131,14 @@ def e15_table():
 def m4t_model():
     """M4T 전력 모델 요약 (scripts/m4t_model_summary.py 가 만든 results/m4t_model.json)."""
     return j("m4t_model.json")
+
+
+def wind_trend(sets=None):
+    """날짜별 평균 풍속에 따른 기존 경로 대비 절감 (가장 약한 날과 가장 강한 날)."""
+    sets = sets or SETS_M4T
+    R = j("E13_stats.json")["sets"]
+    days = [(v["wind"], v["EX_P0"]) for k, _ in sets if k in R for v in R[k]["by_day"].values() if v["EX_P0"] is not None]
+    if not days:
+        return None
+    lo, hi = min(days), max(days)
+    return dict(w_lo=lo[0], p_lo=lo[1], w_hi=hi[0], p_hi=hi[1])

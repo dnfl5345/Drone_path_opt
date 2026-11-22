@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_final_report_hwpx import (C_BODY, C_H1, FIG, MM, P_CENTER, P_HEAD, ROOT, SETS_M4T, SETS_REF, Writer, _f,  # noqa: E402
-                                     cmp3d_rows, e13_rows, e13_split_rows, e15_table, j, summary_values)
+                                     wind_trend, cmp3d_rows, e13_rows, e13_split_rows, e15_table, j, summary_values)
 
 MAN = ROOT / "docs" / "manual_img"
 
@@ -273,8 +273,10 @@ def build(out: Path) -> None:
         e13_split_rows(SETS_M4T) + [[f"{r[0]} (비교)"] + r[1:] for r in e13_split_rows(SETS_REF)],
         widths=[1.4, 1.4, 2, 2],
     )
-    w.b(f"실증 기체 M4T의 절감은 속도 선택 {V['sp4']}, 경로 모양 {V['pa4']}. 비교 기체는 속도 선택의 몫({V['spR']})이 큼")
-    w.b("M4T는 효율 속도(약 12 m/s)가 기존 정속 10 m/s와 가까워, 바람을 피하는 경로·고도 선택의 몫이 커짐")
+    wt = wind_trend()
+    w.b(f"바람이 셀수록 절감이 커짐: M4T는 가장 약한 날(평균 {wt['w_lo']:.1f} m/s) {_f(wt['p_lo'])} %, 가장 강한 날({wt['w_hi']:.1f} m/s) {_f(wt['p_hi'])} %")
+    w.b(f"실증 기체 M4T의 절감은 속도 선택 {V['sp4']}, 경로 모양 {V['pa4']} (비교 기체: 속도 선택 {V['spR']}, 경로 모양 {V['paR']})")
+    w.b("M4T는 효율 속도(약 12 m/s)가 기존 정속 10 m/s와 가까워 속도로 얻는 이득이 작고, 그만큼 전체 절감도 비교 기체보다 작음")
     w.figure(FIG / "F28_superiority.png", "기존 경로 대비 SoC 소모 비교 (실증 기체 M4T 와 비교 기체)", 150)
     w.h3("(3) 3차원 계획 화면에서의 왕복 비교 (2026-10-27 예보, 15시 출발)")
     rows = cmp3d_rows(SETS_M4T) + cmp3d_rows([("pangyo_x650", "판교 · X650 (비교)"), ("changwon_x650", "창원 · X650 (비교)"), ("pangyo_m100", "판교 · M100 (비교)")])

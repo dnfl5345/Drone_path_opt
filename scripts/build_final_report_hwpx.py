@@ -222,7 +222,7 @@ class Writer:
         self._p(f"< 그림 {ch}-{self.n_fig[ch]}. {caption} >", P_CENTER, C_FIGCAP, kind="cap")
 
 
-from report_values import (E15_CASES, SETS_M4T, SETS_REF, _f, _rng, cmp3d_rows, e13_n, e13_range, e13_rows,  # noqa: E402,F401
+from report_values import (wind_trend, E15_CASES, SETS_M4T, SETS_REF, _f, _rng, cmp3d_rows, e13_n, e13_range, e13_rows,  # noqa: E402,F401
                            e13_split_rows, e15_table, j, m4t_model, pct, summary_values)
 
 
@@ -559,7 +559,8 @@ def build(out: Path) -> None:
         rows,
         widths=[1.3, 1.8, 1.5, 1.1, 1, 1.3],
     )
-    w.b("실증 기체 M4T(탑재 0.2 kg)는 판교에서 절감이 크고, 바람이 약한 창원에서는 작음. M4T는 X650과 달리 절감의 상당 부분이 경로 모양(순풍·약풍 고도 선택)에서 나옴")
+    by = j("platform_3d_compare_pangyo_m4t.json")["by"]
+    w.b(f"실증 기체 M4T(탑재 0.2 kg)는 바람이 강한 판교에서 절감이 크고, 바람이 약한 창원에서는 작음. 이 판교 사례에서는 경로 모양의 몫({_f(by['path_pct'])} %)이 속도의 몫({_f(by['speed_pct'])} %)보다 컸으나, 여러 날 평균(4-5절)에서는 속도의 몫이 더 큼")
     w.b("이날 판교 15시는 맞바람이 약 11 m/s로 M4T 내풍 한계(12 m/s)에 가까운 조건이므로, 실제 운용에서는 출발 판정(4-6절)으로 걸러야 함")
     w.b("판교 M100은 기존 경로로는 SoC가 바닥나 임무가 성립하지 않으나, 제안 경로는 예비 20 %를 지키며 완주함")
     w.figure(FIG / "platform_3d_compare_pangyo_m4t.png", "3차원 계획 화면의 경로 비교 (판교 · 실증 기체 M4T)", 160)
@@ -583,8 +584,10 @@ def build(out: Path) -> None:
         widths=[1.2, 1.4, 2, 2],
     )
     w.b(f"실증 기체 M4T: 기존 경로 대비 SoC 소모 {V['r4']} 감소(95 % 구간 상한 {V['ci4']} 감소), 제안이 우수한 경우 {V['win4']}건")
-    w.b(f"M4T의 절감은 속도 선택 {V['sp4']}, 경로 모양 {V['pa4']}로 나뉨. 비교 기체(X650·M100)는 속도 선택 {V['spR']}, 경로 모양 {V['paR']}로 속도의 몫이 큼")
-    w.b("M4T는 가볍고(1.2 kg) 효율 속도(약 12 m/s)가 기존 정속 10 m/s와 가까워 속도만으로 얻는 이득이 작고, 바람을 피하는 경로·고도 선택의 몫이 커짐")
+    wt = wind_trend()
+    w.b(f"바람이 셀수록 절감이 커짐: M4T는 바람이 가장 약한 날(평균 {wt['w_lo']:.1f} m/s) {_f(wt['p_lo'])} %, 가장 강한 날({wt['w_hi']:.1f} m/s) {_f(wt['p_hi'])} %")
+    w.b(f"M4T의 절감은 속도 선택 {V['sp4']}, 경로 모양 {V['pa4']}로 나뉨 (비교 기체: 속도 선택 {V['spR']}, 경로 모양 {V['paR']})")
+    w.b(f"M4T는 효율 속도(약 12 m/s)가 기존 정속 10 m/s와 가까워 속도 선택의 몫({V['sp4']})이 비교 기체({V['spR']})보다 작고, 그만큼 전체 절감도 작음. 경로 모양의 몫({V['pa4']})은 비교 기체({V['paR']})와 비슷함")
     w.b("'기존 경로'를 최단 경로 + 속도 최적화로 정의하면 절감은 경로 모양의 몫만 남음. 비교 기준의 정의를 발주처와 확정해야 함 [확인요망]")
     w.figure(FIG / "F28_superiority.png", "기존 경로 대비 SoC 소모 비교 (실증 기체 M4T 와 비교 기체)", 150)
 
@@ -837,7 +840,7 @@ def build(out: Path) -> None:
     w.h2("5-2. 관련 분야 기여도")
     w.h3("(1) 학술적 기여")
     w.b("SoC를 목적·제약 상태 변수로 두고 시공간 바람장·이동 장애물·구간 속도를 한 번에 다루는 3차원 탐색(WE-LT*)을 제시")
-    w.b("절감을 속도 선택과 경로 모양의 몫으로 분해하여, 기체에 따라 몫이 달라짐을 보임 (M4T는 경로 모양, X650·M100은 속도 선택의 몫이 큼)")
+    w.b("절감을 속도 선택과 경로 모양의 몫으로 분해하여, 기체의 효율 속도에 따라 속도 선택의 몫이 달라짐을 보임 (M4T 6–8 %, X650·M100 15–18 %)")
     w.b("예보 시점별 실측 오차로 SoC 신뢰 구간을 보정하여 출발 판정의 포함률을 실제로 검증(94.7 %)")
     w.h3("(2) 기술적 기여")
     w.b("ArduPilot 미션·MAVLink와 DJI WPML 등 공개 형식으로 계획 결과를 내보내 특정 기체에 묶이지 않는 운용 체계를 마련")

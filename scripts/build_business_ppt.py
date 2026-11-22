@@ -111,7 +111,7 @@ def table(slide, x, y, w, rows, col_w, row_h=0.36, head_size=13, body_size=11, h
 
 
 MAN = ROOT / "docs" / "manual_img"
-from report_values import (SETS_M4T, SETS_REF, _f, cmp3d_rows, e13_rows, e13_split_rows, e15_table,  # noqa: E402
+from report_values import (wind_trend, SETS_M4T, SETS_REF, _f, cmp3d_rows, e13_rows, e13_split_rows, e15_table,  # noqa: E402
                            summary_values)
 
 
@@ -139,6 +139,7 @@ def build(template: str, out: str) -> None:
     V = summary_values()
     M = V["M"]
     T15 = e15_table()
+    WT = wind_trend()
     SITL = J("sitl_check.json")
 
     # ── 목차 ───────────────────────────────────────────
@@ -326,7 +327,8 @@ def build(template: str, out: str) -> None:
         ("실증 기체 M4T  ", f"판교·창원 {V['n4']}건, 탑재 0.2 kg, 공식 사양 보정 모델"),
         ("기존 경로  ", "최단 경로 + 정속 10 m/s"),
         ("M4T 절감의 출처  ", f"속도 선택 {V['sp4']}, 경로 모양 {V['pa4']}"),
-    ], size=12, gap=4)
+        ("바람이 셀수록 절감 ↑  ", f"약풍일 {_f(WT['p_lo'])} % → 강풍일({WT['w_hi']:.0f} m/s) {_f(WT['p_hi'])} %"),
+    ], size=12, gap=3)
     stat(s, 7.2, 5.3, 5.55, 1.1, f"실증 기체 M4T: SoC 소모 변화 ({V['n4']}건)", f"−{V['r4']}", f"제안이 우수한 경우 {V['win4']}건 · 비교 기체 −{V['rR']}", dark=True, vsize=22)
     source(s, "가상 시운전 · 계획 00Z 예보, 평가 06Z 예보 · 편도 1.5–2.8 km · M4T 모델은 공식 사양 보정(탑재·고속 실측 전)")
 
@@ -342,7 +344,7 @@ def build(template: str, out: str) -> None:
     items(s, 8.2, 4.35, 4.55, 2.4, [
         "2026-10-27 예보, 15시 출발 왕복, M4T 탑재 0.2 kg",
         "판교 15시 맞바람 약 11 m/s: M4T 내풍 한계(12 m/s)에 가까워 출발 판정으로 걸러야 함",
-        "M4T는 절감의 상당 부분이 경로 모양(순풍·약풍 고도)에서 나옴",
+        "이 강풍 사례는 경로 모양의 몫이 컸음 (여러 날 평균은 속도의 몫이 더 큼)",
     ], size=12, gap=5)
 
     s = D.content("3-1. 가상 시운전 – 비행 중 갱신·신뢰도")

@@ -399,7 +399,7 @@ def compare(rows, a, b):
 def analyze():
     from dpo import config as C
     files = sorted(C.RES.glob("E13_*_*.json"))
-    files = [f for f in files if f.name != "E13_stats.json" and not f.name.startswith("E13err")]
+    files = [f for f in files if f.name not in ("E13_stats.json", "E13_speed_sensitivity.json") and not f.name.startswith("E13err")]
     sets = {f.stem[4:]: json.loads(f.read_text()) for f in files}
     R = dict(sets={}, days=DAYS, hours=HOURS, payload=PAYLOAD, payload_by=PAYLOAD_BY)
     for name, rows in sets.items():
