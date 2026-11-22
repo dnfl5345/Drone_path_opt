@@ -4,12 +4,18 @@
 
 필요: python-hwpx (pip install python-hwpx), Pillow.  저장소 결과 파일(results/*.json, results/figures)을 읽는다.
 
-서식 (요청 이미지 기준)
-    3. 기술개발의 목표 및 내용        ← 1수준: 왼쪽 0 mm, 15 pt 굵게
-     3-1. 최종목표 및 평가방법         ← 2수준: 3 mm, 13 pt 굵게
-      (1) 최종목표                     ← 3수준: 6 mm, 12 pt
-        - 내용 ...                     ← 글머리: '-' 는 9 mm, 글자는 12 mm (내어쓰기 3 mm,
-          둘째 줄도 글자에 맞춤          '내어쓰기용 자동 탭'으로 첫 줄 글자도 같은 자리에서 시작)
+서식: 기관 양식(민간수탁연구사업 계획서, 2026. 7. 16.)에서 서식만 남긴 docs/templates/report_base.hwpx 위에 쓴다
+(scripts/make_report_base_hwpx.py). 양식의 글자·문단 모양 번호를 그대로 써서 여백·자간·장평·줄 간격이 같다.
+    쪽       A4, 여백 왼쪽·오른쪽 25 mm, 위·아래 15 mm, 머리말·꼬리말 12.7 mm, 쪽 번호 '- n -' 아래 가운데
+    1수준    '1. 제목'          휴먼명조 11 pt 굵게, 장평 99 %, 자간 0, 줄 간격 160 %   (글자 36 · 문단 33)
+    2수준    '  1-1. 제목'      휴먼명조 11 pt, 앞 공백 2칸                             (37 · 33)
+    3수준    '   (1) 제목'      앞 공백 3칸                                             (37 · 33)
+    글머리   '    - 내용'       앞 공백 4칸, 양쪽 정렬, 내어쓰기 3000 HWPUNIT(10.6 mm)  (37 · 45)
+    하위     '      · 내용'     앞 공백 6칸                                             (37 · 45)
+    참고     '      ＊ 내용'    왼쪽 정렬, 줄 간격 150 %                                (37 · 16)
+    묶음 사이  5 pt 빈 줄                                                            (75 · 45)
+    표       돋움 10 pt, 제목 줄 #BFBFBF, 바깥 0.15 mm·안쪽 0.12 mm, 셀 여백 1.8/0.5 mm
+    그림 제목  '< 제목 >' 휴먼명조 12 pt 가운데                                         (72)
 """
 from __future__ import annotations
 
@@ -24,18 +30,22 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[1]
 RES = ROOT / "results"
 FIG = RES / "figures"
+BASE = ROOT / "docs" / "templates" / "report_base.hwpx"
 MM = 7200 / 25.4  # HWPUNIT per mm
-TEXT_W_MM = 170.0  # A4 210 - 좌우 여백 20 mm
+TEXT_W_MM = 160.0  # A4 210 - 좌우 여백 25 mm
+FONT_G = "돋움"  # (호환용 이름) 표 글꼴
 
-# ───────────────────────── 서식 ─────────────────────────
-BODY_PT = 11.0
-FONT = "함초롬바탕"
-FONT_G = "함초롬돋움"
+# 양식의 글자 모양(charPr)·문단 모양(paraPr) 번호
+C_H1, C_BODY, C_SP, C_TITLE, C_COVER, C_FIGCAP, C_TBL = "36", "37", "75", "20", "21", "72", "68"
+P_HEAD, P_BUL, P_NOTE, P_CENTER = "33", "45", "16", "22"
+# 표 테두리(borderFill): [왼쪽 열, 가운데 열, 오른쪽 열]
+BF_HEAD, BF_BODY, BF_LAST, BF_TABLE = ("63", "64", "65"), ("67", "5", "68"), ("69", "71", "72"), "5"
+BF_LABEL = "26"  # 회색(#D3D3D3) 칸: 표지 항목명
 
 
 class Writer:
-    def __init__(self) -> None:
-        self.doc = HwpxDocument.new()
+    def __init__(self, base: Path = BASE) -> None:
+        self.doc = HwpxDocument.open(str(base))
         self.st = self.doc.styles
         self._para: dict[str, str] = {}
         self._run: dict[str, str] = {}
@@ -43,140 +53,154 @@ class Writer:
         self.n_fig = {}
         self.chapter = 0
         self.first_used = False
+        self.last = None  # 직전 문단 종류 (묶음 사이 5 pt 빈 줄 판단)
 
-    # 문단 모양 (단위: mm, pt)
-    def para(self, key, *, left=0.0, hang=0.0, before=0.0, after=0.0, align="JUSTIFY", line=160,
-             keep_next=False, autotab=False):
-        if key in self._para:
-            return self._para[key]
-        margins = {
-            "intent": int(round(-hang * MM)),
-            "left": int(round(left * MM)),
-            "right": 0,
-            "prev": int(round(before * 100)),
-            "next": int(round(after * 100)),
-        }
-        kw = dict(alignment=align, line_spacing_percent=line, margins=margins)
-        if keep_next:
-            kw["break_setting"] = {"keepWithNext": True}
-        if autotab:
-            kw["tab_pr_id_ref"] = "1"  # 내어쓰기용 자동 탭
-        pid = self.st.ensure_paragraph_format(**kw)
-        self._para[key] = pid
-        return pid
+    # 양식 모양을 바탕으로 한 파생 모양
+    def para(self, key, *, base=P_CENTER, align="CENTER", line=150, **_ignored):
+        if key not in self._para:
+            self._para[key] = self.st.ensure_paragraph_format(base_para_pr_id=base, alignment=align, line_spacing_percent=line)
+        return self._para[key]
 
-    def run(self, key, *, size=BODY_PT, bold=False, font=FONT, color=None):
-        if key in self._run:
-            return self._run[key]
-        cid = self.st.ensure_run(bold=bold, size=size, font=font, color=color)
-        self._run[key] = cid
-        return cid
+    def run(self, key, *, base=C_BODY, bold=None, size=None, **_ignored):
+        if key not in self._run:
+            self._run[key] = self.st.ensure_run(base_char_pr_id=base, bold=bold, size=size)
+        return self._run[key]
 
-    def _p(self, text, pid, cid, page_break=False):
+    def _p(self, text, pid, cid, page_break=False, kind="p"):
         if not self.first_used:
             p = self.doc.paragraphs[0]
             p.para_pr_id_ref = pid
-            p.text = text
-            for r in p.runs:
-                r.char_pr_id_ref = cid
+            p.add_run(text, char_pr_id_ref=cid)
             self.first_used = True
         else:
             p = self.doc.add_paragraph(text, para_pr_id_ref=pid, char_pr_id_ref=cid)
         if page_break:
             p.element.set("pageBreak", "1")
+        self.last = kind
         return p
 
+    def spacer(self):
+        """양식의 묶음 사이 5 pt 빈 줄."""
+        return self._p("", P_BUL, C_SP, kind="sp")
+
     # ── 제목 수준 ──
-    def h1(self, text, page_break=True):
+    def h1(self, text, page_break=False):
         self.chapter = int(text.split(".")[0]) if text[0].isdigit() else self.chapter
-        pid = self.para("h1", left=0, before=6, after=8, align="LEFT", keep_next=True)
-        cid = self.run("h1", size=15, bold=True)
-        return self._p(text, pid, cid, page_break=page_break)
+        if self.last not in (None, "cover", "sp") and not page_break:
+            self._p("", P_HEAD, C_BODY, kind="blank")
+        return self._p(text, P_HEAD, C_H1, page_break=page_break, kind="h1")
 
     def h2(self, text):
-        pid = self.para("h2", left=3, before=12, after=4, align="LEFT", keep_next=True)
-        cid = self.run("h2", size=13, bold=True)
-        return self._p(text, pid, cid)
+        if self.last not in ("h1", "sp", "blank", None):
+            self.spacer()
+        return self._p("  " + text, P_HEAD, C_BODY, kind="h2")
 
     def h3(self, text):
-        pid = self.para("h3", left=6, before=8, after=2, align="LEFT", keep_next=True)
-        cid = self.run("h3", size=12)
-        return self._p(text, pid, cid)
+        return self._p("   " + text, P_HEAD, C_BODY, kind="h3")
 
     # ── 본문 ──
     def b(self, text):
-        """'- ' 글머리 (내어쓰기 4 mm, 둘째 줄을 글자에 맞춤)."""
-        pid = self.para("b", left=12, hang=3, before=3, after=0, autotab=True)
-        return self._p("-\t" + text, pid, self.run("body"))
+        return self._p("    - " + text, P_BUL, C_BODY, kind="b")
 
     def bb(self, text):
-        """하위 글머리 '·'."""
-        pid = self.para("bb", left=16, hang=3, before=1, after=0, autotab=True)
-        return self._p("·\t" + text, pid, self.run("body"))
+        return self._p("      · " + text, P_BUL, C_BODY, kind="b")
 
     def p(self, text):
-        pid = self.para("p", left=9, before=3, after=0)
-        return self._p(text, pid, self.run("body"))
+        return self._p("    " + text, P_BUL, C_BODY, kind="b")
 
     def note(self, text):
-        pid = self.para("note", left=12, hang=0, before=1, after=0, line=140)
-        return self._p(text, pid, self.run("note", size=9, color="#404040"))
+        t = text[1:].strip() if text.startswith("※") else text
+        return self._p("      ＊ " + t, P_NOTE, C_BODY, kind="note")
 
     def blank(self, size=6):
-        pid = self.para(f"blank{size}", line=100)
-        return self._p("", pid, self.run(f"blank{size}", size=size))
+        return self._p("", P_HEAD, C_BODY, kind="blank")
 
-    def center(self, text, size, bold=False, before=0, after=0, font=FONT, page_break=False, color=None):
-        pid = self.para(f"c{before}_{after}", before=before, after=after, align="CENTER", line=150)
-        cid = self.run(f"c{size}{bold}{font}{color}", size=size, bold=bold, font=font, color=color)
-        return self._p(text, pid, cid, page_break=page_break)
+    def center(self, text, size, bold=False, before=0, after=0, font=None, page_break=False, color=None):
+        cid = self.run(f"c{size}{bold}", base=C_TITLE if size >= 20 else C_COVER, bold=bold, size=size)
+        return self._p(text, P_CENTER, cid, page_break=page_break, kind="cover")
 
     # ── 표 ──
-    def table(self, caption, header, rows, widths=None, width_mm=160.0, font_pt=9.0, align=None):
+    def table(self, caption, header, rows, widths=None, width_mm=150.0, font_pt=10.0, align=None, label_col=False):
         ch = self.chapter
         self.n_tab[ch] = self.n_tab.get(ch, 0) + 1
         if caption:
-            cap = f"<표 {ch}-{self.n_tab[ch]}> {caption}"
-            pid_cap = self.para("cap_t", before=8, after=2, align="CENTER", line=140, keep_next=True)
-            self._p(cap, pid_cap, self.run("cap", size=10, bold=True, font=FONT_G))
-
+            self._p(f"(표 {ch}-{self.n_tab[ch]}. {caption})", P_NOTE, C_BODY, kind="cap")
         nr, nc = len(rows) + 1, len(header)
-        t = self.doc.add_table(nr, nc, width=int(width_mm * MM))
-        # 표를 품은 문단: 가운데
+        width_mm = min(width_mm, TEXT_W_MM - 2)
+        t = self.doc.add_table(nr, nc, width=int(width_mm * MM), border_fill_id_ref=BF_TABLE)
         holder = t.element.getparent()
         while holder is not None and not holder.tag.endswith("}p"):
             holder = holder.getparent()
         if holder is not None:
-            holder.set("paraPrIDRef", self.para("tblhold", align="CENTER", line=100, after=2))
-        try:
-            t.set_treat_as_char(True)
-        except Exception:
-            pass
+            holder.set("paraPrIDRef", P_CENTER)
+        t.set_treat_as_char(True)
         t.element.set("repeatHeader", "1")
+        im = t.element.find("{*}inMargin")
+        if im is not None:
+            im.attrib.update({"left": "510", "right": "510", "top": "141", "bottom": "141"})
         if widths:
             t.set_column_widths(widths)
-        p_h = self.para("cell_c", align="CENTER", line=130)
-        p_l = self.para("cell_l", align="LEFT", line=130)
-        c_h = self.run(f"cellh{font_pt}", size=font_pt, bold=True, font=FONT_G)
-        c_b = self.run(f"cell{font_pt}", size=font_pt, font=FONT_G)
-        c_bb = self.run(f"cellbb{font_pt}", size=font_pt, bold=True, font=FONT_G)
+        p_c = self.para("cell_c", base="68", align="CENTER", line=160)
+        p_l = self.para("cell_l", base="68", align="LEFT", line=160)
+        c_b = C_TBL
+        c_bb = self.run("cell_bold", base=C_TBL, bold=True)
         al = align or (["L"] + ["C"] * (nc - 1))
         for r in range(nr):
             vals = header if r == 0 else rows[r - 1]
+            bfs = BF_HEAD if r == 0 else (BF_LAST if r == nr - 1 else BF_BODY)
             for c in range(nc):
                 raw = str(vals[c])
-                bold = r == 0 or raw.startswith("**")
-                txt = raw[2:] if raw.startswith("**") else raw
+                bold = raw.startswith("**")
+                txt = raw[2:] if bold else raw
                 t.set_cell_text(r, c, txt)
                 cell = t.cell(r, c)
                 for para in cell.paragraphs:
-                    para.para_pr_id_ref = p_h if (r == 0 or al[c] == "C") else p_l
+                    para.para_pr_id_ref = p_c if (r == 0 or al[c] == "C") else p_l
                     for run in para.runs:
-                        run.char_pr_id_ref = c_h if r == 0 else (c_bb if bold else c_b)
+                        run.char_pr_id_ref = c_bb if bold else c_b
+                cell.element.set("borderFillIDRef", bfs[0] if c == 0 else (bfs[2] if c == nc - 1 else bfs[1]))
+                cm = cell.element.find("{*}cellMargin")
+                if cm is not None:
+                    cm.attrib.update({"left": "510", "right": "510", "top": "141", "bottom": "141"})
                 if r == 0:
-                    t.set_cell_shading(r, c, "#DCE6F2")
                     cell.element.set("header", "1")
+        self.last = "tbl"
         return t
+
+    def cover_table(self, rows, widths=(1.4, 3.1), width_mm=150.0):
+        """표지 항목표: 항목명 칸은 회색(양식의 표지 표와 같은 휴먼명조 12 pt)."""
+        t = self.doc.add_table(len(rows), 2, width=int(width_mm * MM), border_fill_id_ref="4")
+        holder = t.element.getparent()
+        while holder is not None and not holder.tag.endswith("}p"):
+            holder = holder.getparent()
+        if holder is not None:
+            holder.set("paraPrIDRef", P_CENTER)
+        t.set_treat_as_char(True)
+        t.set_column_widths(list(widths))
+        p_c = self.para("cover_c", base=P_CENTER, align="CENTER", line=150)
+        p_l = self.para("cover_l", base=P_CENTER, align="LEFT", line=150)
+        for r, (k, v) in enumerate(rows):
+            for c, txt in enumerate((k, v)):
+                t.set_cell_text(r, c, txt)
+                cell = t.cell(r, c)
+                for para in cell.paragraphs:
+                    para.para_pr_id_ref = p_c if c == 0 else p_l
+                    for run in para.runs:
+                        run.char_pr_id_ref = C_COVER
+                cell.element.set("borderFillIDRef", BF_LABEL if c == 0 else "12")
+                sub = cell.element.find("{*}subList")
+                if sub is not None:
+                    sub.set("vertAlign", "CENTER")
+        self.last = "cover"
+        return t
+
+    def finish(self):
+        """표·그림을 품은 문단과 조판 부호에 붙은 양식 기본 글자 모양(0번, 휴먼옛체 20 pt)을 본문 모양으로 바꾼다
+        (그대로 두면 그 줄의 높이가 20 pt 기준으로 잡힌다)."""
+        for p in self.doc.paragraphs:
+            for r in p.element.findall("{*}run"):
+                if r.get("charPrIDRef") == "0":
+                    r.set("charPrIDRef", C_BODY)
 
     # ── 그림 ──
     def figure(self, path: Path, caption, width_mm=150.0):
@@ -187,13 +211,11 @@ class Writer:
             im = im.resize((1800, int(im.height * 1800 / im.width)), Image.LANCZOS)
         buf = io.BytesIO()
         im.save(buf, "JPEG", quality=86)
+        width_mm = min(width_mm, TEXT_W_MM - 5)
         h_mm = width_mm * im.height / im.width
-        pid = self.para("fig", before=6, after=0, align="CENTER", line=100, keep_next=True)
         self.doc.add_picture(buf.getvalue(), "jpg", width_mm=width_mm, height_mm=h_mm, align="CENTER",
-                             para_pr_id_ref=pid, char_pr_id_ref=self.run("body"))
-        cap = f"[그림 {ch}-{self.n_fig[ch]}] {caption}"
-        pid_cap = self.para("cap_f", before=2, after=6, align="CENTER", line=140)
-        self._p(cap, pid_cap, self.run("cap", size=10, bold=True, font=FONT_G))
+                             para_pr_id_ref=P_CENTER, char_pr_id_ref=C_BODY)
+        self._p(f"< 그림 {ch}-{self.n_fig[ch]}. {caption} >", P_CENTER, C_FIGCAP, kind="cap")
 
 
 def j(name):
@@ -208,36 +230,25 @@ def pct(a, b):
 def build(out: Path) -> None:
     w = Writer()
     doc = w.doc
-    mm = lambda v: int(round(v * MM))
-    doc.set_page_margins(left=mm(20), right=mm(20), top=mm(15), bottom=mm(15), header=mm(10), footer=mm(10), gutter=0)
 
-    # ===== 표지 =====
-    w.center("", 12, before=40)
-    doc.paragraphs[0].add_page_hiding(header=True, footer=True, page_num=True)  # 표지: 머리말·쪽 번호 감춤
-    w.center("최 종 보 고 서", 26, bold=True, before=30, after=30, font=FONT_G)
-    w.center("드론 비행 금지 구역 회피 경로 제공 방법 및 장치", 17, bold=True, before=10, after=4)
-    w.center("― SoC 기반 무인 운반 드론 에너지 인식 경로 최적화 알고리즘 개발 ―", 13, after=40)
-    w.table(
-        None,
-        ["구분", "내용"],
-        [
-            ["과제명", "드론 비행 금지 구역 회피 경로 제공 방법 및 장치  [확인요망: 협약서상 공식 과제명]"],
-            ["세부 주제", "SoC를 명시 상태 변수로 포함한 무인 운반 드론 에너지 인식 경로 최적화"],
-            ["수행 기간", "[자료필요: 협약 기간]"],
-            ["수행 기관 · 책임자", "[자료필요]"],
-            ["실증 기체", "DJI Matrice 4T"],
-            ["시험비행 · 개발 기체", "Holybro X650 (Pixhawk 6X + ArduCopter), Holybro X500"],
-            ["작성일", "2026. 11. 20."],
-        ],
-        widths=[1, 3.2],
-        width_mm=140,
-        font_pt=10,
-    )
-    w.n_tab = {}
+    # ===== 표지 (양식의 표지와 같은 제목 20 pt · 항목표 12 pt) =====
+    w.center("민간수탁연구사업 연구개발 결과보고서", 20, bold=True)
+    doc.paragraphs[0].add_page_hiding(header=True, footer=True, page_num=True)  # 표지: 쪽 번호 감춤
+    w.blank()
+    w.cover_table([
+        ("과  제  명", "배터리 잔존 용량을 고려한 드론 경로 최적화 알고리즘 개발"),
+        ("연 구 기 간", "2026. 08. 01. ~ 2026. 10. 30.(3개월)"),
+        ("기  관  명", "한국전자기술연구원"),
+        ("연구책임자", ""),
+        ("실 증 기 체", "DJI Matrice 4T"),
+        ("시험비행 · 개발 기체", "Holybro X650 (Pixhawk 6X + ArduCopter), Holybro X500"),
+        ("작  성  일", "2026. 11. 22."),
+    ])
 
     # ===== 요약 =====
     w.chapter = 0
-    w.center("요  약", 16, bold=True, before=0, after=10, font=FONT_G, page_break=True)
+    w.center("요  약", 14, bold=True, page_break=True)
+    w.blank()
     w.table(
         None,
         ["구분", "내용"],
@@ -247,14 +258,14 @@ def build(out: Path) -> None:
             ["주요 결과", "· 기존 경로(최단 + 정속 10 m/s) 대비 SoC 소모 17.5–21.2 % 감소 (지역·기체 3개 조합 × 7일, 모두 630건)\n· 틀린 예보로 생긴 손해를 30초 속도 갱신이 42–73 % 회복, 이동 장애물 144건 침범 0건\n· 95 % 신뢰 상한 포함률 409/432 (94.7 %)\n· ArduCopter SITL: 미션 13항목 업로드·읽기 일치, 속도 명령 전부 수락\n· X650 시험비행(2026-11-13): 시간 예측 오차 3 %, 에너지는 제원 중량 기준 16 % 과소 예측(중량 보정 시 2 % 이내)\n· 위 정량 결과는 X650·M100 전력 모델 기준이며, 실증 기체 M4T의 전력 모델은 아직 없음"],
             ["남은 과제", "· 실증 기체 DJI Matrice 4T: 정속 비행 전력 기록으로 전력 모델 구축, 경로 파일(WPML) 기종 추가와 DJI Pilot 2 불러오기 확인, Mobile SDK V5 기반 비행 중 속도 갱신\n· 시험비행 기체 X650: 이륙 중량 실측, 5 m/s 이상 속도별 전력 보정, 기체 바람 추정(EK3_DRAG_BCOEF) 활성화"],
         ],
-        widths=[1, 5],
-        width_mm=165,
-        font_pt=9.5,
+        widths=[1, 5.2],
+        width_mm=158,
         align=["C", "L"],
     )
 
     # ===== 목차 =====
-    w.center("목  차", 16, bold=True, before=0, after=10, font=FONT_G, page_break=True)
+    w.center("목  차", 14, bold=True, page_break=True)
+    w.blank()
     toc = [
         ("1. 연구개발과제의 개요", ["1-1. 연구개발의 필요성", "1-2. 연구개발의 범위"]),
         ("2. 국내외 기술개발 현황", ["2-1. 드론 경로계획 기술의 분류", "2-2. 국내외 연구 동향", "2-3. 기존 기술의 한계와 본 과제의 차별성"]),
@@ -267,15 +278,14 @@ def build(out: Path) -> None:
         ("7. 참고문헌", []),
         ("부록. 산출물 목록", []),
     ]
-    p1 = w.para("toc1", left=0, before=6, after=0, align="LEFT")
-    p2 = w.para("toc2", left=8, before=1, after=0, align="LEFT")
     for t1, subs in toc:
-        w._p(t1, p1, w.run("toc1", size=11.5, bold=True))
-        for s in subs:
-            w._p(s, p2, w.run("body"))
+        w._p(t1, P_HEAD, C_H1, kind="toc")
+        for s_ in subs:
+            w._p("  " + s_, P_HEAD, C_BODY, kind="toc")
+    w.last = "cover"
 
     # ===== 1장 =====
-    w.h1("1. 연구개발과제의 개요")
+    w.h1("1. 연구개발과제의 개요", page_break=True)
     w.h2("1-1. 연구개발의 필요성")
     w.h3("(1) 기술적 필요성")
     w.b("무인 운반 드론의 임무 성패는 배터리 잔량(SoC, State of Charge)으로 결정되나, 일반적인 경로계획은 이동 거리 최소화를 목표로 하여 바람·고도·속도에 따른 에너지 차이를 반영하지 못함")
@@ -876,9 +886,8 @@ def build(out: Path) -> None:
         "DJI, Cloud API – Product Supported. https://developer.dji.com/doc/cloud-api-tutorial/en/overview/product-support.html",
         "DJI, Cloud API – DJI WPML Common Elements. https://developer.dji.com/doc/cloud-api-tutorial/en/api-reference/dji-wpml/common-element.html",
     ]
-    pr = w.para("ref", left=9, hang=9, before=2, after=0, line=140, align="LEFT", autotab=True)
     for i, r in enumerate(refs, 1):
-        w._p(f"[{i}]\t{r}", pr, w.run("ref", size=9.5))
+        w._p(f"    [{i}] {r}", P_BUL, C_BODY, kind="b")
 
     # ===== 부록 =====
     w.h1("부록. 산출물 목록", page_break=True)
@@ -900,16 +909,7 @@ def build(out: Path) -> None:
         align=["C", "L", "L"],
     )
 
-    # 쪽 번호
-    try:
-        doc.set_page_number(position="BOTTOM_CENTER", prefix="- ", suffix=" -")
-    except Exception as exc:  # pragma: no cover
-        print("쪽 번호 실패:", exc)
-    try:
-        doc.set_header_text("SoC 기반 무인 운반 드론 에너지 인식 경로 최적화 ― 최종 보고서")
-    except Exception as exc:  # pragma: no cover
-        print("머리말 실패:", exc)
-
+    w.finish()
     rep = doc.validate()
     if rep.issues:
         raise SystemExit(f"검증 실패: {rep.issues}")

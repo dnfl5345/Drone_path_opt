@@ -13,61 +13,55 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from build_final_report_hwpx import FIG, FONT_G, MM, ROOT, Writer, j, pct  # noqa: E402
+from build_final_report_hwpx import C_BODY, C_H1, FIG, MM, P_CENTER, P_HEAD, ROOT, Writer, j, pct  # noqa: E402
 
 MAN = ROOT / "docs" / "manual_img"
 
 
 def code_box(w: Writer, lines: list[str], width_mm: float = 150.0) -> None:
-    """명령어 상자 (회색 바탕 1칸 표)."""
-    t = w.doc.add_table(1, 1, width=int(width_mm * MM))
+    """명령어 상자: 양식 표 테두리(0.15/0.12 mm), 회색(#D3D3D3) 바탕 1칸 표, 돋움 10 pt."""
+    t = w.doc.add_table(1, 1, width=int(width_mm * MM), border_fill_id_ref="5")
     holder = t.element.getparent()
     while holder is not None and not holder.tag.endswith("}p"):
         holder = holder.getparent()
     if holder is not None:
-        holder.set("paraPrIDRef", w.para("tblhold", align="CENTER", line=100, after=2))
+        holder.set("paraPrIDRef", P_CENTER)
     t.set_treat_as_char(True)
     t.set_cell_text(0, 0, "\n".join(lines))
     cell = t.cell(0, 0)
-    pid = w.para("code", align="LEFT", line=140)
-    cid = w.run("code", size=9.5, font=FONT_G)
+    pid = w.para("cell_l", base="68", align="LEFT", line=160)
     for para in cell.paragraphs:
         para.para_pr_id_ref = pid
         for run in para.runs:
-            run.char_pr_id_ref = cid
-    t.set_cell_shading(0, 0, "#F2F2F2")
+            run.char_pr_id_ref = "68"
+    cell.element.set("borderFillIDRef", "26")
+    cm = cell.element.find("{*}cellMargin")
+    if cm is not None:
+        cm.attrib.update({"left": "510", "right": "510", "top": "141", "bottom": "141"})
+    w.last = "tbl"
 
 
 def build(out: Path) -> None:
     w = Writer()
     doc = w.doc
-    mm = lambda v: int(round(v * MM))  # noqa: E731
-    doc.set_page_margins(left=mm(20), right=mm(20), top=mm(15), bottom=mm(15), header=mm(10), footer=mm(10), gutter=0)
 
-    # ===== 표지 =====
-    w.center("", 12, before=40)
+    # ===== 표지 (양식의 표지와 같은 제목 20 pt · 항목표 12 pt) =====
+    w.center("민간수탁연구사업 사업 내용 보고서", 20, bold=True)
     doc.paragraphs[0].add_page_hiding(header=True, footer=True, page_num=True)
-    w.center("사 업 내 용 보 고 서", 26, bold=True, before=30, after=30, font=FONT_G)
-    w.center("드론 비행 금지 구역 회피 경로 제공 방법 및 장치", 17, bold=True, before=10, after=4)
-    w.center("― SoC 기반 무인 운반 드론 에너지 인식 경로 최적화 알고리즘 ―", 13, after=40)
-    w.table(
-        None,
-        ["구분", "내용"],
-        [
-            ["과제명", "드론 비행 금지 구역 회피 경로 제공 방법 및 장치  [확인요망: 협약서상 공식 과제명]"],
-            ["실증 기체", "DJI Matrice 4T"],
-            ["시험비행 · 개발 기체", "Holybro X650 (Pixhawk 6X + ArduCopter), Holybro X500"],
-            ["수행 기관", "[자료필요]"],
-            ["작성일", "2026. 11. 21."],
-        ],
-        widths=[1.3, 3.2],
-        width_mm=140,
-        font_pt=10,
-    )
-    w.n_tab = {}
+    w.blank()
+    w.cover_table([
+        ("과  제  명", "배터리 잔존 용량을 고려한 드론 경로 최적화 알고리즘 개발"),
+        ("연 구 기 간", "2026. 08. 01. ~ 2026. 10. 30.(3개월)"),
+        ("기  관  명", "한국전자기술연구원"),
+        ("연구책임자", ""),
+        ("실 증 기 체", "DJI Matrice 4T"),
+        ("시험비행 · 개발 기체", "Holybro X650 (Pixhawk 6X + ArduCopter), Holybro X500"),
+        ("작  성  일", "2026. 11. 22."),
+    ])
 
     # ===== 목차 =====
-    w.center("목  차", 16, bold=True, after=10, font=FONT_G, page_break=True)
+    w.center("목  차", 14, bold=True, page_break=True)
+    w.blank()
     toc = [
         ("1. 과제 개요", ["1-1. 과제 배경", "1-2. 과제 목표", "1-3. 요약"]),
         ("2. 개발 알고리즘", ["2-1. 알고리즘 구성", "2-2. 경로 탐색 알고리즘 선정", "2-3. 에너지·SoC 모델",
@@ -76,15 +70,14 @@ def build(out: Path) -> None:
         ("4. 알고리즘 탑재 방법 및 지원 계획", ["4-1. 탑재 구성", "4-2. 설치 및 실행 (매뉴얼)", "4-3. 경로 생성 (매뉴얼)",
                                      "4-4. 기체 적용 절차", "4-5. 비행 전 점검", "4-6. 활용 계획", "4-7. 지원 계획"]),
     ]
-    p1 = w.para("toc1", left=0, before=6, after=0, align="LEFT")
-    p2 = w.para("toc2", left=8, before=1, after=0, align="LEFT")
     for t1, subs in toc:
-        w._p(t1, p1, w.run("toc1", size=11.5, bold=True))
-        for s in subs:
-            w._p(s, p2, w.run("body"))
+        w._p(t1, P_HEAD, C_H1, kind="toc")
+        for s_ in subs:
+            w._p("  " + s_, P_HEAD, C_BODY, kind="toc")
+    w.last = "cover"
 
     # ===================== 1. 과제 개요 =====================
-    w.h1("1. 과제 개요")
+    w.h1("1. 과제 개요", page_break=True)
     w.h2("1-1. 과제 배경")
     w.h3("(1) 필요성")
     w.b("무인 운반 드론의 임무 성패는 배터리 잔량(SoC, State of Charge)으로 결정되나, 일반적인 경로계획은 이동 거리 최소화를 목표로 하여 바람·고도·속도에 따른 에너지 차이를 반영하지 못함")
@@ -523,11 +516,7 @@ def build(out: Path) -> None:
     )
     w.note("※ 지원 일정은 발주처와 협의하여 정함 [확인요망: 지원 일정]")
 
-    try:
-        doc.set_page_number(position="BOTTOM_CENTER", prefix="- ", suffix=" -")
-        doc.set_header_text("SoC 기반 무인 운반 드론 에너지 인식 경로 최적화 ― 사업 내용 보고서")
-    except Exception as exc:  # pragma: no cover
-        print("머리말·쪽 번호 실패:", exc)
+    w.finish()
     rep = doc.validate()
     if rep.issues:
         raise SystemExit(f"검증 실패: {rep.issues}")
