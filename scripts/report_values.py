@@ -98,6 +98,8 @@ def summary_values():
     V["win4"] = f"{sum(a for a, _ in wins)}/{sum(b for _, b in wins)}"
     inf = {k: E[k]["infeasible"] for k, _ in SETS_M4T if k in E}
     V["inf4"] = inf
+    T = e15_table()
+    V["e15_m4"], V["obs_n"], V["obs_col"] = T["m4"], T["obs_n"], T["obs_col"]
     return V
 
 

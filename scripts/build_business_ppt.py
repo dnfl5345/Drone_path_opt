@@ -115,6 +115,11 @@ from report_values import (wind_trend, SETS_M4T, SETS_REF, _f, cmp3d_rows, e13_r
                            summary_values)
 
 
+def RNG(r):
+    """'7.7–10.8 %' → '−7.7 ~ −10.8 %' (감소 범위 표기)."""
+    return "−" + r.replace("–", " ~ −")
+
+
 def J(name):
     return json.loads((ROOT / "results" / name).read_text(encoding="utf-8"))
 
@@ -323,13 +328,13 @@ def build(template: str, out: str) -> None:
     for r in e13_rows(SETS_REF):
         rows.append([r[0] + " (비교)", f"{r[1][:-3]} → {r[2]}", r[3].lstrip("*")])
     table(s, 7.2, 1.15, 5.55, rows, [1.75, 1.6, 2.2], row_h=0.44, head_size=12, body_size=11, first_col_center=False)
-    items(s, 7.2, 3.45, 5.55, 1.8, [
+    items(s, 7.2, 3.95, 5.55, 1.6, [
         ("실증 기체 M4T  ", f"판교·창원 {V['n4']}건, 탑재 0.2 kg, 공식 사양 보정 모델"),
         ("기존 경로  ", "최단 경로 + 정속 10 m/s"),
         ("M4T 절감의 출처  ", f"속도 선택 {V['sp4']}, 경로 모양 {V['pa4']}"),
         ("바람이 셀수록 절감 ↑  ", f"약풍일 {_f(WT['p_lo'])} % → 강풍일({WT['w_hi']:.0f} m/s) {_f(WT['p_hi'])} %"),
-    ], size=12, gap=3)
-    stat(s, 7.2, 5.3, 5.55, 1.1, f"실증 기체 M4T: SoC 소모 변화 ({V['n4']}건)", f"−{V['r4']}", f"제안이 우수한 경우 {V['win4']}건 · 비교 기체 −{V['rR']}", dark=True, vsize=22)
+    ], size=11.5, gap=2)
+    stat(s, 7.2, 5.65, 5.55, 1.05, f"실증 기체 M4T: SoC 소모 변화 ({V['n4']}건)", RNG(V['r4']), f"제안이 우수한 경우 {V['win4']}건 · 비교 기체 {RNG(V['rR'])}", dark=True, vsize=22)
     source(s, "가상 시운전 · 계획 00Z 예보, 평가 06Z 예보 · 편도 1.5–2.8 km · M4T 모델은 공식 사양 보정(탑재·고속 실측 전)")
 
     s = D.content("3-1. 가상 시운전 – 3D 화면 왕복 비교")
@@ -353,14 +358,15 @@ def build(template: str, out: str) -> None:
     table(s, X0, 1.45, 7.3, [[h.replace(" (비교)", "\n(비교)") for h in T15["head"]]] + T15["rows"],
           [2.6] + [1.0] * T15["n_sets"], row_h=0.46, head_size=10.5, body_size=11, first_col_center=False)
     items(s, X0, 4.4, 7.3, 2.4, [
-        ("갱신 주기  ", "틀린 예보 손해를 2분 주기 12–35 %, 30초 주기 42–73 % 회복"),
+        ("실증 기체 M4T  ", f"30초 속도 갱신 + 안전장치로 SoC 소모 {T15['m4']} 감소"),
+        ("갱신 주기  ", "틀린 예보 손해를 2분 주기 12–35 %, 30초 주기 42–73 % 회복 (X650·M100)"),
         ("속도 갱신의 안전성  ", f"{T15['n_cases']}건 모두 안전장치만 쓴 경우보다 나쁘지 않음, 판단 1회 2–3 ms"),
-        ("신뢰도  ", "95 % 상한 포함률 409/432 (94.7 %), 36일 · 2지역"),
+        ("신뢰도  ", "95 % 상한 포함률 409/432 (94.7 %), 36일 · 2지역 (X650·M100)"),
         ("필요 SoC 여유  ", "6시간 전 예보 3.7 %, 30시간 전 14 %, 78시간 전 27 %"),
     ], size=12.5, gap=5)
     stat(s, 8.25, 1.45, 4.5, 1.6, f"가로지르는 이동 장애물 {T15['obs_n']}건", f"침범 {T15['obs_col']}건",
          f"완주 {T15['obs_done']}건 · 최소 이격 {T15['obs_sep'][0]:.0f}–{T15['obs_sep'][1]:.0f} m", dark=True)
-    stat(s, 8.25, 3.25, 4.5, 1.6, "30초 속도 갱신의 손해 회복", "42–73 %", "틀린 예보로 생긴 SoC 손해 대비")
+    stat(s, 8.25, 3.25, 4.5, 1.6, "실증 기체 M4T: 비행 중 속도 갱신", RNG(T15['m4']), "연결 전 플랫폼 대비 SoC 소모 (5가지 바람 경우)")
     stat(s, 8.25, 5.05, 4.5, 1.6, "출발 판정 95 % 상한 포함률", "94.7 %", "409 / 432건")
 
     s = D.content("3-1. 가상 시운전 – 비행제어기 SITL")
