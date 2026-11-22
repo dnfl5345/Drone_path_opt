@@ -11,15 +11,13 @@ const P = (cmd, env = true, note = "") => `<div><span class="p">${env ? "(dpo-en
 const O = t => t.trim() ? `<div class="o">${esc(t.trimEnd())}</div>` : "";
 const T = s => `<div class="c"># [${s.sec} s, 종료 코드 ${s.rc}]</div>`;
 const shots = {
-  t1_install: P(S.venv.cmd, false, "가상환경 만들기") + T(S.venv) +
-    P("source dpo-env/bin/activate", false, "켜기 (Windows: dpo-env\\Scripts\\activate)") +
-    P(S.pip.cmd) + T(S.pip) + P(S.unzip.cmd, true, "자료 묶음 풀기 → dpo_data 폴더") + P("ls") + O(S.ls.out.split("\n").filter(Boolean).join("  ")),
-  t2_check: P(S.check.cmd) + O(S.check.out) + T(S.check),
-  t3_server: P("dpo-server --open", true, "브라우저에 3D 화면이 열립니다") +
-    O(`[platform] 준비 완료\n3D 지도: http://127.0.0.1:8765/3d   (끄기: Ctrl+C)`) +
-    `<div class="c"># 이 시험에서는 화면 없는 환경이라 --port ${S.server.cmd.split(" ").pop()} 로 켜서 /api/health 로 확인: ${S.server.sec} s, ` +
-    `v${S.server.health.version}, 기체 ${S.server.health.drones.join(", ")}</div>`,
-  t4_cli: P(S.plan.cmd) + O(S.plan.out) + T(S.plan),
+  t1_install: P(S.unzip_release.cmd, false, "배포판 풀기") + O(S.unzip_release.out.split("\n").filter(Boolean).join("  ")) +
+    P(S.sha.cmd, false, "받은 파일 확인 (선택)") + O(S.sha.out) +
+    P(S.install.cmd, false, "설치: 가상환경 → 프로그램 → 자료 → 점검") + O(S.install.out) + T(S.install),
+  t3_server: P(S.server_pangyo.cmd, false, "켜기 – 브라우저에 3D 화면이 열립니다 (창원: sh run_linux_mac.sh changwon)") +
+    O(S.server_pangyo.out.split("\n").filter(l => l && !/"(GET|POST) /.test(l)).join("\n")) +
+    `<div class="c"># 서버 준비 ${S.server_pangyo.sec} s, v${S.server_pangyo.health.version}, 기체 ${S.server_pangyo.health.drones.join(", ")}. 끄기: Ctrl+C</div>`,
+  t4_cli: P("source dpo-env/bin/activate", false, "명령줄을 쓸 때 (Windows: dpo-env\\Scripts\\activate)") + P(S.plan.cmd) + O(S.plan.out) + T(S.plan),
   t5_cli_wpml: P(S.plan_wpml.cmd) + O(S.plan_wpml.out) + T(S.plan_wpml) + P(S.files.cmd) + O(S.files.out.split("\n").filter(Boolean).join("  ")),
 };
 const css = `body{margin:0;background:#fff}.w{width:1180px;background:#1E222B;border-radius:12px;overflow:hidden;font:15.5px/1.55 'NanumGothicCoding','D2Coding','NanumGothic',monospace;color:#E6E6E6}

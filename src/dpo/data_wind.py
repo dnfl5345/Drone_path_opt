@@ -159,7 +159,7 @@ if __name__ == "__main__":
 
     with cf.ThreadPoolExecutor(8) as ex:
         rows = list(ex.map(one, days))
-    with open(C.RAW / "gfs_scan_oct2026.csv", "w") as f:
+    with open(C.RAW / "gfs_scan_oct2026.csv", "w", encoding="utf-8") as f:
         f.write("date,u100,v100,ws100\n")
         for d, u, v in rows:
             f.write(f"{d:%Y-%m-%d},{u:.2f},{v:.2f},{np.hypot(u, v):.2f}\n")

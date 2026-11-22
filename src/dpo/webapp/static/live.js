@@ -42,8 +42,10 @@ function draw() {
   if (!L.site) return;
   ctx.clearRect(0, 0, cv.width, cv.height);
   if (L.img.complete) ctx.drawImage(L.img, 0, 0, cv.width, cv.height);
-  const [nx, ny, nr] = L.site.nfz;
-  ctx.save(); ctx.globalAlpha = 0.9; circle(nx, ny, nr, "rgba(215,38,61,0.18)", "#D7263D", [5, 4]); ctx.restore();
+  if (L.site.nfz) {                         // 원형 비행 금지 구역이 없는 지역(창원 등)은 null
+    const [nx, ny, nr] = L.site.nfz;
+    ctx.save(); ctx.globalAlpha = 0.9; circle(nx, ny, nr, "rgba(215,38,61,0.18)", "#D7263D", [5, 4]); ctx.restore();
+  }
   marker(...L.site.hub, "거점", "sq"); marker(...L.site.dst, "목적지", "dot");
   const s = L.snap;
   if (s && s.state !== "idle") {

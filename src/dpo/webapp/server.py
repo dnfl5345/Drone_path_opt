@@ -552,7 +552,7 @@ class App:
                         bl.append(dict(p=[[x0, y0], [x1, y0], [x1, y1], [x0, y1]], b=round(float(gz.min()), 1),
                                        h=round(float(bh[j, i]) + float(gz.max() - gz.min()), 1)))
                         i = i1 + 1
-            for f in (json.loads(bfile.read_text()) if (swkt is not None and bfile.exists()) else []):
+            for f in (json.loads(bfile.read_text(encoding="utf-8")) if (swkt is not None and bfile.exists()) else []):
                 h = float(f["h"]) if f["h"] else (float(f["nf"]) * 3.3 if f["nf"] else default_h.get(f["cls"] or "", 10.0))
                 g = swkt.loads(f["wkt"])
                 for poly in getattr(g, "geoms", [g]):
@@ -943,7 +943,7 @@ class App:
 
 def _load_adsb_full():
     f = C.RES / "adsb_error_model.json"
-    return json.loads(f.read_text()) if f.exists() else None
+    return json.loads(f.read_text(encoding="utf-8")) if f.exists() else None
 
 
 ADSB_FULL = _load_adsb_full()
@@ -954,7 +954,7 @@ def _load_adsb():
     f = C.RES / "adsb_error_model.json"
     if not f.exists():
         return None
-    d = json.loads(f.read_text())
+    d = json.loads(f.read_text(encoding="utf-8"))
     m = d["model_all"]
     return dict(knots=d["knots"], q=m["q"], n_aircraft=d["n_aircraft"], n_obs=d["n_obs"], horizon=20.0)
 

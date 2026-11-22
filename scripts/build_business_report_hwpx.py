@@ -9,14 +9,18 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_final_report_hwpx import (C_BODY, C_H1, FIG, MM, P_CENTER, P_HEAD, ROOT, SETS_M4T, SETS_REF, Writer, _f,  # noqa: E402
                                      wind_trend, cmp3d_rows, e13_rows, e13_split_rows, e15_table, j, summary_values)
+from report_values import kpi  # noqa: E402
 
 MAN = ROOT / "docs" / "manual_img"
+sys.path.insert(0, str(ROOT / "src"))
+from dpo import __version__ as VER  # noqa: E402
 
 
 def code_box(w: Writer, lines: list[str], width_mm: float = 150.0) -> None:
@@ -46,6 +50,7 @@ def build(out: Path) -> None:
     w = Writer()
     doc = w.doc
     V = summary_values()
+    K = kpi()
     M = V["M"]
 
     # ===== 표지 (양식의 표지와 같은 제목 20 pt · 항목표 12 pt) =====
@@ -54,7 +59,7 @@ def build(out: Path) -> None:
     w.blank()
     w.cover_table([
         ("과  제  명", "배터리 잔존 용량을 고려한 드론 경로 최적화 알고리즘 개발"),
-        ("연 구 기 간", "2026. 08. 01. ~ 2026. 10. 30.(3개월)"),
+        ("연 구 기 간", "2026. 09. 01. ~ 2026. 12. 31.(4개월)"),
         ("기  관  명", "한국전자기술연구원"),
         ("연구책임자", ""),
         ("실 증 기 체", "DJI Matrice 4T"),
@@ -111,7 +116,18 @@ def build(out: Path) -> None:
     w.b("바람·지형·건물·비행 금지 구역·이동 장애물을 반영한 3차원 시공간 경로와 구간별 속도 산출")
     w.b("비행 중 기상 정보 갱신에 따른 속도 재계산과 출발 전 신뢰도 판정(go / caution / no-go)")
     w.b("실증 기체(DJI Matrice 4T)·시험비행 기체(Holybro X650)에 올릴 수 있는 경로 파일과 실시간 연동")
-    w.h3("(3) 대상 기체")
+    w.h3("(3) 정량적 목표 (2026. 7. 28. 계획서)")
+    w.table(
+        "정량적 목표 항목",
+        ["평가항목", "단위", "세계최고 수준", "국내 수준", "개발 목표치", "평가방법"],
+        [["외란을 고려한 배터리 안전여유 확보율", "%", "중국/DJI 98.0 이상", "85.0 수준", "95.0 이상",
+          "승인된 임무 종료 후 정상 복귀/착륙 여부와 종료 시 Reserve가 정책 마진 이상인지 확인하여 성공률을 산정 (자체시험평가)"]],
+        widths=[1.6, 0.5, 1.1, 0.9, 0.9, 3.0],
+        font_pt=8.5,
+        align=["C", "C", "C", "C", "C", "L"],
+    )
+    w.note("※ 평가환경 : 동일 기체·배터리·페이로드 조건의 반복 실외 비행 시험을 고려하여 시뮬레이션 환경 기반 정상 복귀 지점이 사전 정의된 PoC 시험환경")
+    w.h3("(4) 대상 기체")
     w.table(
         "대상 기체",
         ["구분", "기체", "비행제어 · 연동", "주요 제원"],
@@ -131,10 +147,11 @@ def build(out: Path) -> None:
         ["구분", "내용"],
         [
             ["개발 알고리즘", "· 경로 탐색 5종 비교 후 Lazy Theta* 선정 → 에너지 비용·바람·시간·고도로 확장한 3차원 시공간 탐색(WE-LT*)\n· 회전익 전력 모델 + 배터리 내부저항 기반 SoC 환산, 이동 장애물 안전 구간, 30초 속도 갱신, 출발 판정"],
+            ["정량 목표", f"· 외란을 고려한 배터리 안전여유 확보율 {K['rate']} % ({K['k']}/{K['N']}, 95 % 신뢰구간 {K['lo']}–{K['hi']} %) – 목표 95.0 % 이상 달성 (M4T 모델 PoC 가상 시뮬레이션, 반복 실외 비행 재산정 필요)"],
             ["가상 시운전 검증", f"· 실증 기체 M4T(탑재 0.2 kg): 기존 경로(최단 + 정속 10 m/s) 대비 SoC 소모 {V['r4']} 감소 ({V['n4']}건), 비교 기체 X650·M100 {V['rR']} 감소 ({V['nR']}건)\n· 비행 중 30초 속도 갱신: M4T SoC 소모 {V['e15_m4']} 감소, 이동 장애물 {V['obs_n']}건 침범 {V['obs_col']}건\n· 틀린 예보 손해 42–73 % 회복, 95 % 상한 포함률 94.7 % (비교 기체 X650·M100 기준)\n· ArduCopter SITL: 미션 13항목 업로드·읽기 일치, 속도 명령 전부 수락"],
             ["실제 비행 데이터 검증", "· X650 시험비행(2026-11-13, 103초): 시간 예측 오차 3 %\n· 에너지는 제원 중량 기준 16 % 과소 예측, 호버 전력에 맞춘 중량(4.66 kg)으로 2 % 이내\n· 비행 중 위치·배터리·바람·현재 경로점 약 2 Hz 수신 확인 (바람 추정은 설정 꺼짐)"],
-            ["탑재 방법", "· 지상 PC에 설치(약 20초) → 3D 화면에서 경로 생성(13초) → M4T는 .kmz를 DJI Pilot 2로, X650은 .waypoints를 Mission Planner로 올림\n· X650은 MAVLink로 비행 중 속도 갱신 가능"],
-            ["지원 계획", "· M4T 비행 기록으로 전력 모델 확인·보정, M4T 경로 파일 기종 추가·불러오기 시험, 실증 지역(고성) 지도 구축, 설치·교육, Mobile SDK V5 기반 속도 갱신 앱"],
+            ["탑재 방법", "· 배포판 zip 을 풀고 설치 파일 실행(Windows: install_windows.bat) → 실행 파일로 3D 화면을 열어 경로 생성 → M4T는 .kmz를 DJI Pilot 2로, X650은 .waypoints를 Mission Planner로 올림\n· X650은 MAVLink로 비행 중 속도 갱신 가능"],
+            ["지원 계획", "· M4T 비행 기록으로 전력 모델 확인·보정, M4T 의 Pilot 2 파일로 만든 경로 파일 불러오기 시험, 반복 실외 비행으로 정량 목표 재산정, 실증 지역(고성) 지도 구축, 설치·교육, Mobile SDK V5 기반 속도 갱신 앱"],
         ],
         widths=[1.3, 5],
         font_pt=9,
@@ -292,10 +309,26 @@ def build(out: Path) -> None:
     if T15["m4"]:
         w.b(f"실증 기체 M4T: 바람 경우에 따라 SoC 소모 {T15['m4']} 감소")
     w.b(f"가로지르는 이동 장애물을 넣은 {T15['obs_n']}건 중 {T15['obs_done']}건 완주, 침범 {T15['obs_col']}건 (최소 이격 {T15['obs_sep'][0]:.0f}–{T15['obs_sep'][1]:.0f} m). 속도 갱신 판단 1회에 2–3 ms")
-    w.h3("(5) 출발 판정의 신뢰도")
+    w.h3("(5) 정량 목표: 외란을 고려한 배터리 안전여유 확보율")
+    w.b(f"M4T 모델 왕복 {K['n']}개 임무(판교·창원 × {K['days']}일 × 경로 3개, 탑재 0.2 kg)를 승인이 겨우 나는 출발 SoC에서 실시간 엔진으로 폐루프 비행. 정책 마진 20 %")
+    w.table(
+        "외란별 안전여유 확보율",
+        ["외란", "95 % 신뢰 승인 (제안)", "명목 승인 (비교)"],
+        [["실제 예보 오차", K["cases"]["real"]["conf"], K["cases"]["real"]["nom"]],
+         ["실제 예보 오차 + 이동 장애물", K["cases"]["obs"]["conf"], K["cases"]["obs"]["nom"]],
+         ["**합계 (평가항목)", f"**{K['k']}/{K['N']} ({K['rate']} %)", f"{K['nom_k']}/{K['nom_N']} ({K['nom_rate']} %)"],
+         ["(참고) 풍향 30° 회전", K["cases"]["rot30"]["conf"], K["cases"]["rot30"]["nom"]],
+         ["(참고) 풍속 1.3배", K["cases"]["spd1.3"]["conf"], K["cases"]["spd1.3"]["nom"]]],
+        widths=[2.4, 1.8, 1.8],
+        font_pt=9,
+        align=["L", "C", "C"],
+    )
+    w.b(f"평가항목 확보율 {K['rate']} % (95 % 신뢰구간 {K['lo']}–{K['hi']} %)로 목표 95.0 % 이상 달성. 이동 장애물 침범 {K['col_total']}건. 오차 모형 밖의 큰 외란(참고)에서는 목표에 못 미침")
+    w.figure(FIG / "F39_kpi_reserve.png", "외란별 안전여유 확보율", 150)
+    w.h3("(6) 출발 판정의 신뢰도")
     w.b("2025-11–2026-10의 36일, 432건에서 95 % 상한 안에 실제 SoC 소모가 든 비율은 409건(94.7 %) (X650·M100으로 계산. 예보 오차 모형은 기체와 무관하여 M4T에도 같은 모형을 씀)")
     w.b("필요한 SoC 여유는 6시간 전 예보 3.7 %, 30시간 전 14 %, 78시간 전 27 % (명목값 대비)")
-    w.h3("(6) 비행제어기 시운전 (ArduCopter SITL)")
+    w.h3("(7) 비행제어기 시운전 (ArduCopter SITL)")
     s = j("sitl_check.json")
     c, m = s["checks"], s["mission"]
     w.table(
@@ -392,9 +425,9 @@ def build(out: Path) -> None:
         "운용 환경",
         ["항목", "내용"],
         [
-            ["지상 PC", "Python 3.10 이상이 설치된 PC (시험: Linux, Python 3.13) [확인요망: Windows 미시험]"],
+            ["지상 PC", "Python 3.10 이상이 설치된 Windows · Linux · macOS PC (배포판 인수 시험: Linux, Python 3.13 / Windows 는 설치 파일 정적 검사와 라이브러리 확인만 함)"],
             ["브라우저", "Chrome · Edge 최신판 (3D 화면에 WebGL 필요)"],
-            ["설치 파일", "프로그램 drone_path_opt-1.3.0-py3-none-any.whl (약 0.4 MB), 자료 묶음 dpo_data_1.3.0.zip (약 20 MB)"],
+            ["배포판", f"DronePathOpt_v{VER}.zip: 설치·실행 파일(Windows .bat, Linux·macOS .sh), 프로그램(약 0.4 MB), 자료 묶음(약 20 MB), 사용자 매뉴얼, 시험 안내서"],
             ["기체 쪽 소프트웨어", "M4T: DJI Pilot 2 / X650: Mission Planner 또는 QGroundControl"],
         ],
         widths=[1.4, 5],
@@ -402,21 +435,25 @@ def build(out: Path) -> None:
     )
 
     w.h2("4-2. 설치 및 실행 (매뉴얼)")
-    w.h3("(1) 설치 (처음 한 번, 약 20초)")
-    w.b("두 설치 파일을 한 폴더에 두고 그 폴더에서 다음을 실행함")
-    code_box(w, ["python3 -m venv dpo-env", "source dpo-env/bin/activate",
-                 'pip install "drone_path_opt-1.3.0-py3-none-any.whl[mavlink]"', "unzip dpo_data_1.3.0.zip"])
-    w.note("※ Windows: py -m venv dpo-env, dpo-env\\Scripts\\activate 로 바꾸고 zip은 탐색기에서 압축 풀기")
-    w.h3("(2) 설치 점검 (8초)")
-    code_box(w, ["dpo-plan --check"])
-    w.h3("(3) 프로그램 켜기 (4초)")
-    code_box(w, ["dpo-server --open"])
-    w.b("브라우저에 3D 계획 화면(http://127.0.0.1:8765/3d)이 열림. 끌 때는 터미널에서 Ctrl+C")
+    _IL = json.loads((ROOT / "docs" / "manual_img" / "install_log.json").read_text(encoding="utf-8"))
+    _S = _IL["steps"]
+    w.h3(f"(1) 설치 (처음 한 번, 약 {_S['install']['sec']:.0f}초)")
+    w.b(f"배포판 DronePathOpt_v{VER}.zip 을 풀고 설치 파일을 실행함 (가상환경 → 프로그램 → 자료 묶음 → 점검까지 자동)")
+    code_box(w, ["Windows:      install_windows.bat 두 번 누르기", "Linux·macOS:  sh install_linux_mac.sh"])
+    w.h3(f"(2) 프로그램 켜기 (약 {_S['server_pangyo']['sec']:.0f}초)")
+    code_box(w, ["Windows:      run_windows.bat (창원: run_windows_changwon.bat)", "Linux·macOS:  sh run_linux_mac.sh (창원: sh run_linux_mac.sh changwon)"])
+    w.b("브라우저에 3D 계획 화면(http://127.0.0.1:8765/3d)이 열림. 끌 때는 검은 창(터미널)을 닫거나 Ctrl+C")
+    _A = _IL.get("acceptance", {})
+    if _A:
+        w.b("배포판 인수 시험: zip 을 빈 폴더에 풀어 위 순서로 설치·실행하고 시험 안내서의 항목을 브라우저 자동 조작으로 실행 – "
+            + ", ".join(f"{'판교' if k == 'pangyo' else '창원'} {sum(x['ok'] for x in v['steps'])}/{len(v['steps'])} 통과" for k, v in _A.items()))
     w.figure(MAN / "01_start.png", "프로그램을 켠 화면 (① 3D 지도 ② 표시 선택 ③ 임무 설정)", 150)
     w.table(
-        "설치부터 첫 경로까지 소요 시간 (구동 시험)",
+        "설치부터 첫 경로까지 소요 시간 (배포판 인수 시험, Linux)",
         ["단계", "소요 시간"],
-        [["설치", "약 17 s"], ["설치 점검", "8 s"], ["서버 시작", "3.8 s"], ["화면 열기", "4.0 s"], ["경로 생성 (왕복 비교)", "13.1 s"]],
+        [["설치 파일 (가상환경 · 프로그램 · 자료 · 점검)", f"{_S['install']['sec']:.0f} s"], ["서버 시작 (판교)", f"{_S['server_pangyo']['sec']:.1f} s"],
+         ["화면 열기", (_A.get("pangyo", {}).get("steps") or [{"detail": "–"}])[0]["detail"].split(",")[0]],
+         ["경로 생성 (M4T 왕복)", (_A.get("pangyo", {}).get("steps") or [{}, {"detail": "–"}])[1]["detail"].split("·")[0].strip()]],
         widths=[2, 1.5],
         width_mm=110,
         align=["L", "C"],

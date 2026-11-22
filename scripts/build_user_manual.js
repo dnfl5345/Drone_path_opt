@@ -9,7 +9,8 @@ const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, ImageR
 const ROOT = path.resolve(__dirname, "..");
 const IMG = path.join(ROOT, "docs", "manual_img");
 const LOGC = JSON.parse(fs.readFileSync(path.join(IMG, "capture_log.json"), "utf8"));
-const INST = JSON.parse(fs.readFileSync(path.join(IMG, "install_log.json"), "utf8")).steps;   // scripts/release_test.py 의 실제 설치 기록
+const ILOG = JSON.parse(fs.readFileSync(path.join(IMG, "install_log.json"), "utf8"));   // scripts/release_test.py 의 실제 인수 시험 기록
+const INST = ILOG.steps, ACC = ILOG.acceptance, VER = ILOG.version;
 const sec = k => INST[k].sec.toFixed(0);
 const FONT = "맑은 고딕", MONO = "Consolas";
 const NAVY = "004E8F", TEAL = "1B6E8C", INK = "16202A", GRAY = "5B6770", LIGHT = "E3EEF3", PALE = "F4F7F9", RED = "C0201B";
@@ -87,35 +88,45 @@ const c = [];
 // 표지
 c.push(new Paragraph({ spacing: { before: 1400, after: 200 }, children: [new TextRun({ text: "드론 SoC 최대화 경로계획", font: FONT, size: 56, bold: true, color: NAVY })] }));
 c.push(new Paragraph({ spacing: { after: 400 }, border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: TEAL, space: 12 } },
-  children: [new TextRun({ text: "사용자 매뉴얼 – 프로그램을 켜서 경로를 생성하기까지 (v1.3.0)", font: FONT, size: 32, color: TEAL })] }));
-c.push(P("2026년 11월 19일", { size: 22, color: GRAY, after: 500 }));
+  children: [new TextRun({ text: `사용자 매뉴얼 – 배포판을 받아 경로를 생성하기까지 (v${VER})`, font: FONT, size: 32, color: TEAL })] }));
+c.push(P("2026년 11월 22일", { size: 22, color: GRAY, after: 500 }));
 c.push(table(["단계", "할 일", "걸린 시간 (실측)", "쪽"], [
-  ["1. 설치 (처음 한 번)", "가상환경 만들기 → 프로그램 설치 → 자료 묶음 풀기 → 점검", `약 ${Math.round(INST.venv.sec + INST.pip.sec + INST.unzip.sec)}초 + 점검 ${sec("check")}초`, "2"],
-  ["2. 켜기", "`dpo-server --open` → 브라우저에 3D 지도", `서버 4초, 화면 ${LOGC.load_s.toFixed(0)}초`, "3"],
-  ["3. 임무 설정", "기체·탑재중량 → 임무 형태 → 출발지·도착지 → 출발 시각", "사용자 입력", "4–7"],
-  ["4. 경로 생성", "'경로 생성' 누르기", `${LOGC.plan_s.toFixed(0)}초`, "8"],
-  ["5. 결과·비교·내보내기", "결과 읽기, 재생, 기존 경로와 비교, 미션 파일 받기", "수 초", "9–12"],
+  ["1. 설치 (처음 한 번)", "배포판 zip 풀기 → 설치 파일 실행 (Windows: `install_windows.bat` 두 번 누르기)", `약 ${sec("install")}초 (인터넷 속도에 따라 다름)`, "2–3"],
+  ["2. 켜기", "실행 파일 (Windows: `run_windows.bat` 두 번 누르기) → 브라우저에 3D 지도", `서버 ${sec("server_pangyo")}초, 화면 ${LOGC.load_s.toFixed(0)}초`, "4–5"],
+  ["3. 임무 설정", "기체·탑재중량 → 임무 형태 → 출발지·도착지 → 출발 시각", "사용자 입력", "6–9"],
+  ["4. 경로 생성", "'경로 생성' 누르기", `${LOGC.plan_s.toFixed(0)}초`, "10–11"],
+  ["5. 결과·비교·내보내기", "결과 읽기, 재생, 기존 경로와 비교, 미션 파일 받기", "수 초", "12–15"],
 ], [3, 8, 3, 1], { size: 20 }));
 c.push(P("", { after: 200 }));
-c.push(P("**터미널 명령 4개, 화면 조작 6번**이면 첫 경로가 나옵니다. 시간은 저장소와 떨어진 빈 폴더에 새 가상환경을 만들어 처음부터 설치해 잰 값입니다 (Linux, 인터넷 연결). 화면 그림은 모두 실제 실행 화면이고, 빨간 테두리와 번호는 누를 곳을 표시하려고 덧그린 것입니다.", { size: 20 }));
+c.push(P("**파일 두 개를 두 번 누르고, 화면 조작 6번**이면 첫 경로가 나옵니다. 시간은 배포판 zip 을 빈 폴더에 풀어 받은 사람과 똑같이 설치·실행해 잰 값입니다 (Linux, 인터넷 연결). 화면 그림은 모두 실제 실행 화면이고, 빨간 테두리와 번호는 누를 곳을 표시하려고 덧그린 것입니다.", { size: 20 }));
 
 // 1. 설치
 c.push(H1("1. 설치 (처음 한 번)"));
-c.push(table(["받는 파일", "내용"], [
-  ["`drone_path_opt-1.3.0-py3-none-any.whl`", "프로그램 (약 0.4 MB)"],
-  ["`dpo_data_1.3.0.zip`", "자료 묶음: 지형·건물 격자, 예보 바람, 건물 모양, 오차 모형 (약 20 MB)"],
-], [5, 9], { width: 10000 }));
-c.push(P("", { after: 60 }));
-c.push(P("필요한 것: **Python 3.10 이상**, 설치할 때 인터넷 연결 (numpy 등 기본 라이브러리를 받습니다), WebGL이 되는 브라우저 (Chrome, Edge 등). 두 파일을 한 폴더에 두고 그 폴더의 터미널에서 실행합니다.", { size: 20 }));
-c.push(...wide(null, "t1_install", [], [
-  B("**Windows:** `py -m venv dpo-env`, `dpo-env\\Scripts\\activate` 로 바꾸고, zip은 탐색기의 '압축 풀기'로 풉니다 (Windows에서는 시험하지 않았습니다)."),
-  B("자료 묶음을 풀면 `dpo_data` 폴더가 생깁니다. **이 폴더 옆에서 실행하면 자료를 저절로 찾습니다.** 다른 곳에서 실행하려면 환경변수 `DPO_HOME` 을 `dpo_data` 폴더로 지정합니다."),
-], 900));
-c.push(...wide("1.1 점검: dpo-plan --check", "t2_check", [P("'정상'이 나오면 준비가 끝났습니다. 설치 후 처음 한 번은 계산 코드를 컴파일하느라 몇 초 더 걸립니다.", { size: 20 })], [], 900));
+c.push(P(`받은 **DronePathOpt_v${VER}.zip** 을 풀면 다음 파일이 나옵니다. 필요한 것: **Python 3.10 이상**, 설치할 때 인터넷 연결 (numpy 등 기본 라이브러리를 받습니다), Chrome 또는 Edge.`, { size: 20 }));
+c.push(table(["파일", "내용"], [
+  ["`install_windows.bat` / `install_linux_mac.sh`", "설치 (처음 한 번)"],
+  ["`run_windows.bat` / `run_windows_changwon.bat` / `run_linux_mac.sh`", "실행 – 판교 / 창원"],
+  [`\`drone_path_opt-${VER}-py3-none-any.whl\`, \`dpo_data_${VER}.zip\``, "프로그램 (약 0.4 MB), 자료 묶음: 지형·건물·예보 바람·오차 모형 (약 20 MB) – 설치 파일이 씀"],
+  ["`사용자매뉴얼.docx`, `시험안내서.hwpx`, `비행기록표.xlsx`", "이 문서, 시험 항목과 회신 자료, 비행마다 적는 기록표"],
+  ["`README.txt`, `SHA256SUMS.txt`", "요약 안내, 파일이 온전한지 확인하는 값"],
+], [6, 8], { size: 19 }));
+c.push(H2("1.1 Windows"));
+c.push(table(["순서", "할 일", "화면에 나오는 것"], [
+  ["①", "Python 이 없으면 python.org 에서 3.10 이상(권장 3.12)을 설치합니다. **첫 화면의 'Add python.exe to PATH' 를 반드시 켭니다.**", "설치 끝"],
+  ["②", "메일로 받은 zip 은 오른쪽 클릭 → 속성 → **'차단 해제'** 를 켜고 확인한 뒤, 오른쪽 클릭 → **'모두 압축 풀기'**. 경로에 한글이 있어도 됩니다.", "DronePathOpt 폴더"],
+  ["③", "폴더 안의 **install_windows.bat** 를 두 번 누릅니다. 'Windows의 PC 보호' 창이 뜨면 '추가 정보' → '실행'.", "검은 창에 [1/4] Python 확인 → [2/4] 가상환경 → [3/4] 프로그램 설치 (몇 분) → [4/4] 자료 묶음 풀기 → '정상: v… · 성남 판교·분당 …' → '설치가 끝났습니다'"],
+  ["④", "아무 키나 눌러 창을 닫습니다. 다음부터는 2장의 실행 파일만 누릅니다.", ""],
+], [1, 8, 8], { size: 19 }));
+c.push(P("", { after: 40 }));
+c.push(P("**[오류] 로 시작하는 줄이 나오면** 그 줄에 할 일이 적혀 있습니다 (Python 없음 → ①, 설치 실패 → 인터넷·회사 프록시 확인 후 다시 실행). 해결되지 않으면 검은 창을 화면 캡처하여 회신해 주십시오. Windows 설치·실행 파일은 개발 환경에 Windows 가 없어 **실제 Windows 에서는 시험하지 못했습니다** (같은 순서를 Linux 에서 시험하였고, Windows 용 라이브러리가 Python 3.10–3.14 모두 있음을 확인함).", { size: 19 }));
+c.push(...wide("1.2 Linux · macOS", "t1_install", [P("터미널에서 풀고 설치 파일을 실행합니다. 마지막에 **'정상'** 과 '설치가 끝났습니다' 가 나오면 준비가 끝난 것입니다 (아래는 실제 실행 기록).", { size: 20 })], [
+  B("설치 파일은 가상환경 `dpo-env` 를 만들고 프로그램을 넣은 뒤 자료 묶음을 풀어 `dpo_data` 폴더를 만들고 점검(`dpo-plan --check`)까지 합니다."),
+  B("설치 후 처음 한 번은 계산 코드를 컴파일하느라 몇 초 더 걸립니다."),
+], 900, true));
 
 // 2. 켜기
 c.push(H1("2. 프로그램 켜기"));
-c.push(...wide(null, "t3_server", [P("`dpo-server --open` 을 실행합니다. 브라우저가 3D 지도 화면을 엽니다. 저절로 열리지 않으면 터미널에 나온 주소 `http://127.0.0.1:8765/3d` 를 주소창에 넣습니다. **이 터미널 창은 닫지 마십시오** – 닫으면 프로그램이 꺼집니다.", { size: 20 })], [], 900));
+c.push(...wide(null, "t3_server", [P("**Windows:** `run_windows.bat` (판교) 또는 `run_windows_changwon.bat` (창원) 을 두 번 누릅니다. **Linux·macOS:** `sh run_linux_mac.sh` (창원: `sh run_linux_mac.sh changwon`). 잠시 뒤 브라우저가 3D 지도 화면을 엽니다. 저절로 열리지 않으면 주소창에 `http://127.0.0.1:8765/3d` 를 넣습니다. **켜 둔 검은 창(터미널)은 닫지 마십시오** – 닫으면 프로그램이 꺼집니다.", { size: 20 })], [], 900));
 c.push(...step("2.1 첫 화면", "01_start", [
   { n: "①", t: "**3D 지도** – 지형·건물·비행금지구역(붉은 원기둥). 왼쪽 끌기 = 회전, 오른쪽 끌기 = 이동, 휠 = 확대" },
   { n: "②", t: "**표시 선택** – 건물·바람·경로 등 보일 것. '경로에 맞춰 보기'로 화면을 경로에 맞춥니다." },
@@ -190,9 +201,9 @@ c.push(...step("5.4 실증 기체 Matrice 4T 의 경로 파일", "10b_export_m4t
 
 // 6. 끄기·명령줄
 c.push(H1("6. 끄기와 명령줄 사용 (선택)"));
-c.push(P("**끄기:** 서버를 켠 터미널에서 **Ctrl+C**. `[platform] 종료`가 나오면 꺼진 것입니다. 다음부터는 1장 없이 다음 두 줄만 실행합니다.", { size: 20 }));
-c.push(...code(["source dpo-env/bin/activate        (Windows: dpo-env\\Scripts\\activate)", "dpo-server --open"]));
-c.push(...wide("6.1 화면 없이 명령 한 줄로", "t4_cli", [P("같은 계획을 화면 없이 할 수 있습니다. 결과 요약이 출력되고 미션 파일이 `--out` 폴더에 생깁니다.", { size: 20 })], [], 860));
+c.push(P("**끄기:** 켜 둔 검은 창을 닫거나, 그 창에서 **Ctrl+C**. `[platform] 종료`가 나오면 꺼진 것입니다. 다시 켤 때는 2장의 실행 파일만 누릅니다 (설치는 다시 하지 않음).", { size: 20 }));
+c.push(...wide("6.1 화면 없이 명령 한 줄로", "t4_cli", [P("같은 계획을 화면 없이 할 수 있습니다. 배포판 폴더에서 터미널(Windows: 주소창에 `cmd`)을 열고 가상환경을 켠 뒤 실행합니다. 결과 요약이 출력되고 미션 파일이 `--out` 폴더에 생깁니다.", { size: 20 })],
+  [...code(["Windows:      dpo-env\\Scripts\\activate", "Linux·macOS:  source dpo-env/bin/activate"])], 860));
 c.push(...wide(null, "t5_cli_wpml", [P("지역을 바꾸려면 `--site changwon`, 편도는 `--one-way`, DJI 경로 파일까지 만들려면 `--wpml m30`(문서로 확인한 기종) 또는 `--wpml-template 파일.kmz`(M4T: Pilot 2 에서 내보낸 파일)를 붙입니다.", { size: 20 })], [], 960));
 c.push(table(["자주 쓰는 인자", "뜻"], [
   ["`--site pangyo` / `changwon`", "지역 (서버도 `dpo-server --site changwon`)"],
@@ -207,6 +218,9 @@ c.push(table(["자주 쓰는 인자", "뜻"], [
 // 7. 문제 해결
 c.push(H1("7. 문제가 생기면"));
 c.push(table(["증상", "원인과 조치"], [
+  ["[오류] Python 3.10 이상을 찾지 못했습니다 (Windows)", "python.org 에서 설치하며 'Add python.exe to PATH' 를 켜고, install_windows.bat 를 다시 누릅니다."],
+  ["[오류] 프로그램 설치에 실패했습니다", "인터넷 연결 또는 회사 프록시 때문입니다. 연결을 확인하고 설치 파일을 다시 누릅니다 (이어서 설치됨)."],
+  ["'Windows의 PC 보호' 창 / 파일이 열리지 않음", "'추가 정보' → '실행'. 메일로 받은 zip 은 풀기 전에 속성의 '차단 해제'를 켭니다."],
   ["`필수 자료가 없습니다`", "자료 묶음을 풀지 않았거나 다른 폴더에서 실행했습니다. `dpo_data` 폴더 옆에서 실행하거나 `DPO_HOME` 을 지정합니다 (아래 ①)."],
   ["`포트 8765 를 열 수 없습니다`", "서버가 이미 켜져 있습니다. 브라우저로 `http://127.0.0.1:8765/3d` 를 바로 열거나 `dpo-server --port 8766` 으로 켭니다 (아래 ②)."],
   ["`입력 오류: …`", "입력이 허용 범위를 넘었습니다. 안내된 범위 안에서 넣습니다 (아래 ③)."],
@@ -224,29 +238,32 @@ c.push(errRow(["e3_bad", "③ 입력 범위를 넘었을 때"], ["e4_infeasible"
 
 // 8. 시험 기록
 c.push(H1("8. 구동 시험 기록"));
+const accRow = (site, lab) => {
+  const A = ACC[site]; if (!A) return [lab, "시험 안 함"];
+  const n = A.steps.filter(x => x.ok).length;
+  return [lab, `${n}/${A.steps.length} 통과 · 브라우저 오류 ${A.errors.length}건 · ` + A.steps.map(x => x.id).join(", ")];
+};
 c.push(table(["항목", "내용"], [
-  ["환경", "Linux, Python 3.13, Chromium (자동 조작). 저장소와 떨어진 빈 폴더에 새 가상환경"],
-  ["설치", `가상환경 ${INST.venv.sec} s · 프로그램 설치 ${INST.pip.sec} s (인터넷으로 의존 패키지 받음) · 자료 풀기 ${INST.unzip.sec} s · 점검 ${INST.check.sec} s`],
-  ["첫 경로까지", `서버 준비 ${INST.server.sec} s · 화면 열림 ${LOGC.load_s.toFixed(1)} s · 경로 생성 ${LOGC.plan_s.toFixed(1)} s`],
-  ["화면 오류", LOGC.errors.length ? LOGC.errors.join(", ") : "브라우저 콘솔 오류 없음"],
-  ["내려받기", "미션 파일 2개, DJI 경로 파일 2개를 실제로 받아 다시 읽어 확인"],
+  ["방법", `배포판 DronePathOpt_v${VER}.zip 을 빈 폴더에 풀어 받은 사람과 같은 순서로 설치·실행 (Linux, Python 3.13, Chromium 자동 조작). 시험 파일: scripts/release_test.py`],
+  ["파일 확인·설치", `SHA-256 ${INST.sha.out} · 설치 파일 ${INST.install.sec} s (종료 코드 ${INST.install.rc}) · Windows 실행 파일 정적 검사 (줄바꿈·글자 코드·명령) 통과`],
+  ["켜기", `판교 ${INST.server_pangyo.sec} s · 창원 ${INST.server_changwon.sec} s (서버 준비까지)`],
+  accRow("pangyo", "화면 시험 (판교)"),
+  accRow("changwon", "화면 시험 (창원)"),
+  ["명령줄", `경로 계획 ${INST.plan.sec} s · DJI 경로 파일 ${INST.plan_wpml.sec} s · 잘못된 입력은 안내 문구와 종료 코드 ${INST.bad_input.rc}`],
 ], [2, 10], { size: 19 }));
-c.push(P("", { after: 80 }));
-c.push(table(["시험하면서 발견한 점", "고친 것"], [
-  ["자료 폴더를 매번 환경변수로 지정해야 했음", "`dpo_data` 폴더 옆에서 실행하면 저절로 찾음"],
-  ["자료가 없을 때 현재 폴더에 빈 폴더가 생김", "만들지 않음. 오류 문구에 할 일을 넣음"],
-  ["자료 없음·포트 사용 중일 때 긴 오류 추적이 나옴", "한두 줄 안내로 바꿈"],
-  ["화면의 요청마다 터미널에 한 줄씩 찍힘", "오류만 출력 (`DPO_VERBOSE=1` 이면 전부)"],
-  ["새로 설치하면 건물이 상자 모양으로 그려짐", "건물 모양 라이브러리(shapely)를 기본 설치에 넣음"],
-  ["브라우저를 직접 열고 주소를 쳐야 했음", "`--open` 으로 3D 화면을 바로 엶"],
-  ["임무 불가인데 도착 SOC가 크게 표시됨 (앞 구간까지의 값)", "'–'로 표시, 바꿔 볼 것을 안내, 비교 단추를 숨김"],
-  ["DJI 경로 파일의 복귀 고도가 209 m로 나옴 (주변 산 때문)", "150 m로 제한하고 경고"],
+c.push(P("화면 시험 항목: T2-0 화면 열림, T2 경로 생성(M4T 0.2 kg 왕복 15시), T3 기존 경로와 비교, T2-1 미션 파일, T5-0/T5 Pilot 2 파일로 DJI 경로 파일, T2-2 탑재 한도 입력 거부, T6 X650 미션, L·L2 실시간 운용 화면과 모의 비행 (시험안내서와 같은 번호).", { size: 18, color: GRAY }));
+c.push(table(["시험하면서 발견한 점 (v1.3.1)", "고친 것"], [
+  ["창원 지역의 실시간 운용 화면에서 스크립트 오류 (원형 비행 금지 구역이 없는 지역)", "없는 경우를 처리, 두 지역에서 모의 비행 완료까지 시험"],
+  ["Windows 실행 파일을 UTF-8 로 저장 – 한국어 Windows 에서 줄이 합쳐져 명령이 빠질 위험", "명령은 영문, 안내 글은 한국어 Windows 기본 글자 코드로 저장, 단계 번호와 [오류] 안내 추가"],
+  ["Windows 에서 Python 판(3.10 미만) 확인 없음, 자료 풀기에 PowerShell 사용", "Python 3.10 이상인지 먼저 확인, 자료는 Python 으로 풂"],
+  ["일부 자료 파일을 글자 코드 지정 없이 읽음 (한국어 Windows 기본값 cp949 에서 오류 가능)", "모두 UTF-8 로 읽고 씀"],
+  ["매뉴얼이 명령어로 설치하는 방법만 설명", "배포판의 설치·실행 파일 순서로 다시 씀"],
 ], [6, 6], { size: 19 }));
 c.push(P("", { after: 80 }));
-c.push(P("**시험하지 못한 것:** Windows·macOS, 인터넷이 없는 PC에서의 설치 (기본 라이브러리를 미리 받아 두는 방법이 필요합니다), 여러 사용자가 동시에 쓰는 경우.", { size: 20 }));
+c.push(P("**시험하지 못한 것:** 실제 Windows·macOS PC, 인터넷이 없는 PC에서의 설치 (기본 라이브러리를 미리 받아 두는 방법이 필요합니다), 진짜 M4T 의 DJI Pilot 2 파일 (시험에는 번호만 바꾼 흉내 파일을 씀), 여러 사용자가 동시에 쓰는 경우.", { size: 20 }));
 
 const doc = new Document({
-  creator: "drone-path-opt", title: "드론 SoC 최대화 경로계획 – 사용자 매뉴얼 v1.3.0",
+  creator: "drone-path-opt", title: `드론 SoC 최대화 경로계획 – 사용자 매뉴얼 v${VER}`,
   styles: { default: { document: { run: { font: FONT, size: 21 } },
     heading1: { run: { font: FONT, size: 30, bold: true, color: NAVY }, paragraph: { spacing: { before: 0, after: 160 }, keepNext: true } },
     heading2: { run: { font: FONT, size: 24, bold: true, color: TEAL }, paragraph: { spacing: { before: 120, after: 100 }, keepNext: true } } } },
@@ -255,7 +272,7 @@ const doc = new Document({
   sections: [{
     properties: { page: { size: { width: 11906, height: 16838, orientation: PageOrientation.LANDSCAPE }, margin: { top: 900, bottom: 800, left: 800, right: 800 } } },
     headers: { default: new Header({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { after: 0 },
-      children: [new TextRun({ text: "드론 SoC 최대화 경로계획 · 사용자 매뉴얼 v1.3.0", font: FONT, size: 16, color: GRAY })] })] }) },
+      children: [new TextRun({ text: `드론 SoC 최대화 경로계획 · 사용자 매뉴얼 v${VER}`, font: FONT, size: 16, color: GRAY })] })] }) },
     footers: { default: new Footer({ children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 0 },
       children: [new TextRun({ children: [PageNumber.CURRENT], font: FONT, size: 18, color: GRAY })] })] }) },
     children: c,

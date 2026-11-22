@@ -121,7 +121,7 @@ def fetch_buildings():
     """bbox 안 건물 footprint/높이를 parquet 원격 range read로 추출."""
     out = C.RAW / C.SITE["buildings"]
     if out.exists():
-        return json.loads(out.read_text())
+        return json.loads(out.read_text(encoding="utf-8"))
     import fsspec
     import pyarrow.parquet as pq
     import pyarrow.compute as pc
@@ -148,7 +148,7 @@ def fetch_buildings():
                                 tb.column("class").to_pylist(), tb.column("geometry").to_pylist()):
             geom = wkb.loads(g)
             feats.append(dict(h=h, nf=nf, cls=cl, wkt=geom.wkt))
-    out.write_text(json.dumps(feats))
+    out.write_text(json.dumps(feats), encoding="utf-8")
     return feats
 
 

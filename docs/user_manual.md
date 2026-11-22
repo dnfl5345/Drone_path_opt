@@ -1,5 +1,5 @@
 ---
-title: "드론 SoC 최대화 경로계획 – 사용자 매뉴얼 (v1.3.0)"
+title: "드론 SoC 최대화 경로계획 – 사용자 매뉴얼 (v1.3.1)"
 subtitle: "프로그램을 켜서 경로를 생성하기까지"
 date: "2026년 11월 19일"
 ---
@@ -26,8 +26,8 @@ date: "2026년 11월 19일"
 
 | 파일 | 내용 |
 |---|---|
-| `drone_path_opt-1.3.0-py3-none-any.whl` | 프로그램 (약 0.4 MB) |
-| `dpo_data_1.3.0.zip` | 자료 묶음: 지형·건물 격자, 예보 바람, 건물 모양, 오차 모형 (약 20 MB). 건물 모양 파일이 빠진 묶음이면 3D 화면의 건물이 상자 모양으로 그려집니다. |
+| `drone_path_opt-1.3.1-py3-none-any.whl` | 프로그램 (약 0.4 MB) |
+| `dpo_data_1.3.1.zip` | 자료 묶음: 지형·건물 격자, 예보 바람, 건물 모양, 오차 모형 (약 20 MB). 건물 모양 파일이 빠진 묶음이면 3D 화면의 건물이 상자 모양으로 그려집니다. |
 
 필요한 것: **Python 3.10 이상**, 설치할 때 인터넷 연결(numpy 등 기본 라이브러리를 받습니다), WebGL이 되는 브라우저(Chrome, Edge 등).
 
@@ -44,11 +44,11 @@ source dpo-env/bin/activate
 ```
 
 ```bash
-pip install "drone_path_opt-1.3.0-py3-none-any.whl[mavlink]"
+pip install "drone_path_opt-1.3.1-py3-none-any.whl[mavlink]"
 ```
 
 ```bash
-unzip dpo_data_1.3.0.zip
+unzip dpo_data_1.3.1.zip
 ```
 
 ![설치 – 실제 실행 기록](manual_img/t1_install.png){width=100%}

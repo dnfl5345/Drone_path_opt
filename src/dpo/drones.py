@@ -30,7 +30,7 @@ ARDUCOPTER_DEFAULTS = dict(WP_SPD=10.0, WP_SPD_UP=2.5, WP_SPD_DN=1.5, WP_RADIUS_
 
 def m100() -> Drone:
     p = C.RES / "drone_params.json"
-    dd = json.loads(p.read_text()) if p.exists() else {}
+    dd = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
     return Drone(**{k: v for k, v in dd.items() if k in Drone.__dataclass_fields__})
 
 

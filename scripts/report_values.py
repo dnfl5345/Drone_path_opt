@@ -144,3 +144,26 @@ def wind_trend(sets=None):
         return None
     lo, hi = min(days), max(days)
     return dict(w_lo=lo[0], p_lo=lo[1], w_hi=hi[0], p_hi=hi[1])
+
+
+def kpi():
+    """E17 (scripts/exp_kpi_reserve.py): 7/28 계획서 표2 평가항목 '외란을 고려한 배터리 안전여유 확보율'."""
+    S = j("E17_stats.json")
+    pc = lambda x: f"{100 * x:.1f}"
+    R, C = S["realistic"], S["cases"]
+    out = dict(
+        n=S["n_planned"], sites=len(S["sites"]), days=len(S["days"]),
+        rate=pc(R["conf"]["rate"]), k=R["conf"]["success"], N=R["conf"]["approved"],
+        lo=pc(R["conf"]["ci"][0]), hi=pc(R["conf"]["ci"][1]),
+        nom_rate=pc(R["nom"]["rate"]), nom_k=R["nom"]["success"], nom_N=R["nom"]["approved"],
+        margin=f"{S['plan']['margin']:.2f}", margin_rng=f"{S['plan']['margin_rng'][0]:.2f}–{S['plan']['margin_rng'][1]:.2f}",
+        used=f"{S['plan']['nominal']:.1f}", used_rng=f"{S['plan']['nominal_rng'][0]:.1f}–{S['plan']['nominal_rng'][1]:.1f}",
+        s0=f"{S['plan']['s0_conf'][0]:.1f}–{S['plan']['s0_conf'][1]:.1f}",
+        dist=f"{S['plan']['dist'][0] / 1000:.1f}–{S['plan']['dist'][1] / 1000:.1f}",
+        cases={c: dict(conf=f"{C[c]['conf']['success']}/{C[c]['conf']['approved']} ({pc(C[c]['conf']['rate'])} %)",
+                       nom=f"{C[c]['nom']['success']}/{C[c]['nom']['approved']} ({pc(C[c]['nom']['rate'])} %)",
+                       below=C[c]["conf"]["below"], hold=C[c]["conf"]["hold"], emerg=C[c]["conf"]["emerg"], col=C[c]["conf"]["col"],
+                       end_min=f"{C[c]['conf']['end_min']:.1f}") for c in C},
+        col_total=sum(C[c][p]["col"] for c in C for p in ("conf", "nom")),
+    )
+    return out
