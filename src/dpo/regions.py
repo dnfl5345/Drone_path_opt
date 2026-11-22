@@ -48,30 +48,32 @@ def parse_latlon(q: str):
     return lat, lon
 
 
+def _get_json(url, params):
+    """표준 라이브러리만으로 GET → JSON (장소 검색은 '새 지역' 추가 라이브러리 없이도 되게)."""
+    import urllib.parse
+    import urllib.request
+    req = urllib.request.Request(url + "?" + urllib.parse.urlencode(params), headers={"User-Agent": _ua()})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
 def _nominatim(q, limit):
-    import requests
     url = os.environ.get("DPO_GEOCODER_URL", "https://nominatim.openstreetmap.org/search")
-    r = requests.get(url, params=dict(q=q, format="jsonv2", limit=limit, **{"accept-language": "ko"}),
-                     headers={"User-Agent": _ua()}, timeout=15)
-    r.raise_for_status()
     out = []
-    for it in r.json():
+    for it in _get_json(url, dict(q=q, format="jsonv2", limit=limit, **{"accept-language": "ko"})):
         out.append(dict(name=it.get("display_name") or it.get("name") or q, lat=float(it["lat"]), lon=float(it["lon"]),
                         kind=it.get("type") or it.get("category") or "", source="OpenStreetMap"))
     return out
 
 
 def _vworld(q, limit, key):
-    import requests
     out = []
     for typ, cat in (("PLACE", None), ("ADDRESS", "ROAD"), ("ADDRESS", "PARCEL")):
         p = dict(service="search", request="search", version="2.0", crs="EPSG:4326", size=limit, page=1, query=q, type=typ,
                  format="json", errorformat="json", key=key)
         if cat:
             p["category"] = cat
-        r = requests.get("https://api.vworld.kr/req/search", params=p, headers={"User-Agent": _ua()}, timeout=15)
-        r.raise_for_status()
-        res = r.json().get("response", {})
+        res = _get_json("https://api.vworld.kr/req/search", p).get("response", {})
         if res.get("status") != "OK":
             continue
         for it in res.get("result", {}).get("items", []):
