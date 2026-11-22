@@ -56,7 +56,7 @@ const OUT = process.argv[3] || "docs/manual_img";
   await shot("01_start", [{ sel: "#view", n: "①", text: "3D 지도 (끌어서 회전·이동, 휠로 확대)", pad: -6, side: "bottom" },
     { sel: "#layers", n: "②", text: "표시 선택" }, { sel: "aside .card", n: "③", text: "임무 설정", side: "inside" }], `첫 화면 (${tLoad.toFixed(1)} s)`);
   // 2. 기체·탑재
-  await pg.selectOption("#drone", "x650"); await pg.fill("#payload", "1");
+  await pg.selectOption("#drone", "m4t"); await pg.fill("#payload", "0.2");
   await shot("02_drone", [{ sel: "#drone", n: "①", text: "기체" }, { sel: "#payload", n: "②", text: "탑재중량" }]);
   // 3. 임무 형태
   await pg.selectOption("#mtype", "ab"); await pg.selectOption("#kind", "delivery");
@@ -92,6 +92,9 @@ const OUT = process.argv[3] || "docs/manual_img";
   const dl = [];
   pg.on("download", async d => { const p = `${OUT}/../../dist/manual_dl_${d.suggestedFilename()}`; dl.push(d.suggestedFilename()); await d.saveAs(p).catch(() => {}); });
   await pg.click("#dl_wpl"); await pg.waitForTimeout(800);
+  await pg.selectOption("#dji_model", "template"); await pg.dispatchEvent("#dji_model", "change"); await pg.waitForTimeout(300);
+  await shot("10b_export_m4t", [{ sel: "#dji_model", n: "①", text: "Matrice 4T 등 – Pilot 2 파일로 지정" }, { sel: "#dji_tpl", n: "②", text: "Pilot 2 에서 내보낸 .kmz" }]);
+  await pg.selectOption("#dji_model", "m30"); await pg.dispatchEvent("#dji_model", "change");
   await pg.click("#dl_kmz"); await pg.waitForSelector("#k_tab", { state: "visible", timeout: 60000 }); await pg.waitForTimeout(1200);
   await shot("10_export", [{ sel: "#dl_wpl", n: "①", text: "ArduPilot", side: "left" }, { sel: "#dl_kmz", n: "②", text: "DJI", side: "left" }, { sel: "#dji_model", n: "③", text: "DJI 기종" }]);
   fs.writeFileSync(`${OUT}/capture_log.json`, JSON.stringify({ load_s: tLoad, plan_s: tPlan, downloads: dl, errors: errs, steps: log,

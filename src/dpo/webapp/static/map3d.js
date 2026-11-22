@@ -794,7 +794,15 @@ async function dl(kind) {
 async function dlKmz() {
   try {
     const model = $("dji_model").value;
-    const w = await api("/api/wpml", { model });
+    const req = { model };
+    if (model === "template") {
+      const f = $("dji_tpl").files[0];
+      if (!f) throw new Error("Pilot 2 경로 파일(.kmz)을 먼저 고르세요 (DJI Pilot 2 에서 그 기체로 내보낸 파일)");
+      const b = new Uint8Array(await f.arrayBuffer());
+      let s = ""; for (let q = 0; q < b.length; q += 0x8000) s += String.fromCharCode.apply(null, b.subarray(q, q + 0x8000));
+      req.template_b64 = btoa(s);
+    }
+    const w = await api("/api/wpml", req);
     $("k_tab").style.display = "table";
     $("k_rows").innerHTML = w.legs.map(L => { const s = L.summary;
       return `<tr><td>${legKo(L.name)}</td><td>${s.n_waypoints}</td><td>${s.height_min.toFixed(0)}–${s.height_max.toFixed(0)} m</td>` +
@@ -919,6 +927,7 @@ async function init() {
   $("sub").textContent = `${S.site.date} · ${S.site.site.label} ${(S.site.W / 1000).toFixed(1)}×${(S.site.H / 1000).toFixed(1)} km · 건물 ${S.sc.buildings.length.toLocaleString()}동`;
 
   $("drone").onchange = () => { refreshDrone(); markDirty(); };
+  $("dji_model").onchange = () => { const t = $("dji_model").value === "template"; $("tpl_row").style.display = t ? "" : "none"; $("tpl_hint").style.display = t ? "" : "none"; };
   $("hour").onchange = () => { refreshWindInfo(); markDirty(); if ($("l_wind").checked) loadWind(); };
   $("mtype").onchange = () => { refreshMissionType(); markDirty(); frame(); };
   $("eps").onchange = () => { placeObstacles(); markDirty(); };

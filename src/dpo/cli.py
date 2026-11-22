@@ -1,10 +1,10 @@
 """dpo-plan – 명령줄에서 경로를 계획하고 ArduPilot 미션 파일을 만든다.
 
 예)
-  dpo-plan --drone x650 --payload 1.0 --dep-hour 15 --out missions/
+  dpo-plan --drone m4t --payload 0.2 --dep-hour 15 --out missions/        (실증 기체 DJI Matrice 4T, 기본값)
   dpo-plan --site changwon --drone x650 --tour "2600,2300;1900,2700;1200,2100" --dwell 10 --out missions/
   dpo-plan --hub 127.1055,37.4020 --dst 127.1271,37.3886 --lonlat --one-way --obstacles obstacles.json --out missions/
-  dpo-plan --drone x650 --confidence 0.95 --forecast-age 30      # 30시간 전 예보로 계획할 때의 출발 판정
+  dpo-plan --drone m4t --confidence 0.95 --forecast-age 30      # 30시간 전 예보로 계획할 때의 출발 판정
   dpo-plan --check
 
 좌표는 지역 좌표 (x 동쪽, y 북쪽 [m], 지도 남서쪽 모서리 기준) 또는 --lonlat 을 주면 경도,위도다.
@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import zipfile
 import sys
 from pathlib import Path
 
@@ -27,7 +28,7 @@ def build_parser():
     ap = argparse.ArgumentParser(prog="dpo-plan", description="SoC 최대화 경로 계획 → ArduPilot 미션 파일(.waypoints)·경로표(.csv)")
     ap.add_argument("--version", action="version", version=f"drone-path-opt {__version__}")
     ap.add_argument("--site", default=C.SITE_KEY, choices=list(C.SITES), help="대상 지역 (기본: 환경변수 DPO_SITE)")
-    ap.add_argument("--drone", default="x650", choices=["m100", "x650", "m4t"])
+    ap.add_argument("--drone", default="m4t", choices=["m4t", "x650", "m100"])
     ap.add_argument("--payload", type=float, default=None, help="탑재중량 [kg] (기본: m4t 0.2, m100 0.5, x650 1.0)")
     ap.add_argument("--kind", default="delivery", choices=["delivery", "pickup"], help="배송(갈 때 적재) / 회수(올 때 적재)")
     ap.add_argument("--dep-hour", type=int, default=15, help="출발 시각 [시, KST] (9–20)")
@@ -50,6 +51,9 @@ def build_parser():
                     help="계획에 쓰는 대지속도 상한 [m/s] (기체 기본값보다 낮출 때). --wpml 을 주면 기본으로 --wpml-vmax 와 같게 둔다")
     ap.add_argument("--wpml", default=None, metavar="MODEL",
                     help="DJI 경로 파일(.kmz)도 함께 쓴다. MODEL: m30 | m30t | m300 | m350 | m3e | m3t | m3m | m3d | m3td (--out 필요)")
+    ap.add_argument("--wpml-template", default=None, metavar="FILE.kmz",
+                    help="DJI Pilot 2 에서 그 기체로 내보낸 경로 파일. 기종·카메라 번호를 이 파일에서 가져온다 (Matrice 4T 는 이 방식). "
+                         "주면 --wpml 을 따로 주지 않아도 된다")
     ap.add_argument("--wpml-vmax", type=float, default=15.0, metavar="V", help="DJI 기종의 최대 경로 속도 [m/s]. 넘는 구간 속도는 깎는다")
     ap.add_argument("--wpml-finish", default="autoLand", choices=["autoLand", "goHome", "noAction", "gotoFirstWaypoint"],
                     help="DJI 경로를 마친 뒤의 동작")
@@ -63,6 +67,8 @@ def build_parser():
 
 def main(argv=None):
     a = build_parser().parse_args(argv)
+    if a.wpml_template and not a.wpml:
+        a.wpml = "template"
     if a.wpml and not a.out:
         print("--wpml 은 --out 과 함께 써야 합니다", file=sys.stderr)
         return 2
@@ -133,8 +139,11 @@ def main(argv=None):
         if a.wpml:
             import base64
             try:
-                w = app.wpml(dict(model=a.wpml, v_max=a.wpml_vmax, finish=a.wpml_finish, rc_lost=a.wpml_rc_lost))
-            except ValueError as ex:
+                req_w = dict(model=a.wpml, v_max=a.wpml_vmax, finish=a.wpml_finish, rc_lost=a.wpml_rc_lost)
+                if a.wpml_template:
+                    req_w["template_b64"] = base64.b64encode(Path(a.wpml_template).read_bytes()).decode("ascii")
+                w = app.wpml(req_w)
+            except (ValueError, OSError, zipfile.BadZipFile) as ex:
                 print(f"입력 오류: {ex}", file=sys.stderr)
                 return 2
             out["wpml"] = dict(notes=w["notes"], legs=[dict(name=L["name"], **L["summary"]) for L in w["legs"]])
@@ -174,6 +183,9 @@ def main(argv=None):
                 for w in L["warnings"]:
                     print(f"           ! {w}")
             print(f"    ! {out['wpml']['notes'][0]}")
+        elif a.drone == "m4t" and a.out:
+            print("  참고: Matrice 4T 는 ArduPilot 미션(.waypoints)이 아니라 DJI 경로 파일로 올립니다. "
+                  "DJI Pilot 2 에서 그 기체로 내보낸 경로 파일을 --wpml-template FILE.kmz 로 주십시오.")
     if not r["feasible"]:
         return 1
     return 4 if (conf is not None and conf["decision"] != "go") else 0

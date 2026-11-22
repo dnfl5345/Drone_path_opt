@@ -394,7 +394,7 @@ def build(out: Path) -> None:
         [
             ["지상 PC", "Python 3.10 이상이 설치된 PC (시험: Linux, Python 3.13) [확인요망: Windows 미시험]"],
             ["브라우저", "Chrome · Edge 최신판 (3D 화면에 WebGL 필요)"],
-            ["설치 파일", "프로그램 drone_path_opt-1.2.0-py3-none-any.whl (약 0.4 MB), 자료 묶음 dpo_data_1.2.0.zip (약 20 MB)"],
+            ["설치 파일", "프로그램 drone_path_opt-1.3.0-py3-none-any.whl (약 0.4 MB), 자료 묶음 dpo_data_1.3.0.zip (약 20 MB)"],
             ["기체 쪽 소프트웨어", "M4T: DJI Pilot 2 / X650: Mission Planner 또는 QGroundControl"],
         ],
         widths=[1.4, 5],
@@ -405,7 +405,7 @@ def build(out: Path) -> None:
     w.h3("(1) 설치 (처음 한 번, 약 20초)")
     w.b("두 설치 파일을 한 폴더에 두고 그 폴더에서 다음을 실행함")
     code_box(w, ["python3 -m venv dpo-env", "source dpo-env/bin/activate",
-                 'pip install "drone_path_opt-1.2.0-py3-none-any.whl[mavlink]"', "unzip dpo_data_1.2.0.zip"])
+                 'pip install "drone_path_opt-1.3.0-py3-none-any.whl[mavlink]"', "unzip dpo_data_1.3.0.zip"])
     w.note("※ Windows: py -m venv dpo-env, dpo-env\\Scripts\\activate 로 바꾸고 zip은 탐색기에서 압축 풀기")
     w.h3("(2) 설치 점검 (8초)")
     code_box(w, ["dpo-plan --check"])

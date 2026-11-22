@@ -134,3 +134,42 @@ def test_export_matches_plan_and_cli(tmp_path):
     f = list(tmp_path.glob("*_m350.kmz"))
     assert len(f) == 1 and WP.check(f[0].read_bytes()) == []
     assert WP.read_kmz(f[0].read_bytes())["waylines_mission"]["finishAction"] == "goHome"
+
+
+def test_drone_info_from_pilot2_template(tmp_path):
+    """번호를 문서로 확인하지 못한 기종(예: M4T): DJI Pilot 2 가 내보낸 파일의 기종·카메라 번호와 선회 방식을 그대로 쓴다."""
+    import io
+    import zipfile
+    wps = [dict(lat=37.40, lon=127.10, height=30.0, speed=10.0, hover=0.0),
+           dict(lat=37.401, lon=127.101, height=40.0, speed=12.0, hover=0.0),
+           dict(lat=37.402, lon=127.103, height=40.0, speed=12.0, hover=0.0)]
+    # 'Pilot 2 가 내보낸 파일' 흉내: m30 으로 만든 뒤 번호를 99-1 / 89 로, 선회 방식을 coordinateTurn 으로 바꾼다
+    src = WP.build(wps, model="m30")["kmz"]
+    buf = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(src)) as zi, zipfile.ZipFile(buf, "w") as zo:
+        for n in zi.namelist():
+            t = zi.read(n).decode("utf-8")
+            t = (t.replace("<wpml:droneEnumValue>67<", "<wpml:droneEnumValue>99<").replace("<wpml:droneSubEnumValue>0<", "<wpml:droneSubEnumValue>1<")
+                  .replace("<wpml:payloadEnumValue>52<", "<wpml:payloadEnumValue>89<")
+                  .replace("toPointAndPassWithContinuityCurvature", "coordinateTurn").replace("<wpml:globalUseStraightLine>1</wpml:globalUseStraightLine>", ""))
+            zo.writestr(n, t)
+    info = WP.drone_info_from_kmz(buf.getvalue())
+    assert (info["drone_enum"], info["drone_sub"], info["payload_enum"]) == (99, 1, 89)
+    assert info["turn_mode"] == "coordinateTurn" and info["straight"] is False
+    out = WP.build(wps, drone_info=info)
+    r = WP.read_kmz(out["kmz"])
+    assert r["waylines_drone"] == (99, "1") and r["template_drone"] == (99, "1")
+    assert out["summary"]["model"] == "template" and out["summary"]["payload_enum"] == 89
+    assert {p["turn"] for p in r["waylines"][1:-1]} == {"coordinateTurn"}
+    assert WP.check(out["kmz"]) != [] and WP.check(out["kmz"], extra_drone_enums=(99,)) == []
+    with pytest.raises(ValueError):
+        WP.drone_info_from_kmz(_empty_zip())
+
+
+def _empty_zip():
+    import io
+    import zipfile
+    b = io.BytesIO()
+    with zipfile.ZipFile(b, "w") as z:
+        z.writestr("readme.txt", "x")
+    return b.getvalue()

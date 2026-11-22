@@ -1,17 +1,17 @@
 {
- "load_s": 3.583,
- "plan_s": 13.23,
+ "load_s": 4.462,
+ "plan_s": 18.583,
  "downloads": [
-  "pangyo_x650_15h_out.waypoints",
-  "pangyo_x650_15h_back.waypoints",
-  "pangyo_x650_15h_out_m30.kmz",
-  "pangyo_x650_15h_back_m30.kmz"
+  "pangyo_m4t_15h_out.waypoints",
+  "pangyo_m4t_15h_back.waypoints",
+  "pangyo_m4t_15h_out_m30.kmz",
+  "pangyo_m4t_15h_back_m30.kmz"
  ],
  "errors": [],
  "steps": [
   {
    "name": "01_start",
-   "note": "첫 화면 (3.6 s)"
+   "note": "첫 화면 (4.5 s)"
   },
   {
    "name": "02_drone",
@@ -39,7 +39,7 @@
   },
   {
    "name": "07_result",
-   "note": "경로 생성 13.2 s"
+   "note": "경로 생성 18.6 s"
   },
   {
    "name": "08_play",
@@ -50,10 +50,14 @@
    "note": ""
   },
   {
+   "name": "10b_export_m4t",
+   "note": ""
+  },
+  {
    "name": "10_export",
    "note": ""
   }
  ],
- "soc": "51.8 %",
+ "soc": "61.5 %",
  "feas": "임무 가능 (예비 20 % 이상)"
 }

@@ -613,7 +613,8 @@ class App:
     def wpml(self, req=None):
         """마지막으로 계획한 경로를 DJI 경로 파일(WPML, .kmz)로 내보낸다. 이륙~착륙 한 번이 파일 하나다.
 
-        req: model (m30 | m30t | m300 | m350 | m3e | m3t | m3m | m3d | m3td), finish, rc_lost, v_max, turn, rth_height
+        req: model (m30 | m30t | m300 | m350 | m3e | m3t | m3m | m3d | m3td), finish, rc_lost, v_max, turn, rth_height,
+             template_b64 (DJI Pilot 2 에서 그 기체로 내보낸 .kmz 의 base64 – 기종·카메라 번호와 선회 방식을 그대로 쓴다. M4T 는 이 방식)
         고도는 이륙점 기준 상대 고도. 복귀 고도를 주지 않으면 경로를 둘러싼 직사각형(+100 m) 안의 가장 높은 지형·건물 + 20 m 로 한다.
         DJI 기체나 DJI 소프트웨어에서 열어 본 적은 없다 (dpo.wpml 의 설명 참고)."""
         import base64
@@ -630,6 +631,11 @@ class App:
             if not ms:
                 raise ValueError("내보낼 수 있는 경로가 없습니다")
             opt = {k: req[k] for k in ("model", "finish", "rc_lost", "turn", "dock") if req.get(k) is not None}
+            extra = ()
+            if req.get("template_b64"):                    # DJI Pilot 2 에서 내보낸 경로 파일로 기종 번호를 정한다 (예: M4T)
+                info = WP.drone_info_from_kmz(base64.b64decode(req["template_b64"]))
+                opt["drone_info"], extra = info, (info["drone_enum"],)
+                opt.pop("model", None)
             if req.get("v_max") is not None:
                 opt["v_max"] = float(req["v_max"])
             legs = []
@@ -647,13 +653,18 @@ class App:
                     w["summary"]["warnings"].append(
                         f"복귀 고도를 {RTH_LIMIT:.0f} m 로 제한했습니다 (일반 비행 고도 제한). 경로 주변에 이륙점보다 {rth_need - 20:.0f} m 높은 "
                         "지형·건물이 있어, 복귀 직선이 그 위를 지나면 부딪힐 수 있습니다. 복귀 경로를 지도에서 확인하십시오.")
-                sm = dict(w["summary"], soc_end=m["summary"]["soc_end"], duration_s=m["summary"]["duration_s"], check=WP.check(w["kmz"], w["summary"]["v_max"]))
+                sm = dict(w["summary"], soc_end=m["summary"]["soc_end"], duration_s=m["summary"]["duration_s"], check=WP.check(w["kmz"], w["summary"]["v_max"], extra_drone_enums=extra))
                 if sm["n_clamped"]:
                     sm["soc_end"] = None                       # 속도를 깎으면 계획의 SOC 예상이 맞지 않는다
                 legs.append(dict(name=m["name"], legs=m["legs"], kmz_b64=base64.b64encode(w["kmz"]).decode("ascii"),
                                  template=w["template"], waylines=w["waylines"], summary=sm))
-            note = [f"계획에 쓴 전력 모델은 {DR.LABEL[cx['dkey']]} 입니다. 내보내는 기종({legs[0]['summary']['model_label']})의 전력 모델이 아니므로 "
-                    "SOC 예상과 최적 속도는 그 기종에 맞지 않습니다.",
+            if opt.get("drone_info") is not None:
+                first = (f"기종·카메라 번호와 선회 방식을 DJI Pilot 2 경로 파일에서 가져왔습니다 ({legs[0]['summary']['model_label']}). "
+                         f"그 파일이 계획에 쓴 기체({DR.LABEL[cx['dkey']]})로 만든 것인지 확인하세요.")
+            else:
+                first = (f"계획에 쓴 전력 모델은 {DR.LABEL[cx['dkey']]} 입니다. 내보내는 기종({legs[0]['summary']['model_label']})의 전력 모델이 아니므로 "
+                         "SOC 예상과 최적 속도는 그 기종에 맞지 않습니다.")
+            note = [first,
                     "DJI 기체·DJI Pilot 2 에서 이 파일을 열어 확인하지 못했습니다. 불러온 뒤 경로점 고도·속도·복귀 고도·신호 두절 동작을 반드시 확인하세요.",
                     "비행 중 속도 갱신은 이 파일로 할 수 없습니다. 계획한 구간 속도만 들어 있습니다."]
             return dict(drone=DR.LABEL[cx["dkey"]], drone_key=cx["dkey"], dep_hour=cx["dep_hour"], legs=legs, notes=note)

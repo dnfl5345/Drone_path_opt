@@ -9,6 +9,8 @@ const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, ImageR
 const ROOT = path.resolve(__dirname, "..");
 const IMG = path.join(ROOT, "docs", "manual_img");
 const LOGC = JSON.parse(fs.readFileSync(path.join(IMG, "capture_log.json"), "utf8"));
+const INST = JSON.parse(fs.readFileSync(path.join(IMG, "install_log.json"), "utf8")).steps;   // scripts/release_test.py 의 실제 설치 기록
+const sec = k => INST[k].sec.toFixed(0);
 const FONT = "맑은 고딕", MONO = "Consolas";
 const NAVY = "004E8F", TEAL = "1B6E8C", INK = "16202A", GRAY = "5B6770", LIGHT = "E3EEF3", PALE = "F4F7F9", RED = "C0201B";
 const W = 15238;                                   // 본문 폭 [DXA] (A4 가로, 좌우 여백 0.8 in)
@@ -85,10 +87,10 @@ const c = [];
 // 표지
 c.push(new Paragraph({ spacing: { before: 1400, after: 200 }, children: [new TextRun({ text: "드론 SoC 최대화 경로계획", font: FONT, size: 56, bold: true, color: NAVY })] }));
 c.push(new Paragraph({ spacing: { after: 400 }, border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: TEAL, space: 12 } },
-  children: [new TextRun({ text: "사용자 매뉴얼 – 프로그램을 켜서 경로를 생성하기까지 (v1.2.0)", font: FONT, size: 32, color: TEAL })] }));
+  children: [new TextRun({ text: "사용자 매뉴얼 – 프로그램을 켜서 경로를 생성하기까지 (v1.3.0)", font: FONT, size: 32, color: TEAL })] }));
 c.push(P("2026년 11월 19일", { size: 22, color: GRAY, after: 500 }));
 c.push(table(["단계", "할 일", "걸린 시간 (실측)", "쪽"], [
-  ["1. 설치 (처음 한 번)", "가상환경 만들기 → 프로그램 설치 → 자료 묶음 풀기 → 점검", "약 20초 + 점검 8초", "2"],
+  ["1. 설치 (처음 한 번)", "가상환경 만들기 → 프로그램 설치 → 자료 묶음 풀기 → 점검", `약 ${Math.round(INST.venv.sec + INST.pip.sec + INST.unzip.sec)}초 + 점검 ${sec("check")}초`, "2"],
   ["2. 켜기", "`dpo-server --open` → 브라우저에 3D 지도", `서버 4초, 화면 ${LOGC.load_s.toFixed(0)}초`, "3"],
   ["3. 임무 설정", "기체·탑재중량 → 임무 형태 → 출발지·도착지 → 출발 시각", "사용자 입력", "4–7"],
   ["4. 경로 생성", "'경로 생성' 누르기", `${LOGC.plan_s.toFixed(0)}초`, "8"],
@@ -100,8 +102,8 @@ c.push(P("**터미널 명령 4개, 화면 조작 6번**이면 첫 경로가 나�
 // 1. 설치
 c.push(H1("1. 설치 (처음 한 번)"));
 c.push(table(["받는 파일", "내용"], [
-  ["`drone_path_opt-1.2.0-py3-none-any.whl`", "프로그램 (약 0.4 MB)"],
-  ["`dpo_data_1.2.0.zip`", "자료 묶음: 지형·건물 격자, 예보 바람, 건물 모양, 오차 모형 (약 20 MB)"],
+  ["`drone_path_opt-1.3.0-py3-none-any.whl`", "프로그램 (약 0.4 MB)"],
+  ["`dpo_data_1.3.0.zip`", "자료 묶음: 지형·건물 격자, 예보 바람, 건물 모양, 오차 모형 (약 20 MB)"],
 ], [5, 9], { width: 10000 }));
 c.push(P("", { after: 60 }));
 c.push(P("필요한 것: **Python 3.10 이상**, 설치할 때 인터넷 연결 (numpy 등 기본 라이브러리를 받습니다), WebGL이 되는 브라우저 (Chrome, Edge 등). 두 파일을 한 폴더에 두고 그 폴더의 터미널에서 실행합니다.", { size: 20 }));
@@ -126,7 +128,7 @@ c.push(H1("3. 임무 설정"));
 c.push(...step("3.1 기체와 탑재중량", "02_drone", [
   { n: "①", t: "**기체**를 고릅니다. 아래에 배터리 용량·자체 무게·속도 한계가 나옵니다." },
   { n: "②", t: "**탑재중량** [kg]. 오른쪽 괄호의 최대값 안에서 넣습니다." },
-  { tip: "Holybro X650의 전력 모델은 제원으로 만든 추정입니다. 비행 기록으로 보정하기 전 SOC 수치는 참고용입니다." },
+  { tip: "기본 기체는 실증 기체 DJI Matrice 4T(탑재 최대 0.2 kg)입니다. 전력 모델은 DJI 공식 사양(무탑재 호버 42분, 9 m/s 정속 49분)에 맞춘 값이며, 탑재·고속 비행은 실측 비행 기록으로 확인 전입니다. 시험비행 기체 Holybro X650, 비교용 DJI M100도 고를 수 있습니다." },
 ]));
 c.push(...step("3.2 임무 형태", "03_mission", [
   { n: "①", t: "**임무 형태** – 배송·회수 (출발지 ↔ 도착지) 또는 순회 (경유점을 돌고 출발지로)" },
@@ -150,7 +152,7 @@ c.push(...step("3.4 출발 시각과 예비 SOC", "05_time", [
 c.push(H1("4. 경로 생성"));
 c.push(...step("4.1 '경로 생성' 누르기", "06_plan", [
   { n: "①", t: "**경로 생성**을 누릅니다." },
-  `버튼 옆에 '계산 중…'이 나옵니다. 이 예(판교, X650, 탑재 1 kg, 15시, 왕복 약 5.7 km)에서는 **${LOGC.plan_s.toFixed(0)}초** 걸렸습니다.`,
+  `버튼 옆에 '계산 중…'이 나옵니다. 이 예(판교, M4T, 탑재 0.2 kg, 15시, 왕복 약 5.4 km)에서는 **${LOGC.plan_s.toFixed(0)}초** 걸렸습니다.`,
   "바람이 센 날, 거리가 길 때, 장애물이 많을 때 더 걸립니다.",
 ]));
 c.push(...step("4.2 결과", "07_result", [
@@ -176,7 +178,14 @@ c.push(...step("5.3 미션 파일 내보내기", "10_export", [
   { n: "①", t: "**미션 파일 (.waypoints)** – ArduPilot 미션 (Mission Planner, QGroundControl). 왕복이면 가는 편·오는 편 2개" },
   { n: "②", t: "**DJI 경로 파일 (.kmz)** – DJI Pilot 2, FlightHub 2" },
   { n: "③", t: "DJI 파일을 만들 **기종**" },
+  { tip: "Matrice 4T 는 ArduPilot 미션이 아니라 DJI 경로 파일로 올립니다. 아래 5.4 를 따르십시오." },
   { tip: "고도는 출발지(이륙점) 기준 상대 고도입니다. 실제 이륙 위치가 계획의 출발지와 같아야 합니다. DJI 경로 파일은 DJI 기체·소프트웨어에서 확인하지 못했습니다. 실제 비행 전에는 현장 확인과 비행승인이 필요합니다." },
+], { brk: true }));
+
+c.push(...step("5.4 실증 기체 Matrice 4T 의 경로 파일", "10b_export_m4t", [
+  { n: "①", t: "기종에서 **'Matrice 4T 등 – Pilot 2 파일로 지정'** 을 고릅니다." },
+  { n: "②", t: "M4T 의 **DJI Pilot 2** 에서 아무 경로(웨이포인트 경로)나 하나 만들어 내보낸 **.kmz** 를 고른 뒤 'DJI 경로 파일 (.kmz)' 을 누릅니다." },
+  { tip: "M4T 의 기종 번호를 DJI 문서로 확인하지 못해, 그 기체의 Pilot 2 가 쓴 기종·카메라 번호와 선회 방식을 그대로 가져와 씁니다. 처음 한 번은 내보낸 파일을 Pilot 2 로 다시 불러와 경로점 고도·속도·복귀 고도가 맞는지 확인하십시오. 명령줄: `dpo-plan --wpml-template 파일.kmz --out missions`" },
 ], { brk: true }));
 
 // 6. 끄기·명령줄
@@ -184,14 +193,15 @@ c.push(H1("6. 끄기와 명령줄 사용 (선택)"));
 c.push(P("**끄기:** 서버를 켠 터미널에서 **Ctrl+C**. `[platform] 종료`가 나오면 꺼진 것입니다. 다음부터는 1장 없이 다음 두 줄만 실행합니다.", { size: 20 }));
 c.push(...code(["source dpo-env/bin/activate        (Windows: dpo-env\\Scripts\\activate)", "dpo-server --open"]));
 c.push(...wide("6.1 화면 없이 명령 한 줄로", "t4_cli", [P("같은 계획을 화면 없이 할 수 있습니다. 결과 요약이 출력되고 미션 파일이 `--out` 폴더에 생깁니다.", { size: 20 })], [], 860));
-c.push(...wide(null, "t5_cli_wpml", [P("지역을 바꾸려면 `--site changwon`, 편도는 `--one-way`, DJI 경로 파일까지 만들려면 `--wpml m30`을 붙입니다.", { size: 20 })], [], 960));
+c.push(...wide(null, "t5_cli_wpml", [P("지역을 바꾸려면 `--site changwon`, 편도는 `--one-way`, DJI 경로 파일까지 만들려면 `--wpml m30`(문서로 확인한 기종) 또는 `--wpml-template 파일.kmz`(M4T: Pilot 2 에서 내보낸 파일)를 붙입니다.", { size: 20 })], [], 960));
 c.push(table(["자주 쓰는 인자", "뜻"], [
   ["`--site pangyo` / `changwon`", "지역 (서버도 `dpo-server --site changwon`)"],
-  ["`--drone m100` / `x650`, `--payload KG`", "기체, 탑재중량"],
+  ["`--drone m4t` / `x650` / `m100`, `--payload KG`", "기체 (기본 m4t), 탑재중량 (m4t 최대 0.2 kg)"],
   ["`--dep-hour H`, `--reserve %`", "출발 시각 (9–20시), 예비 SOC"],
   ["`--one-way`, `--kind pickup`", "편도, 회수 임무"],
   ["`--confidence 0.95 --forecast-age H`", "예보 오차를 감안한 출발 판정 (예보 시점 H시간 전)"],
-  ["`--wpml MODEL`", "DJI 경로 파일도 만듦"],
+  ["`--wpml MODEL`", "DJI 경로 파일도 만듦 (m30, m300, m350, m3e 등)"],
+  ["`--wpml-template 파일.kmz`", "M4T 등: Pilot 2 에서 내보낸 파일의 기종 번호로 DJI 경로 파일을 만듦"],
 ], [5, 9], { size: 19 }));
 
 // 7. 문제 해결
@@ -216,8 +226,8 @@ c.push(errRow(["e3_bad", "③ 입력 범위를 넘었을 때"], ["e4_infeasible"
 c.push(H1("8. 구동 시험 기록"));
 c.push(table(["항목", "내용"], [
   ["환경", "Linux, Python 3.13, Chromium (자동 조작). 저장소와 떨어진 빈 폴더에 새 가상환경"],
-  ["설치", "가상환경 1.9 s · 프로그램 설치 14.9 s (처음 받을 때 24.3 s) · 자료 풀기 0.1 s · 점검 8.2 s"],
-  ["첫 경로까지", `서버 준비 3.8 s · 화면 열림 ${LOGC.load_s.toFixed(1)} s · 경로 생성 ${LOGC.plan_s.toFixed(1)} s`],
+  ["설치", `가상환경 ${INST.venv.sec} s · 프로그램 설치 ${INST.pip.sec} s (인터넷으로 의존 패키지 받음) · 자료 풀기 ${INST.unzip.sec} s · 점검 ${INST.check.sec} s`],
+  ["첫 경로까지", `서버 준비 ${INST.server.sec} s · 화면 열림 ${LOGC.load_s.toFixed(1)} s · 경로 생성 ${LOGC.plan_s.toFixed(1)} s`],
   ["화면 오류", LOGC.errors.length ? LOGC.errors.join(", ") : "브라우저 콘솔 오류 없음"],
   ["내려받기", "미션 파일 2개, DJI 경로 파일 2개를 실제로 받아 다시 읽어 확인"],
 ], [2, 10], { size: 19 }));
@@ -236,7 +246,7 @@ c.push(P("", { after: 80 }));
 c.push(P("**시험하지 못한 것:** Windows·macOS, 인터넷이 없는 PC에서의 설치 (기본 라이브러리를 미리 받아 두는 방법이 필요합니다), 여러 사용자가 동시에 쓰는 경우.", { size: 20 }));
 
 const doc = new Document({
-  creator: "drone-path-opt", title: "드론 SoC 최대화 경로계획 – 사용자 매뉴얼 v1.2.0",
+  creator: "drone-path-opt", title: "드론 SoC 최대화 경로계획 – 사용자 매뉴얼 v1.3.0",
   styles: { default: { document: { run: { font: FONT, size: 21 } },
     heading1: { run: { font: FONT, size: 30, bold: true, color: NAVY }, paragraph: { spacing: { before: 0, after: 160 }, keepNext: true } },
     heading2: { run: { font: FONT, size: 24, bold: true, color: TEAL }, paragraph: { spacing: { before: 120, after: 100 }, keepNext: true } } } },
@@ -245,7 +255,7 @@ const doc = new Document({
   sections: [{
     properties: { page: { size: { width: 11906, height: 16838, orientation: PageOrientation.LANDSCAPE }, margin: { top: 900, bottom: 800, left: 800, right: 800 } } },
     headers: { default: new Header({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { after: 0 },
-      children: [new TextRun({ text: "드론 SoC 최대화 경로계획 · 사용자 매뉴얼 v1.2.0", font: FONT, size: 16, color: GRAY })] })] }) },
+      children: [new TextRun({ text: "드론 SoC 최대화 경로계획 · 사용자 매뉴얼 v1.3.0", font: FONT, size: 16, color: GRAY })] })] }) },
     footers: { default: new Footer({ children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 0 },
       children: [new TextRun({ children: [PageNumber.CURRENT], font: FONT, size: 18, color: GRAY })] })] }) },
     children: c,

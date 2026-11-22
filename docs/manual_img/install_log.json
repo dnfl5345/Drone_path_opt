@@ -1,0 +1,78 @@
+{
+ "version": "1.3.0",
+ "steps": {
+  "venv": {
+   "cmd": "python3 -m venv dpo-env",
+   "rc": 0,
+   "sec": 2.3,
+   "out": ""
+  },
+  "pip": {
+   "cmd": "pip install \"drone_path_opt-1.3.0-py3-none-any.whl[mavlink]\"",
+   "rc": 0,
+   "sec": 21.7,
+   "out": "\n[notice] A new release of pip is available: 26.2.2 -> 26.3\n[notice] To update, run: pip install --upgrade pip\n"
+  },
+  "unzip": {
+   "cmd": "unzip dpo_data_1.3.0.zip",
+   "rc": 0,
+   "sec": 0.2,
+   "out": ""
+  },
+  "ls": {
+   "cmd": "ls",
+   "rc": 0,
+   "sec": 0.0,
+   "out": "dpo-env\ndpo_data\ndpo_data_1.3.0.zip\ndrone_path_opt-1.3.0-py3-none-any.whl\n"
+  },
+  "check": {
+   "cmd": "dpo-plan --check",
+   "rc": 0,
+   "sec": 11.1,
+   "out": "[platform] 준비 완료 (7.9s)\n정상: v1.3.0 · 성남 판교·분당 · 격자 [22, 221, 247] · 바람 13시각 · 기체 m100, x650, m4t\n"
+  },
+  "server": {
+   "cmd": "dpo-server --port 8782",
+   "sec": 4.4,
+   "health": {
+    "status": "ok",
+    "version": "1.3.0",
+    "site": "pangyo",
+    "site_label": "성남 판교·분당",
+    "drones": [
+     "m100",
+     "x650",
+     "m4t"
+    ],
+    "live": "idle",
+    "grid": [
+     22,
+     221,
+     247
+    ],
+    "wind_hours": 13,
+    "mavlink": null
+   },
+   "rc": 0
+  },
+  "plan": {
+   "cmd": "dpo-plan --drone m4t --payload 0.2 --dep-hour 15 --out missions",
+   "rc": 0,
+   "sec": 24.3,
+   "out": "[platform] 준비 완료 (1.7s)\n성남 판교·분당 · DJI Matrice 4T (실증 기체, 공식 사양 보정) · 15시 출발 · 안전장치 켬\n    out: SOC   9.7 %p ·   228 s ·  2.50 km · 대기 0 s\n   back: SOC  28.8 %p ·   412 s ·  2.88 km · 대기 0 s\n  합계 SOC 소모 38.5 %p → 도착 SOC 61.5 % (예비 확보)\n  → missions/pangyo_m4t_15h_out.waypoints\n  → missions/pangyo_m4t_15h_out.csv\n  → missions/pangyo_m4t_15h_back.waypoints\n  → missions/pangyo_m4t_15h_back.csv\n  참고: Matrice 4T 는 ArduPilot 미션(.waypoints)이 아니라 DJI 경로 파일로 올립니다. DJI Pilot 2 에서 그 기체로 내보낸 경로 파일을 --wpml-template FILE.kmz 로 주십시오.\n"
+  },
+  "plan_wpml": {
+   "cmd": "dpo-plan --drone m4t --payload 0.2 --dep-hour 15 --one-way --wpml m30 --out missions",
+   "rc": 0,
+   "sec": 6.8,
+   "out": "[platform] 준비 완료 (1.9s)\n성남 판교·분당 · DJI Matrice 4T (실증 기체, 공식 사양 보정) · 15시 출발 · 안전장치 켬\n    out: SOC   9.7 %p ·   228 s ·  2.50 km · 대기 0 s\n  합계 SOC 소모 9.7 %p → 도착 SOC 90.3 % (예비 확보)\n  → missions/pangyo_m4t_15h_out.waypoints\n  → missions/pangyo_m4t_15h_out.csv\n  → missions/pangyo_m4t_15h_out_m30.kmz\n  DJI 경로 파일(WPML) – DJI 기체·소프트웨어에서 확인하지 못한 파일입니다. 불러온 뒤 고도·속도·복귀 고도를 확인하세요.\n      out: Matrice 30 · 경로점 18개 · 상대 고도 60–100 m · 속도 11–15 m/s · 복귀 고도 113 m · 검사 통과\n    ! 계획에 쓴 전력 모델은 DJI Matrice 4T (실증 기체, 공식 사양 보정) 입니다. 내보내는 기종(Matrice 30)의 전력 모델이 아니므로 SOC 예상과 최적 속도는 그 기종에 맞지 않습니다.\n"
+  },
+  "files": {
+   "cmd": "ls missions",
+   "rc": 0,
+   "sec": 0.0,
+   "out": "pangyo_m4t_15h_back.csv\npangyo_m4t_15h_back.waypoints\npangyo_m4t_15h_out.csv\npangyo_m4t_15h_out.waypoints\npangyo_m4t_15h_out_m30.kmz\npangyo_m4t_15h_plan.json\n"
+  }
+ },
+ "ok": true
+}

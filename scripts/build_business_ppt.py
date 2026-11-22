@@ -452,7 +452,7 @@ def build(template: str, out: str) -> None:
     section_tag(s, "4. 탑재 방법 및 지원 계획")
     head(s, X0, 1.05, "① 설치 (처음 한 번, 약 20초)", w=6)
     code(s, X0, 1.45, 5.9, ["python3 -m venv dpo-env", "source dpo-env/bin/activate",
-                           'pip install "drone_path_opt-1.2.0-py3-none-any.whl[mavlink]"', "unzip dpo_data_1.2.0.zip"], size=11.5)
+                           'pip install "drone_path_opt-1.3.0-py3-none-any.whl[mavlink]"', "unzip dpo_data_1.3.0.zip"], size=11.5)
     head(s, X0, 2.95, "② 점검 (8초)", w=6)
     code(s, X0, 3.35, 5.9, ["dpo-plan --check"], size=11.5)
     head(s, X0, 3.95, "③ 켜기 (4초) → 3D 화면이 브라우저에 열림", w=6)

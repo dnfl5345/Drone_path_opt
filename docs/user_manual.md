@@ -1,5 +1,5 @@
 ---
-title: "드론 SoC 최대화 경로계획 – 사용자 매뉴얼 (v1.2.0)"
+title: "드론 SoC 최대화 경로계획 – 사용자 매뉴얼 (v1.3.0)"
 subtitle: "프로그램을 켜서 경로를 생성하기까지"
 date: "2026년 11월 19일"
 ---
@@ -26,8 +26,8 @@ date: "2026년 11월 19일"
 
 | 파일 | 내용 |
 |---|---|
-| `drone_path_opt-1.2.0-py3-none-any.whl` | 프로그램 (약 0.4 MB) |
-| `dpo_data_1.2.0.zip` | 자료 묶음: 지형·건물 격자, 예보 바람, 건물 모양, 오차 모형 (약 20 MB). 건물 모양 파일이 빠진 묶음이면 3D 화면의 건물이 상자 모양으로 그려집니다. |
+| `drone_path_opt-1.3.0-py3-none-any.whl` | 프로그램 (약 0.4 MB) |
+| `dpo_data_1.3.0.zip` | 자료 묶음: 지형·건물 격자, 예보 바람, 건물 모양, 오차 모형 (약 20 MB). 건물 모양 파일이 빠진 묶음이면 3D 화면의 건물이 상자 모양으로 그려집니다. |
 
 필요한 것: **Python 3.10 이상**, 설치할 때 인터넷 연결(numpy 등 기본 라이브러리를 받습니다), WebGL이 되는 브라우저(Chrome, Edge 등).
 
@@ -44,11 +44,11 @@ source dpo-env/bin/activate
 ```
 
 ```bash
-pip install "drone_path_opt-1.2.0-py3-none-any.whl[mavlink]"
+pip install "drone_path_opt-1.3.0-py3-none-any.whl[mavlink]"
 ```
 
 ```bash
-unzip dpo_data_1.2.0.zip
+unzip dpo_data_1.3.0.zip
 ```
 
 ![설치 – 실제 실행 기록](manual_img/t1_install.png){width=100%}
@@ -136,7 +136,7 @@ dpo-server --open
 | ② | 생성된 경로 | 가는 편 = 주황, 오는 편 = 파랑. 반투명 막은 경로 아래로 내린 그림자입니다. |
 | ③ | 고도 단면 | 경로를 따라 지형·건물과 비행 고도. 점선은 비행할 수 있는 가장 낮은 높이입니다. |
 
-이 예에서는 탑재 1 kg으로 왕복해 **도착 SOC 51.8 %, 임무 가능**이 나왔습니다.
+이 예에서는 M4T, 탑재 0.2 kg으로 왕복해 **도착 SOC 51.8 %, 임무 가능**이 나왔습니다.
 
 ![비행 재생](manual_img/08_play.png){width=100%}
 
@@ -179,7 +179,7 @@ dpo-server --open
 같은 계획을 화면 없이 할 수 있습니다. 결과 요약이 출력되고 미션 파일이 `--out` 폴더에 생깁니다.
 
 ```bash
-dpo-plan --drone x650 --payload 1.0 --dep-hour 15 --out missions
+dpo-plan --drone m4t --payload 0.2 --dep-hour 15 --out missions
 ```
 
 ![명령줄 계획 – 실제 출력](manual_img/t4_cli.png){width=100%}
@@ -191,7 +191,7 @@ dpo-plan --drone x650 --payload 1.0 --dep-hour 15 --out missions
 | 자주 쓰는 인자 | 뜻 |
 |---|---|
 | `--site pangyo / changwon` | 지역 (서버도 `dpo-server --site changwon`) |
-| `--drone m100 / x650`, `--payload KG` | 기체, 탑재중량 |
+| `--drone m4t / x650 / m100`, `--payload KG` | 기체 (기본 m4t), 탑재중량 (m4t 최대 0.2 kg) |
 | `--dep-hour H` | 출발 시각 (9–20시) |
 | `--one-way`, `--kind pickup` | 편도, 회수 임무 |
 | `--reserve %` | 예비 SOC |

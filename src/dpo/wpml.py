@@ -54,6 +54,7 @@ MODELS = {
     "m3td": (91, 1, 81, "Matrice 3TD", True),
 }
 FINISH = ("goHome", "noAction", "autoLand", "gotoFirstWaypoint")
+TEMPLATE_MODEL = "template"   # 기종 정보를 DJI Pilot 2 에서 내보낸 경로 파일에서 가져온다 (drone_info_from_kmz)
 RC_LOST = ("goContinue", "goBack", "landing", "hover")
 TURN_STOP = "toPointAndStopWithDiscontinuityCurvature"
 TURN_PASS = "toPointAndPassWithContinuityCurvature"
@@ -125,7 +126,7 @@ def _num(v, n=2):
 
 def build(waypoints, model="m30", finish="autoLand", rc_lost="goBack", v_max=15.0, turn="pass", damping_max=5.0,
           rth_height=None, takeoff_security=None, dock=False, payload_enum=None, payload_position=0, author="drone-path-opt",
-          created_ms=None):
+          created_ms=None, drone_info=None):
     """경로점 목록 → dict(template, waylines, kmz, waypoints, summary).
 
     finish   : 경로를 마친 뒤의 동작 (goHome | noAction | autoLand | gotoFirstWaypoint)
@@ -133,9 +134,11 @@ def build(waypoints, model="m30", finish="autoLand", rc_lost="goBack", v_max=15.
     v_max    : 기종의 최대 경로 속도 [m/s]. 넘는 구간 속도는 이 값으로 깎는다.
     turn     : 'pass' = 미리 돌고 통과 (기본) | 'stop' = 모든 경로점에서 정지
     rth_height : 복귀 고도 (이륙점 기준 [m]). None 이면 경로의 최고 높이 + 20 m.
-    dock     : 도크 운용이면 True (안전 이륙 고도의 하한이 8 m)"""
-    if model not in MODELS:
-        raise ValueError(f"model 은 {', '.join(MODELS)} 중 하나")
+    dock     : 도크 운용이면 True (안전 이륙 고도의 하한이 8 m)
+    drone_info : drone_info_from_kmz() 의 결과. 주면 model 대신 그 기종·카메라 번호와 선회 방식을 쓴다
+                 (번호를 문서로 확인하지 못한 기종 – 예: Matrice 4T – 을 그 기체의 DJI Pilot 2 가 쓴 값으로 맞춘다)."""
+    if drone_info is None and model not in MODELS:
+        raise ValueError(f"model 은 {', '.join(MODELS)} 중 하나 (또는 drone_info)")
     if finish not in FINISH:
         raise ValueError(f"finish 는 {', '.join(FINISH)} 중 하나")
     if rc_lost not in RC_LOST:
@@ -144,7 +147,13 @@ def build(waypoints, model="m30", finish="autoLand", rc_lost="goBack", v_max=15.
         raise ValueError("turn 은 pass 또는 stop")
     if not (0 < v_max <= 30):
         raise ValueError("v_max 는 0 보다 크고 30 이하")
-    d_enum, d_sub, p_enum, label, straight_ok = MODELS[model]
+    if drone_info is not None:
+        d_enum, d_sub, p_enum, label = drone_info["drone_enum"], drone_info["drone_sub"], drone_info["payload_enum"], drone_info["label"]
+        straight_ok = bool(drone_info.get("straight", False))
+        payload_position = drone_info.get("payload_position", payload_position)
+        model = TEMPLATE_MODEL
+    else:
+        d_enum, d_sub, p_enum, label, straight_ok = MODELS[model]
     p_enum = p_enum if payload_enum is None else int(payload_enum)
     wps = [dict(w) for w in waypoints]
     n = len(wps)
@@ -169,6 +178,8 @@ def build(waypoints, model="m30", finish="autoLand", rc_lost="goBack", v_max=15.
             warn.append(f"경로점 {q}→{q + 1}: 수평 거리가 {h:.1f} m 입니다 (수직 이동). 기체가 받아들이는지 확인하세요.")
     # 꺾임 방식
     pass_mode = TURN_PASS if straight_ok else TURN_COORD
+    if drone_info is not None and drone_info.get("turn_mode") in (TURN_PASS, TURN_COORD):
+        pass_mode = drone_info["turn_mode"]                # 그 기체의 DJI Pilot 2 가 쓴 선회 방식을 따른다
     for q, w in enumerate(wps):
         vertical = (q > 0 and seg[q - 1][0] < 1.0) or (q < n - 1 and seg[q][0] < 1.0)
         if turn == "stop" or q in (0, n - 1) or w["hover"] > 0 or vertical:
@@ -300,6 +311,42 @@ def from_items(items, **opt):
     return out
 
 
+def drone_info_from_kmz(data):
+    """DJI Pilot 2 에서 내보낸 경로 파일(.kmz, bytes)에서 기종·카메라 번호와 선회 방식을 읽는다.
+
+    반환: dict(drone_enum, drone_sub, payload_enum, payload_position, turn_mode, straight, label)
+    쓰임: 기종 번호를 문서로 확인하지 못한 기체(예: Matrice 4T)에서, 그 기체로 아무 경로나 하나 만들어 내보낸 파일을 주면
+          같은 번호로 경로 파일을 만든다 (dpo-plan --wpml-template FILE.kmz)."""
+    ns = dict(k=KML_NS, w=WPML_NS)
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        names = [n for n in z.namelist() if n.endswith(("template.kml", "waylines.wpml"))]
+        if not names:
+            raise ValueError("경로 파일에 wpmz/template.kml 또는 wpmz/waylines.wpml 이 없습니다")
+        names.sort(key=lambda n: 0 if n.endswith("template.kml") else 1)
+        root = ET.fromstring(z.read(names[0]))
+    ns_uri = root.tag.split("}")[0][1:] if root.tag.startswith("{") else KML_NS
+    # 판(1.0.x)이 달라도 읽도록 wpml 이름공간을 문서에서 찾는다
+    wns = next((v for v in {e.tag.split("}")[0][1:] for e in root.iter() if e.tag.startswith("{") and "wpmz" in e.tag}), WPML_NS)
+    ns = dict(k=ns_uri, w=wns)
+    doc = root.find("k:Document", ns)
+    mc = doc.find("w:missionConfig", ns) if doc is not None else None
+    if mc is None:
+        raise ValueError("wpml:missionConfig 가 없습니다")
+    d_enum = _t(mc, "w:droneInfo/w:droneEnumValue", ns)
+    if d_enum is None:
+        raise ValueError("wpml:droneEnumValue 가 없습니다")
+    d_sub = _t(mc, "w:droneInfo/w:droneSubEnumValue", ns)
+    p_enum = _t(mc, "w:payloadInfo/w:payloadEnumValue", ns)
+    p_pos = _t(mc, "w:payloadInfo/w:payloadPositionIndex", ns)
+    folder = doc.find("k:Folder", ns)
+    turn = _t(folder, "w:globalWaypointTurnMode", ns) if folder is not None else None
+    straight = _t(folder, "w:globalUseStraightLine", ns) if folder is not None else None
+    return dict(drone_enum=int(d_enum), drone_sub=None if d_sub is None else int(d_sub),
+                payload_enum=int(p_enum) if p_enum is not None else 0, payload_position=int(p_pos) if p_pos is not None else 0,
+                turn_mode=turn, straight=(straight == "1") if straight is not None else (turn == TURN_PASS),
+                label=f"DJI Pilot 2 경로 파일의 기종 (droneEnumValue {int(d_enum)}" + (f"-{int(d_sub)}" if d_sub is not None else "") + ")")
+
+
 # ------------------------------------------------------------------ 되읽기와 검사
 def _t(el, tag, ns):
     e = el.find(tag, ns)
@@ -336,7 +383,7 @@ def read_kmz(data):
     return out
 
 
-def check(data, v_max=15.0):
+def check(data, v_max=15.0, extra_drone_enums=()):
     """내보낸 kmz 가 문서의 필수 요소와 값 범위를 지키는지 검사한다. 반환: 문제 목록 (비어 있으면 통과).
     DJI 소프트웨어의 검사를 대신하지는 못한다."""
     bad = []
@@ -364,7 +411,7 @@ def check(data, v_max=15.0):
             bad.append(f"{key}: missionConfig 의 숫자를 읽을 수 없습니다")
         if key == "waylines" and "globalRTHHeight" not in mc:
             bad.append("waylines: wpml:globalRTHHeight 가 없습니다")
-        if r[key + "_drone"][0] not in {m[0] for m in MODELS.values()}:
+        if r[key + "_drone"][0] not in {m[0] for m in MODELS.values()} | set(extra_drone_enums):
             bad.append(f"{key}: wpml:droneEnumValue = {r[key + '_drone'][0]}")
         if r[key + "_height_mode"] not in ("relativeToStartPoint", "WGS84", "EGM96", "aboveGroundLevel", "realTimeFollowSurface"):
             bad.append(f"{key}: 고도 방식 = {r[key + '_height_mode']!r}")

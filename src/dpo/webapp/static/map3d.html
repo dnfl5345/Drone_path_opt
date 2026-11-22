@@ -184,9 +184,11 @@
       </div>
       <h2 style="margin-top:12px">DJI 경로 파일 내보내기 (WPML)</h2>
       <div class="row"><button id="dl_kmz">DJI 경로 파일 (.kmz)</button>
-        <label class="inl">기종 <select id="dji_model"><option value="m30">Matrice 30</option><option value="m30t">Matrice 30T</option>
+        <label class="inl">기종 <select id="dji_model"><option value="template">Matrice 4T 등 – Pilot 2 파일로 지정</option><option value="m30">Matrice 30</option><option value="m30t">Matrice 30T</option>
           <option value="m350">Matrice 350 RTK</option><option value="m300">Matrice 300 RTK</option><option value="m3e">Mavic 3E</option>
           <option value="m3t">Mavic 3T</option><option value="m3m">Mavic 3M</option><option value="m3d">Matrice 3D</option><option value="m3td">Matrice 3TD</option></select></label></div>
+      <div class="row" id="tpl_row"><label class="inl">Pilot 2 경로 파일 <input type="file" id="dji_tpl" accept=".kmz"></label></div>
+      <div class="hint" id="tpl_hint">Matrice 4T 는 기종 번호를 DJI 문서로 확인하지 못했습니다. DJI Pilot 2 에서 그 기체로 아무 경로나 하나 만들어 내보낸 .kmz 를 고르면, 그 파일의 기종·카메라 번호와 선회 방식으로 만듭니다.</div>
       <table class="res" id="k_tab" style="display:none"><thead><tr><th>구간</th><th>경로점</th><th>상대 고도</th><th>속도</th><th>깎은 구간</th><th>복귀 고도</th><th>검사</th></tr></thead><tbody id="k_rows"></tbody></table>
       <ul id="k_notes" class="hint" style="margin:6px 0 0 16px;padding:0"></ul>
       <div class="hint" style="margin-top:6px">
