@@ -27,8 +27,8 @@ def build_parser():
     ap = argparse.ArgumentParser(prog="dpo-plan", description="SoC 최대화 경로 계획 → ArduPilot 미션 파일(.waypoints)·경로표(.csv)")
     ap.add_argument("--version", action="version", version=f"drone-path-opt {__version__}")
     ap.add_argument("--site", default=C.SITE_KEY, choices=list(C.SITES), help="대상 지역 (기본: 환경변수 DPO_SITE)")
-    ap.add_argument("--drone", default="x650", choices=["m100", "x650"])
-    ap.add_argument("--payload", type=float, default=None, help="탑재중량 [kg] (기본: m100 0.5, x650 1.0)")
+    ap.add_argument("--drone", default="x650", choices=["m100", "x650", "m4t"])
+    ap.add_argument("--payload", type=float, default=None, help="탑재중량 [kg] (기본: m4t 0.2, m100 0.5, x650 1.0)")
     ap.add_argument("--kind", default="delivery", choices=["delivery", "pickup"], help="배송(갈 때 적재) / 회수(올 때 적재)")
     ap.add_argument("--dep-hour", type=int, default=15, help="출발 시각 [시, KST] (9–20)")
     ap.add_argument("--hub", type=_pt, default=None, metavar="X,Y", help="출발지 (기본: 지역 기본값)")
@@ -67,6 +67,7 @@ def main(argv=None):
         print("--wpml 은 --out 과 함께 써야 합니다", file=sys.stderr)
         return 2
     from . import config as C
+    from . import drones as DR
     C.use_site(a.site)
     missing = C.check_data()
     if missing:
@@ -88,7 +89,7 @@ def main(argv=None):
         x, y = ll2xy(p[0], p[1])
         return (float(x), float(y))
 
-    req = dict(drone=a.drone, payload=a.payload if a.payload is not None else (0.5 if a.drone == "m100" else 1.0),
+    req = dict(drone=a.drone, payload=a.payload if a.payload is not None else DR.PAYLOAD_DEFAULT[a.drone],
                kind=a.kind, dep_hour=a.dep_hour, round_trip=not a.one_way, reserve=a.reserve, safeguard=not a.no_safeguard,
                eps=a.eps, dwell=a.dwell, obstacles=[])
     vg = a.vg_max if a.vg_max is not None else (a.wpml_vmax if a.wpml else None)

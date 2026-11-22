@@ -267,7 +267,7 @@ def main(argv=None):
     ap.add_argument("--version", action="version", version=f"drone-path-opt {__version__}")
     ap.add_argument("--url", default=None, help="기체 MAVLink 주소 (예: udpin:0.0.0.0:14550). --rehearse 면 필요 없음")
     ap.add_argument("--site", default=C.SITE_KEY, choices=list(C.SITES))
-    ap.add_argument("--drone", default="x650", choices=["m100", "x650"])
+    ap.add_argument("--drone", default="x650", choices=["m100", "x650", "m4t"])
     ap.add_argument("--payload", type=float, default=1.0)
     ap.add_argument("--dep-hour", type=int, default=15)
     ap.add_argument("--hub", default=None, metavar="X,Y")

@@ -33,7 +33,12 @@ DAYS = ["20261019", "20261012", "20261029", "20261002", "20261001", "20261031", 
 HOURS = [15, 17, 19]            # 출발 시각 (KST). 06Z 예보가 15–21시를 덮는다
 HOURS_ROLL = [15, 18]
 N_PAIRS, N_PAIRS_ROLL = 10, 6
-PAYLOAD = 1.0
+PAYLOAD = 1.0                    # X650·M100 (기본)
+PAYLOAD_BY = dict(m4t=0.2)       # M4T: 최대 페이로드 200 g
+
+
+def payload(dkey):
+    return PAYLOAD_BY.get(dkey, PAYLOAD)
 KST = 9
 
 
@@ -105,7 +110,7 @@ def safeguard_worker(args):
     site_key, ymd, dkey = args
     fc, tr, d, P = _load_day(site_key, ymd, dkey)
     pairs = od_pairs(fc, N_PAIRS)
-    m = d.m_empty + PAYLOAD
+    m = d.m_empty + payload(dkey)
     out = []
     for h in HOURS:
         t0 = (h - KST) * 3600.0
@@ -142,7 +147,7 @@ def repair_worker(args):
     site_key, ymd, dkey, todo = args
     fc, tr, d, P = _load_day(site_key, ymd, dkey)
     pairs = od_pairs(fc, N_PAIRS)
-    m = d.m_empty + PAYLOAD
+    m = d.m_empty + payload(dkey)
     out = []
     for h, q in todo:
         a, b = pairs[q]
@@ -190,7 +195,7 @@ def day_worker(args):
             s.add_static_nfz_circle(*z)
     d = DR.get(dkey)
     P, PO = Planner(fc, d), Planner(tr, d)
-    m = d.m_empty + PAYLOAD
+    m = d.m_empty + payload(dkey)
     pairs = od_pairs(fc, N_PAIRS)
     kk = np.argmin(np.abs(tr.agl - 100.0), axis=0)
     J, I = np.indices(kk.shape)
@@ -275,7 +280,7 @@ def err_worker(args):
         fc.add_static_nfz_circle(*z)
     d = DR.get(dkey)
     P = Planner(fc, d)
-    m = d.m_empty + PAYLOAD
+    m = d.m_empty + payload(dkey)
     pairs = od_pairs(fc, N_PAIRS_ROLL)
     t0 = (15 - KST) * 3600.0
     kk = np.argmin(np.abs(fc.agl - 100.0), axis=0)
@@ -396,7 +401,7 @@ def analyze():
     files = sorted(C.RES.glob("E13_*_*.json"))
     files = [f for f in files if f.name != "E13_stats.json" and not f.name.startswith("E13err")]
     sets = {f.stem[4:]: json.loads(f.read_text()) for f in files}
-    R = dict(sets={}, days=DAYS, hours=HOURS, payload=PAYLOAD)
+    R = dict(sets={}, days=DAYS, hours=HOURS, payload=PAYLOAD, payload_by=PAYLOAD_BY)
     for name, rows in sets.items():
         S = dict(n=len(rows), n_days=len({r["day"] for r in rows}), wind=[float(min(r["wind"] for r in rows)), float(max(r["wind"] for r in rows))],
                  infeasible={k: int(sum(1 for r in rows if r.get(k) is None)) for k in ("EX", "EXv", "P0", "PO")},
@@ -452,8 +457,10 @@ def figure(R, sets):
     plt.rcParams.update({"font.family": ["NanumGothic", "DejaVu Sans"], "axes.unicode_minus": False, "font.size": 10,
                          "mathtext.fontset": "dejavusans", "axes.spines.top": False, "axes.spines.right": False,
                          "savefig.dpi": 200, "savefig.bbox": "tight", "axes.titleweight": "bold"})
-    COL = {"changwon_x650": "#E46C0A", "pangyo_x650": "#1B6CA8", "pangyo_m100": "#2CA58D"}
-    LAB = {"changwon_x650": "창원 · X650", "pangyo_x650": "판교 · X650", "pangyo_m100": "판교 · M100"}
+    COL = {"changwon_x650": "#E46C0A", "pangyo_x650": "#1B6CA8", "pangyo_m100": "#2CA58D",
+           "changwon_m4t": "#7A3E9D", "pangyo_m4t": "#C0392B"}
+    LAB = {"changwon_x650": "창원 · X650", "pangyo_x650": "판교 · X650", "pangyo_m100": "판교 · M100",
+           "changwon_m4t": "창원 · M4T", "pangyo_m4t": "판교 · M4T"}
     from matplotlib.lines import Line2D
     fig, axs = plt.subplots(2, 2, figsize=(13.6, 10.2), gridspec_kw=dict(wspace=0.26, hspace=0.34))
     names_all = list(sets)

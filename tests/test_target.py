@@ -28,6 +28,23 @@ def test_x650_matches_spec_and_hover_anchor():
     assert d.speed_candidates().max() == pytest.approx(d.vg_max)
 
 
+def test_m4t_matches_official_spec_points():
+    """M4T: DJI 공식 사양 두 점(무풍 호버 42분, 무탑재 9 m/s 정속 49분)에서 SOC 100 %p 를 쓰고, 탑재 한도는 200 g."""
+    d = DR.get("m4t", calibrated=False)
+    S = DR.M4T_SPEC
+    assert d.m_empty == S["takeoff_kg"] and d.battery_wh == S["battery_wh"]
+    assert DR.PAYLOAD_MAX["m4t"] == pytest.approx(0.2) and DR.PAYLOAD_DEFAULT["m4t"] == pytest.approx(0.2)
+    pr = d.params()
+    hover = soc_drop(power_w(0.0, 0.0, d.m_empty, RHO0, pr) * S["hover_min"] * 60.0, d)
+    cruise = soc_drop(power_w(S["flight_speed"], 0.0, d.m_empty, RHO0, pr) * S["flight_min"] * 60.0, d)
+    assert hover == pytest.approx(100.0, abs=0.2) and cruise == pytest.approx(100.0, abs=0.2)
+    assert 0.5 < d.eta < 0.9 and 0.01 < d.cda < 0.1
+    # 무탑재 최대 거리: 측정 조건을 모르는 35 km 표기보다 짧게(보수적으로) 나온다
+    jm = min(power_w(v, 0.0, d.m_empty, RHO0, pr) / v for v in np.arange(3.0, 18.01, 0.5))
+    rng_km = d.battery_wh * 3600.0 / (jm * soc_drop(1.0, d) / 100.0 * d.battery_wh * 3600.0) / 1000.0
+    assert 20.0 < rng_km < S["range_km"]
+
+
 def test_m100_speed_candidates_unchanged():
     assert np.allclose(DR.m100().speed_candidates(), np.arange(3.0, 20.01, 0.5))
 
@@ -100,7 +117,7 @@ def test_platform_3d_scene_plan_and_mission():
     assert len(sc["ground"]) == n == len(sc["floor"]) == len(sc["bh"])
     # 건물 원자료가 있으면 건물 다각형(7천여 동), 없으면 격자 높이로 만든 상자(4천여 개)
     assert len(sc["buildings"]) > 3000 and all(len(b["p"]) >= 3 and b["h"] > 0 for b in sc["buildings"][:200])
-    assert {d["key"] for d in app.site_info()["drones"]} == {"m100", "x650"}
+    assert {d["key"] for d in app.site_info()["drones"]} == {"m100", "x650", "m4t"}
     w = app.wind3d(15)
     assert len(w["u"]) == len(sc["z"]) and len(w["u"][0]) > 5
     # 탑재중량 한계는 기체별
@@ -108,6 +125,8 @@ def test_platform_3d_scene_plan_and_mission():
         app.plan(dict(drone="m100", payload=1.0, round_trip=False))
     with pytest.raises(ValueError):
         app.plan(dict(drone="x650", payload=2.5, round_trip=False))
+    with pytest.raises(ValueError):
+        app.plan(dict(drone="m4t", payload=0.3, round_trip=False))       # M4T 최대 페이로드 200 g
     res = app.plan(dict(drone="x650", payload=1.0, kind="delivery", round_trip=True, dep_hour=15, weight=2.0))
     assert res["drone"]["key"] == "x650" and res["feasible"] and len(res["legs"]) == 2
     zs = [p["z"] for L in res["legs"] for p in L["samples"]]

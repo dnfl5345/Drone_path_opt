@@ -32,7 +32,7 @@ from fetch_gfs_days import gfs_name  # noqa: E402
 KST = 9
 HOURS = [9, 12, 15, 18]
 N_PAIRS = 3
-PAYLOAD = dict(x650=1.0, m100=0.5)
+PAYLOAD = dict(x650=1.0, m100=0.5, m4t=0.2)
 LEVS = [30, 40, 50, 80, 100]                # 비행 고도대의 GFS 고도 [m AGL]
 SIG_GRID = [0.5, 1.0, 1.5, 2.0, 3.0, 4.5, 6.0]   # 신뢰도 계산을 미리 해 두는 σ [m/s]
 SCALES = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0]

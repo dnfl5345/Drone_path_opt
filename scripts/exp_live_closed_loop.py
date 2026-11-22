@@ -31,7 +31,7 @@ from exp_superiority import _cluster_ci, _load_day, od_pairs  # noqa: E402
 DAYS = ["20261001", "20261012", "20261031", "20261027"]
 N_PAIRS = 6
 HOUR = 15
-PAYLOAD = dict(m100=0.5, x650=1.0)
+PAYLOAD = dict(m100=0.5, x650=1.0, m4t=0.2)
 CASES = [("real", "06z"), ("rot30", dict(rot=30.0)), ("rot60", dict(rot=60.0)), ("rot90", dict(rot=90.0)),
          ("spd0.6", dict(scale=0.6))]
 POLICIES = [("P0", dict(safeguard=False, speed_update=0)), ("P1", dict(safeguard=True, speed_update=0)),
@@ -160,7 +160,8 @@ def figure(R):
     plt.rcParams.update({"font.family": ["NanumGothic", "DejaVu Sans"], "axes.unicode_minus": False, "font.size": 10,
                          "axes.spines.top": False, "axes.spines.right": False, "savefig.dpi": 200, "savefig.bbox": "tight",
                          "axes.titleweight": "bold"})
-    SETLAB = {"changwon_x650": "창원 · X650", "pangyo_x650": "판교 · X650", "pangyo_m100": "판교 · M100"}
+    SETLAB = {"changwon_x650": "창원 · X650", "pangyo_x650": "판교 · X650", "pangyo_m100": "판교 · M100",
+              "changwon_m4t": "창원 · M4T", "pangyo_m4t": "판교 · M4T"}
     lab = {"real": "실제\n예보 오차", "rot30": "풍향\n30°", "rot60": "풍향\n60°", "rot90": "풍향\n90°", "spd0.6": "풍속\n0.6배"}
     pol = [("P1", "안전장치만", "#9E9E9E"), ("P2", "+ 속도 갱신 60 s", "#9CC3E4"), ("P3", "+ 속도 갱신 30 s (기본)", "#1B6CA8"),
            ("P4", "+ 속도 갱신 15 s", "#0B3C5D")]

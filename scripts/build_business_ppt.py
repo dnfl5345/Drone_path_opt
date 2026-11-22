@@ -12,14 +12,107 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from build_ppt import (BOX, FIG, GRAY, INK, LIGHT, NAVY, ORANGE, ROOT, TEAL, TITLE, WHITE, X0, Deck, MSO_ANCHOR,  # noqa: E402
-                       PP_ALIGN, arrow, box, box_text, head, items, normalize_partnames, notes, picture, source, stat,
-                       table, textbox)
+import build_ppt as BP  # noqa: E402
+from build_ppt import (FIG, ROOT, X0, Deck, MSO_ANCHOR, PP_ALIGN, arrow, box, box_text, normalize_partnames, notes,  # noqa: E402
+                       picture)
+from lxml import etree  # noqa: E402
+from pptx.dml.color import RGBColor  # noqa: E402
+from pptx.util import Emu, Inches, Pt  # noqa: E402
 
-from pptx.util import Pt  # noqa: E402
+# ── 기관 양식(민간수탁연구사업 계획서)에 맞춘 서식 ──
+#   본문 휴먼명조, 표 돋움 · 제목 줄 #BFBFBF · 검은 가는 선, 소제목 '■', 글머리 '-', 강조는 남색 한 가지
+FONT_BODY, FONT_TABLE = "휴먼명조", "돋움"
+BP.set_run.__defaults__ = (None, None, None, FONT_BODY)          # 모든 글자의 기본 글꼴
+INK, GRAY = RGBColor(0x00, 0x00, 0x00), RGBColor(0x40, 0x40, 0x40)
+NAVY, TEAL, GREEN = RGBColor(0x1F, 0x38, 0x64), RGBColor(0x40, 0x40, 0x40), RGBColor(0x59, 0x59, 0x59)
+ORANGE = RGBColor(0xC0, 0x00, 0x00)                               # 강조 수치
+BOX, LIGHT, HEAD_FILL, WHITE = RGBColor(0xF2, 0xF2, 0xF2), RGBColor(0xF2, 0xF2, 0xF2), RGBColor(0xBF, 0xBF, 0xBF), RGBColor(0xFF, 0xFF, 0xFF)
+TITLE = INK
+SRC_Y = BP.SRC_Y
+_A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+TABLE_GRID = "{5940675A-B579-460E-94D1-54222C63F5DA}"           # 'No Style, Table Grid': 검은 가는 선
+
+
+def textbox(slide, x, y, w, h, paras, size=14, color=INK, bold=False, align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP,
+            space_after=4, name=None):
+    return BP.textbox(slide, x, y, w, h, paras, size=size, color=color, bold=bold, align=align, anchor=anchor,
+                      space_after=space_after, name=name)
+
+
+def head(slide, x, y, text, w=6.0, size=16):
+    """양식의 '■ 소제목'."""
+    return textbox(slide, x, y, w, 0.36, [[("■ ", {"color": INK, "bold": True}), (text, {"color": INK, "bold": True})]], size=size)
+
+
+def items(slide, x, y, w, h, rows, size=14, gap=5, mark="- "):
+    """양식의 '- 항목'. rows: str | (굵은 앞말, 뒷말)."""
+    paras = []
+    for r in rows:
+        if isinstance(r, tuple):
+            paras.append([(mark, {}), (r[0], {"bold": True}), (r[1], {})])
+        else:
+            paras.append([(mark, {}), (r, {})])
+    return textbox(slide, x, y, w, h, paras, size=size, space_after=gap)
+
+
+def stat(slide, x, y, w, h, label, value, sub, dark=False, vsize=26):
+    sp = box(slide, x, y, w, h, fill=LIGHT, line=NAVY if dark else HEAD_FILL, shadow=False)
+    box_text(sp, [[(label, {"size": 12, "bold": False, "color": GRAY})],
+                  [(value, {"size": vsize, "bold": True, "color": ORANGE if dark else NAVY})],
+                  [(sub, {"size": 12, "bold": False, "color": GRAY})]])
+    return sp
+
+
+def source(slide, text):
+    return textbox(slide, X0, SRC_Y, 10.6, 0.3, [text], size=10.5, color=GRAY)
+
+
+def table(slide, x, y, w, rows, col_w, row_h=0.36, head_size=13, body_size=11, highlight=(), first_col_center=True,
+          aligns=None):
+    """양식의 표: 돋움, 제목 줄 회색(#BFBFBF) 바탕 검은 글자, 검은 가는 선. highlight 줄은 연회색."""
+    nr, nc = len(rows), len(rows[0])
+    gt = slide.shapes.add_table(nr, nc, Inches(x), Inches(y), Inches(w), Inches(row_h * nr))
+    tbl = gt.table
+    tblPr = tbl._tbl.tblPr
+    tblPr.set("firstRow", "0")
+    tblPr.set("bandRow", "0")
+    sid = tblPr.find(_A + "tableStyleId")
+    if sid is None:
+        sid = etree.SubElement(tblPr, _A + "tableStyleId")
+    sid.text = TABLE_GRID
+    tot = sum(col_w)
+    for j, cw in enumerate(col_w):
+        tbl.columns[j].width = Emu(int(Inches(w) * cw / tot))
+    for i in range(nr):
+        tbl.rows[i].height = Inches(row_h)
+        for j in range(nc):
+            c = tbl.cell(i, j)
+            c.margin_left = c.margin_right = Inches(0.06)
+            c.margin_top = c.margin_bottom = Inches(0.02)
+            c.vertical_anchor = MSO_ANCHOR.MIDDLE
+            c.fill.solid()
+            c.fill.fore_color.rgb = HEAD_FILL if i == 0 else (LIGHT if i in highlight else WHITE)
+            val = rows[i][j]
+            runs = val if isinstance(val, list) else [(str(val), {})]
+            para = c.text_frame.paragraphs[0]
+            c.text_frame.word_wrap = True
+            if i == 0 or (j == 0 and first_col_center):
+                para.alignment = PP_ALIGN.CENTER
+            elif aligns:
+                para.alignment = aligns[j]
+            else:
+                para.alignment = PP_ALIGN.LEFT
+            for text, o in runs:
+                r = para.add_run()
+                r.text = text
+                BP.set_run(r, o.get("size", head_size if i == 0 else body_size), o.get("bold", False), o.get("color", INK),
+                           font=FONT_TABLE)
+    return gt
+
 
 MAN = ROOT / "docs" / "manual_img"
-GREEN = __import__("pptx.dml.color", fromlist=["RGBColor"]).RGBColor(0x2E, 0x7D, 0x5B)
+from report_values import (SETS_M4T, SETS_REF, _f, cmp3d_rows, e13_rows, e13_split_rows, e15_table,  # noqa: E402
+                           summary_values)
 
 
 def J(name):
@@ -37,14 +130,15 @@ def code(s, x, y, w, lines, size=12):
     return sp
 
 
-RGB_CODE = __import__("pptx.dml.color", fromlist=["RGBColor"]).RGBColor(0xEE, 0xEE, 0xEE)
+RGB_CODE = RGBColor(0xF2, 0xF2, 0xF2)
 
 
 def build(template: str, out: str) -> None:
     D = Deck(template)
-    D.set_title_page(["드론 비행 금지 구역 회피 경로", "제공 방법 및 장치 – 사업 내용 보고"], "2026. 11.")
-    CX = {k: {m["key"]: m for m in J(f"platform_3d_compare_{v}.json")["methods"]}
-          for k, v in (("pg", "pangyo_x650"), ("cw", "changwon_x650"), ("pm", "pangyo_m100"))}
+    D.set_title_page(["배터리 잔존 용량을 고려한", "드론 경로 최적화 알고리즘 개발"], "2026. 11.")
+    V = summary_values()
+    M = V["M"]
+    T15 = e15_table()
     SITL = J("sitl_check.json")
 
     # ── 목차 ───────────────────────────────────────────
@@ -86,8 +180,8 @@ def build(template: str, out: str) -> None:
     section_tag(s, "1. 과제 개요")
     head(s, X0, 1.05, "최종목표")
     b = box(s, X0, 1.48, 12.15, 1.25, fill=LIGHT, shadow=False)
-    box_text(b, [[("○ ", {"color": TITLE}), ("SoC를 명시 상태 변수로 포함한 무인 운반 드론 특화 에너지 인식 경로 최적화 알고리즘 개발", {"color": INK})],
-                 [("○ ", {"color": TITLE}), ("가상 시뮬레이션 및 하드웨어 실증을 통한 알고리즘 성능 검증", {"color": INK})]], size=17)
+    box_text(b, [[("- ", {"color": INK}), ("SoC를 명시 상태 변수로 포함한 무인 운반 드론 특화 에너지 인식 경로 최적화 알고리즘 개발", {"color": INK})],
+                 [("- ", {"color": INK}), ("가상 시뮬레이션 및 하드웨어 실증을 통한 알고리즘 성능 검증", {"color": INK})]], size=17, bold=False)
     head(s, X0, 2.95, "세부 목표")
     items(s, X0, 3.35, 12.15, 1.3, [
         "바람·지형·건물·비행 금지 구역·이동 장애물을 반영한 3차원 시공간 경로와 구간별 속도 산출",
@@ -108,24 +202,24 @@ def build(template: str, out: str) -> None:
     cards = [
         ("개발 알고리즘", ["경로 탐색 5종 비교 → Lazy Theta* 선정", "바람·시간·고도로 확장한 3차원 시공간 에너지 탐색 (WE-LT*)",
                        "SoC 모델 · 이동 장애물 안전 구간", "30초 속도 갱신 · 출발 판정"], NAVY),
-        ("가상 시운전 검증", ["기존 경로 대비 SoC 소모 −17.5 ~ −21.2 % (630건)", "틀린 예보 손해 42–73 % 회복 (30초 갱신)",
-                         "이동 장애물 144건 침범 0건", "ArduCopter SITL 미션 13/13 일치"], TEAL),
+        ("가상 시운전 검증", [f"실증 기체 M4T: 기존 경로 대비 SoC 소모 {V['r4']} 감소 ({V['n4']}건)", f"비교 기체 X650·M100: {V['rR']} 감소",
+                         f"이동 장애물 {T15['obs_n']}건 침범 {T15['obs_col']}건", "ArduCopter SITL 미션 13/13 일치"], NAVY),
         ("실제 비행 데이터 검증", ["X650 시험비행 (2026-11-13, 103초)", "시간 예측 오차 3 %", "에너지: 제원 중량 −16 %, 중량 보정 +2 %",
-                            "비행 중 위치·배터리·바람 약 2 Hz 수신"], ORANGE),
+                            "비행 중 위치·배터리·바람 약 2 Hz 수신"], NAVY),
         ("탑재 · 지원", ["지상 PC 설치 약 20초, 경로 생성 13초", "M4T: .kmz → DJI Pilot 2", "X650: .waypoints → Mission Planner, MAVLink 연동",
-                      "M4T 전력 모델·경로 파일 기종 추가 지원"], GREEN),
+                      "M4T 비행 기록으로 모델 확인, 경로 파일 기종 추가 지원"], NAVY),
     ]
     for n, (t, lines, col) in enumerate(cards):
         x = X0 + n * 3.08
         hb = box(s, x, 1.15, 2.92, 0.62, fill=col, shadow=False)
         box_text(hb, [[(t, {"size": 16, "color": WHITE})]], align=PP_ALIGN.CENTER)
         bb = box(s, x, 1.85, 2.92, 4.3, fill=BOX, shadow=False)
-        box_text(bb, [[("○ ", {"color": col}), (l_, {"bold": False, "color": INK})] for l_ in lines], size=14, anchor=MSO_ANCHOR.TOP)
+        box_text(bb, [[("- ", {"bold": False, "color": INK}), (l_, {"bold": False, "color": INK})] for l_ in lines], size=14, anchor=MSO_ANCHOR.TOP)
         bb.text_frame.margin_top = Pt(11)
         for para in bb.text_frame.paragraphs:
             para.space_after = Pt(12)
     b = box(s, X0, 6.3, 12.15, 0.6, fill=LIGHT, shadow=False)
-    box_text(b, [[("※ 가상 시운전 수치는 X650·M100 전력 모델 기준이며, 실증 기체 M4T의 전력 모델은 M4T 비행 기록을 받아 구축합니다.", {"size": 13, "bold": False, "color": INK})]])
+    box_text(b, [[("＊ 실증 기체 M4T의 전력 모델은 DJI 공식 사양(무탑재 호버 42분, 9 m/s 정속 49분)에 맞춘 값이며, 탑재·고속 비행은 M4T 비행 기록으로 확인합니다.", {"size": 13, "bold": False, "color": INK})]])
 
     # ===================== 2. 개발 알고리즘 =====================
     s = D.content("2-1. 알고리즘 구성과 개발 단계")
@@ -178,8 +272,14 @@ def build(template: str, out: str) -> None:
         ["기체", "모델 계수의 근거", "검증 상태"],
         ["DJI M100", "CMU 공개 실측 비행 198회로 보정", "보정에 쓰지 않은 56회로 예측 확인"],
         ["Holybro X650", "제원 (4.1 kg, 회전면 0.456 m², 222 Wh) + 제조사 호버 30분", "2026-11-13 시험비행으로 비교 (3-2)"],
-        [[("DJI Matrice 4T (실증)", {"color": ORANGE})], "없음", "M4T 비행 기록으로 구축 예정 (4. 지원 계획)"],
+        [[("DJI Matrice 4T (실증)", {"color": NAVY, "bold": True})], f"공식 사양 두 점 (호버 42분, 9 m/s 정속 49분): 효율 {M['eta']:.2f}, 항력 면적 {M['cda']:.3f} m²",
+         "공식 사양과 일치, 실측 비행 비교 전"],
     ], [2.4, 5.4, 4.35], row_h=0.55, head_size=13, body_size=12.5, highlight=(3,))
+    b0, b2 = M["by_payload"]["0.0"], M["by_payload"]["0.2"]
+    items(s, X0, 6.05, 12.15, 0.9, [
+        ("M4T 모델  ", f"무탑재 호버 {b0['hover_w']:.0f} W, 0.2 kg 탑재 호버 {b2['hover_w']:.0f} W ({b2['hover_min']:.1f}분), 효율 속도 약 {b2['v_best']:.0f} m/s, "
+                      f"최대 거리 {b0['range_km']:.1f} km (DJI 표기 35 km보다 짧게 = 보수적)"),
+    ], size=12.5)
     source(s, "전력 모델: 회전익 이론 (Leishman 2006; Zeng 외 2019) · M100 자료: Rodrigues 외, Scientific Data 2021")
 
     s = D.content("2-4. 바람장 반영 3차원 시공간 경로계획")
@@ -216,54 +316,48 @@ def build(template: str, out: str) -> None:
     s = D.content("3-1. 가상 시운전 – 기존 경로 대비 SoC")
     section_tag(s, "3. 알고리즘 검증")
     picture(s, FIG / "F28_superiority.png", X0, 1.08, 6.4, 5.0)
-    table(s, 7.2, 1.15, 5.55, [
-        ["조합", "기존 → 제안", "변화 (95 % 구간)"],
-        ["창원 · X650", "16.6 → 13.7 %p", "−17.5 % (−18.5, −16.3)"],
-        ["판교 · X650", "18.6 → 15.0 %p", "−18.9 % (−20.0, −17.6)"],
-        ["판교 · M100", "35.1 → 27.5 %p", "−21.2 % (−23.0, −19.2)"],
-    ], [1.5, 1.75, 2.3], row_h=0.5, head_size=12.5, body_size=12, first_col_center=False)
-    items(s, 7.2, 3.3, 5.55, 2.0, [
-        ("630건  ", "지역·기체 3조합 × 7일 × 출발 3회 × 쌍 10"),
+    rows = [["조합", "기존 → 제안", "변화 (95 % 구간)"]]
+    for r in e13_rows(SETS_M4T):
+        rows.append([[(r[0], {"bold": True})], f"{r[1][:-3]} → {r[2]}", [(r[3].lstrip("*"), {"bold": True, "color": NAVY})]])
+    for r in e13_rows(SETS_REF):
+        rows.append([r[0] + " (비교)", f"{r[1][:-3]} → {r[2]}", r[3].lstrip("*")])
+    table(s, 7.2, 1.15, 5.55, rows, [1.75, 1.6, 2.2], row_h=0.44, head_size=12, body_size=11, first_col_center=False)
+    items(s, 7.2, 3.45, 5.55, 1.8, [
+        ("실증 기체 M4T  ", f"판교·창원 {V['n4']}건, 탑재 0.2 kg, 공식 사양 보정 모델"),
         ("기존 경로  ", "최단 경로 + 정속 10 m/s"),
-        ("제안이 우수  ", "626 / 630건"),
-        ("절감의 출처  ", "속도 선택 14.7–18.2 %, 경로 모양 1.8–4.9 %"),
-    ], size=12.5, gap=4)
-    stat(s, 7.2, 5.25, 5.55, 1.1, "SoC 소모 변화 (세 조합 평균)", "−17.5 ~ −21.2 %", "기존 경로를 '최단 + 속도 최적화'로 두면 −2 ~ −5 %", dark=True, vsize=24)
-    source(s, "가상 시운전 · 계획 00Z 예보, 평가 06Z 예보 · 편도 1.5–2.8 km · X650 수치는 전력 모델 가정(항력 면적)에 민감")
+        ("M4T 절감의 출처  ", f"속도 선택 {V['sp4']}, 경로 모양 {V['pa4']}"),
+    ], size=12, gap=4)
+    stat(s, 7.2, 5.3, 5.55, 1.1, f"실증 기체 M4T: SoC 소모 변화 ({V['n4']}건)", f"−{V['r4']}", f"제안이 우수한 경우 {V['win4']}건 · 비교 기체 −{V['rR']}", dark=True, vsize=22)
+    source(s, "가상 시운전 · 계획 00Z 예보, 평가 06Z 예보 · 편도 1.5–2.8 km · M4T 모델은 공식 사양 보정(탑재·고속 실측 전)")
 
     s = D.content("3-1. 가상 시운전 – 3D 화면 왕복 비교")
     section_tag(s, "3. 알고리즘 검증")
-    picture(s, FIG / "platform_3d_compare_pangyo_x650.png", X0, 1.08, 7.4, 5.0)
+    picture(s, FIG / "platform_3d_compare_pangyo_m4t.png", X0, 1.08, 7.4, 5.0)
     rows = [["지역 · 기체", "기존", "제안", "변화"]]
-    for k, lab in (("pg", "판교 · X650"), ("cw", "창원 · X650"), ("pm", "판교 · M100")):
-        e, p = CX[k]["existing"], CX[k]["proposed"]
-        rows.append([lab, f"{e['soc_used']:.1f} %p" + ("" if e["feasible"] else "\n(임무 불가)"), f"{p['soc_used']:.1f} %p",
-                     f"{(p['soc_used'] - e['soc_used']) / e['soc_used'] * 100:+.1f} %"])
-    table(s, 8.2, 1.15, 4.55, rows, [1.45, 1.1, 1.0, 1.0], row_h=0.58, head_size=12.5, body_size=12, first_col_center=False)
-    items(s, 8.2, 3.7, 4.55, 2.5, [
-        "2026-10-27 예보, 15시 출발 왕복",
-        "기존 = 최단 경로 + 정속 10 m/s",
-        "판교 M100: 기존 경로는 SoC가 바닥나 임무 불가 → 제안 경로는 예비 20 %를 지키며 완주",
-    ], size=12.5, gap=5)
+    for r in cmp3d_rows(SETS_M4T):
+        rows.append([[(r[0], {"bold": True})], r[1].replace(" (임무 불가)", "\n(임무 불가)"), r[3].lstrip("*"), [(r[4], {"bold": True, "color": NAVY})]])
+    for r in cmp3d_rows([("pangyo_x650", "판교 · X650"), ("changwon_x650", "창원 · X650"), ("pangyo_m100", "판교 · M100")]):
+        rows.append([r[0] + " (비교)", r[1].replace(" (임무 불가)", "\n(임무 불가)"), r[3].lstrip("*"), r[4]])
+    table(s, 8.2, 1.15, 4.55, rows, [1.75, 1.0, 0.9, 0.9], row_h=0.48, head_size=12, body_size=11, first_col_center=False)
+    items(s, 8.2, 4.35, 4.55, 2.4, [
+        "2026-10-27 예보, 15시 출발 왕복, M4T 탑재 0.2 kg",
+        "판교 15시 맞바람 약 11 m/s: M4T 내풍 한계(12 m/s)에 가까워 출발 판정으로 걸러야 함",
+        "M4T는 절감의 상당 부분이 경로 모양(순풍·약풍 고도)에서 나옴",
+    ], size=12, gap=5)
 
     s = D.content("3-1. 가상 시운전 – 비행 중 갱신·신뢰도")
     section_tag(s, "3. 알고리즘 검증")
     head(s, X0, 1.05, "실시간 엔진 폐루프: SoC 소모 변화 (30초 속도 갱신 + 안전장치)", w=8)
-    table(s, X0, 1.45, 7.3, [
-        ["바람 경우 (추정 편차)", "창원 · X650", "판교 · M100", "판교 · X650"],
-        ["실제 예보 오차 (0.3–0.4 m/s)", "−3.8 %", "−1.4 %", "−1.4 %"],
-        ["풍향 30° 회전 (3.2 m/s)", "−4.7 %", "−2.1 %", "−1.2 %"],
-        ["풍향 60° 회전 (6.2 m/s)", "−6.3 %", "−3.5 %", "−1.9 %"],
-        ["풍향 90° 회전 (8.8 m/s)", "−7.9 %", "−4.3 %", "−4.5 %"],
-        ["풍속 0.6배 (2.5 m/s)", "−6.5 %", "−2.9 %", "−4.6 %"],
-    ], [2.9, 1.45, 1.45, 1.5], row_h=0.46, head_size=12, body_size=12, first_col_center=False)
+    table(s, X0, 1.45, 7.3, [[h.replace(" (비교)", "\n(비교)") for h in T15["head"]]] + T15["rows"],
+          [2.6] + [1.0] * T15["n_sets"], row_h=0.46, head_size=10.5, body_size=11, first_col_center=False)
     items(s, X0, 4.4, 7.3, 2.4, [
         ("갱신 주기  ", "틀린 예보 손해를 2분 주기 12–35 %, 30초 주기 42–73 % 회복"),
-        ("속도 갱신의 안전성  ", "360건 모두 안전장치만 쓴 경우보다 나쁘지 않음, 판단 1회 2–3 ms"),
+        ("속도 갱신의 안전성  ", f"{T15['n_cases']}건 모두 안전장치만 쓴 경우보다 나쁘지 않음, 판단 1회 2–3 ms"),
         ("신뢰도  ", "95 % 상한 포함률 409/432 (94.7 %), 36일 · 2지역"),
         ("필요 SoC 여유  ", "6시간 전 예보 3.7 %, 30시간 전 14 %, 78시간 전 27 %"),
     ], size=12.5, gap=5)
-    stat(s, 8.25, 1.45, 4.5, 1.6, "가로지르는 이동 장애물 144건", "침범 0건", "모두 완주 · 최소 이격 32–38 m", dark=True)
+    stat(s, 8.25, 1.45, 4.5, 1.6, f"가로지르는 이동 장애물 {T15['obs_n']}건", f"침범 {T15['obs_col']}건",
+         f"완주 {T15['obs_done']}건 · 최소 이격 {T15['obs_sep'][0]:.0f}–{T15['obs_sep'][1]:.0f} m", dark=True)
     stat(s, 8.25, 3.25, 4.5, 1.6, "30초 속도 갱신의 손해 회복", "42–73 %", "틀린 예보로 생긴 SoC 손해 대비")
     stat(s, 8.25, 5.05, 4.5, 1.6, "출발 판정 95 % 상한 포함률", "94.7 %", "409 / 432건")
 
@@ -384,9 +478,9 @@ def build(template: str, out: str) -> None:
     s = D.content("4-4~5. 기체 적용과 비행 전 점검")
     section_tag(s, "4. 탑재 방법 및 지원 계획")
     for n, (t, col, lines) in enumerate([
-        ("실증 기체 DJI Matrice 4T", GREEN, [".kmz 경로 파일을 DJI Pilot 2에서 불러옴", "고도는 이륙점 기준 → 계획의 출발지에서 이륙",
+        ("실증 기체 DJI Matrice 4T", NAVY, [".kmz 경로 파일을 DJI Pilot 2에서 불러옴", "고도는 이륙점 기준 → 계획의 출발지에서 이륙",
                                             "대지속도 상한·탑재(≤ 200 g)를 M4T 제원에 맞춤", "선행: M4T 기종 번호 추가 · 불러오기 시험"]),
-        ("시험비행 기체 Holybro X650", ORANGE, [".waypoints를 Mission Planner로 업로드 (구간 속도 포함)", "비행 중 속도 갱신: dpo-server --mavlink udpin:0.0.0.0:14550",
+        ("시험비행 기체 Holybro X650", TEAL, [".waypoints를 Mission Planner로 업로드 (구간 속도 포함)", "비행 중 속도 갱신: dpo-server --mavlink udpin:0.0.0.0:14550",
                                               "EK3_DRAG_BCOEF_X/Y 설정 (바람 추정)", "BATT_CAPACITY = 10000 (잔량 % 보정)"]),
     ]):
         x = X0 + n * 6.15
@@ -426,9 +520,9 @@ def build(template: str, out: str) -> None:
     s = D.content("정리")
     for n, (t, d, col) in enumerate([
         ("알고리즘", "SoC를 목적으로 바람·지형·장애물을 반영한 3차원 시공간 경로와 구간 속도를 함께 정함 (WE-LT*)", NAVY),
-        ("가상 시운전", "기존 경로 대비 SoC 소모 17.5–21.2 % 감소, 이동 장애물 침범 0건, 비행제어기 연동 확인", TEAL),
-        ("실제 비행", "X650 시험비행: 시간 예측 3 %, 에너지는 중량 보정 시 2 % (제원 중량 −16 %)", ORANGE),
-        ("다음 단계", "M4T 비행 기록 → 전력 모델 · M4T 경로 파일 → 실증 지역 지도 → M4T 실증", GREEN),
+        ("가상 시운전", f"실증 기체 M4T: 기존 경로 대비 SoC 소모 {V['r4']} 감소 ({V['n4']}건), 이동 장애물 침범 0건, 비행제어기 연동 확인", NAVY),
+        ("실제 비행", "X650 시험비행: 시간 예측 3 %, 에너지는 중량 보정 시 2 % (제원 중량 −16 %)", NAVY),
+        ("다음 단계", "M4T 비행 기록 → 모델 확인 · M4T 경로 파일 → 실증 지역 지도 → M4T 실증", NAVY),
     ]):
         y = 1.2 + n * 1.35
         hb = box(s, X0, y, 2.6, 1.1, fill=col, shadow=False)
@@ -441,7 +535,7 @@ def build(template: str, out: str) -> None:
     print("saved", out)
 
 
-RGB_RED = __import__("pptx.dml.color", fromlist=["RGBColor"]).RGBColor(0xC0, 0x00, 0x00)
+RGB_RED = RGBColor(0xC0, 0x00, 0x00)
 
 if __name__ == "__main__":
     tpl = sys.argv[1]

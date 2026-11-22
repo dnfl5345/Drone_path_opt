@@ -73,7 +73,7 @@ class App:
         for z in self.nfz:
             self.site.add_static_nfz_circle(*z)
         self.hub0, self.dst0, self.tour0 = self._default_points(S)
-        self.drones = {k: DR.get(k) for k in ("m100", "x650")}     # m100: 실측 보정, x650: 실증 대상 기체(추정)
+        self.drones = {k: DR.get(k) for k in ("m100", "x650", "m4t")}     # m100: 실측 보정, x650: 실증 대상 기체(추정)
         self.drone = self.drones["m100"]
         self._scene3d = None
         self._example = None
@@ -187,7 +187,7 @@ class App:
         from ..live import LiveEngine
         dkey = req.pop("drone", None) or "m100"
         if dkey not in self.drones:
-            raise ValueError("기체는 m100 또는 x650")
+            raise ValueError("기체는 m4t, m100 또는 x650")
         pl = float(req.get("payload", 0.5) if req.get("payload") is not None else 0.5)
         if not (0 <= pl <= DR.PAYLOAD_MAX[dkey] + 1e-9):
             raise ValueError(f"탑재중량은 0~{DR.PAYLOAD_MAX[dkey]:g} kg")
@@ -273,11 +273,12 @@ class App:
             raise ValueError("출발 시각은 9~20시")
         dkey = req.get("drone", "m100")
         if dkey not in self.drones:
-            raise ValueError("기체는 m100 또는 x650")
+            raise ValueError("기체는 m4t, m100 또는 x650")
         payload = float(req.get("payload", 0.5))
         if not (0 <= payload <= DR.PAYLOAD_MAX[dkey] + 1e-9):
             raise ValueError(f"탑재중량은 0~{DR.PAYLOAD_MAX[dkey]:g} kg " +
-                             ("(실측 보정 범위)" if dkey == "m100" else "(최대이륙중량 6.3 kg − 자체무게 4.1 kg)"))
+                             {"m100": "(실측 보정 범위)", "x650": "(최대이륙중량 6.3 kg − 자체무게 4.1 kg)",
+                              "m4t": "(최대 페이로드 200 g)"}[dkey])
         kind = req.get("kind", "delivery")
         reserve = float(req.get("reserve", 20.0))
         max_wait = float(req.get("max_wait", 180.0)) if req.get("allow_wait", True) else 0.0

@@ -686,8 +686,11 @@ function refreshDrone() {
   if (+$("payload").value > d.payload_max) $("payload").value = d.payload_max;
   $("pmax").textContent = `(최대 ${d.payload_max} kg)`;
   const w = $("dronewarn");
-  w.style.display = d.key === "x650" ? "block" : "none";
-  w.innerHTML = "X650의 전력 모델은 제원과 제조사 호버 시간(무탑재 약 30분)으로 추정한 값입니다. 비행 기록으로 보정하기 전에는 SOC 수치를 참고용으로만 쓰세요.";
+  const msg = {
+    x650: "X650의 전력 모델은 제원과 제조사 호버 시간(무탑재 약 30분)으로 추정한 값입니다. 비행 기록으로 보정하기 전에는 SOC 수치를 참고용으로만 쓰세요.",
+    m4t: "M4T의 전력 모델은 DJI 공식 사양(무탑재 호버 42분, 9 m/s 정속 49분)에 맞춘 값입니다. 탑재·고속 비행은 실측 비행 기록으로 보정해야 합니다."}[d.key];
+  w.style.display = msg ? "block" : "none";
+  w.innerHTML = msg || "";
 }
 function refreshWindInfo() {
   const w = S.site.wind.find(x => x.hour === +$("hour").value);
@@ -903,11 +906,11 @@ async function init() {
   [S.site, S.sc] = await Promise.all([api("/api/site"), api("/api/scene3d")]);
   S.hub = [...S.sc.hub]; S.dst = [...S.sc.dst]; S.tour = (S.sc.tour || []).map(p => [...p]);
   $("drone").innerHTML = S.site.drones.map(d => `<option value="${d.key}">${d.label}</option>`).join("");
-  $("drone").value = "x650";
+  $("drone").value = S.site.drones.some(d => d.key === "m4t") ? "m4t" : "x650";
   $("hour").innerHTML = S.sc.hours.map(h => `<option value="${h}"${h === 15 ? " selected" : ""}>${h}시</option>`).join("");
   $("wk").innerHTML = S.sc.z.map((z, k) => `<option value="${k}">해발 ${z} m</option>`).join("");
   $("wk").value = Math.min(4, S.sc.z.length - 1);
-  $("payload").value = 1.0;
+  $("payload").value = $("drone").value === "m4t" ? 0.2 : 1.0;
   $("mtype").value = S.tour.length ? "tour" : "ab";
   refreshDrone(); refreshWindInfo();
   root.scale.z = +$("zs").value;

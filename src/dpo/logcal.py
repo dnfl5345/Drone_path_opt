@@ -189,7 +189,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="dpo-calibrate", description="비행 로그(.bin/.tlog)로 기체 전력 모델을 보정한다")
     ap.add_argument("--version", action="version", version=f"drone-path-opt {__version__}")
     ap.add_argument("logs", nargs="+", help="정속 수평 비행 로그 (여러 개 가능)")
-    ap.add_argument("--drone", default="x650", choices=["m100", "x650"])
+    ap.add_argument("--drone", default="x650", choices=["m100", "x650", "m4t"])
     ap.add_argument("--mass", type=float, required=True, help="비행 때의 총중량 [kg] (기체 + 배터리 + 탑재)")
     ap.add_argument("--rho", type=float, default=RHO0, help="공기밀도 [kg/m³]")
     ap.add_argument("--save", action="store_true", help="보정값을 DPO_HOME/calibration/<기체>.json 에 저장 (이후 계획에 쓰임)")
