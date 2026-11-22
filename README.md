@@ -120,6 +120,9 @@ PYTHONPATH=src python scripts/make_figures.py && PYTHONPATH=src python scripts/m
 PYTHONPATH=src python scripts/build_ppt.py <회의자료 템플릿.pptx> docs/drone_soc_path_planning_dev.pptx
 PYTHONPATH=src python scripts/dji_conditions_review.py                                   # DJI 조건 검토 (F25)
 PYTHONPATH=src python scripts/build_academic_ppt.py <회의자료 템플릿.pptx> docs/drone_soc_academic_talk.pptx
+python scripts/make_deploy_m4t_figure.py                                               # 탑재 구성도 (F38)
+python scripts/build_final_report_hwpx.py && python scripts/build_business_report_hwpx.py # 한글(HWPX) 최종·사업 내용 보고서 (python-hwpx 필요)
+PYTHONPATH=src python scripts/build_business_ppt.py <회의자료 템플릿.pptx> docs/drone_soc_business_talk.pptx
 PYTHONPATH=src python scripts/bench_live.py 5 10              # 실시간 엔진 벤치 (약 6분)
 PYTHONPATH=src python -m pytest -q tests
 ```
