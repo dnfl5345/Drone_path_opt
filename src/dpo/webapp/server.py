@@ -11,6 +11,14 @@ API
   POST /api/plan  {obstacles, hub, dst, dep_hour, payload, kind, round_trip, allow_wait, max_wait, wind, reserve}
   POST /api/replan {obstacles, t_now}   비행 중(t_now) 장애물 변경 발표 → 남은 경로 검사 → 충돌 시 재계획
 
+지역 (새 지역 만들기: dpo.regions)
+  GET  /api/regions              지역 목록·현재 지역·만들기 작업 상태
+  POST /api/geo/search {q}       장소·주소 검색 (위도, 경도 입력 가능) → 현재 지역 안이면 x, y
+  POST /api/region/create {name, lat, lon, size_km, date?}   지역 만들기 (별도 프로세스, 진행은 /api/regions)
+  POST /api/region/wind {}       현재 지역의 예보 바람을 최신으로 (사용자 지역만)
+  POST /api/region/open {key}    서버를 끄지 않고 지역 전환
+  POST /api/region/cancel {}     만들기 작업 중단
+
 3D 지도 경로 생성 (/3d 화면, static/map3d.*, three.js 는 static/vendor 에 동봉)
   GET  /api/scene3d              지형 격자·건물 다각형·금지구역·비행 가능 하한/상한 고도
   GET  /api/wind3d?hour=15       고도 레이어별 바람 벡터
@@ -54,7 +62,68 @@ KST = 9
 MAX_TOUR = 12            # 순회 경유점 최대 개수
 
 
+SWITCH = threading.Lock()   # 지역 전환
 RTH_LIMIT = 150.0     # DJI 경로 파일의 복귀 고도 상한 [m, 이륙점 기준] – 국내 일반 비행 고도 제한 (지면 위 150 m)
+
+
+class RegionJob:
+    """지역 만들기·바람 갱신을 별도 프로세스(python -m dpo.regions --json …)로 돌린다.
+    같은 프로세스에서 하면 지역 설정(config 전역값)이 바뀌어 지금 쓰는 지역과 섞이기 때문이다."""
+
+    def __init__(self):
+        self.proc, self.state, self.log, self.key, self.error, self.kind, self.t0 = None, "idle", [], None, None, None, None
+        self.lock = threading.Lock()
+
+    def start(self, kind, args):
+        import subprocess
+        with self.lock:
+            if self.state == "running":
+                raise ValueError("이미 진행 중인 작업이 있습니다")
+            env = dict(os.environ, DPO_HOME=str(C.ROOT), PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+            src = str(Path(__file__).resolve().parents[2])
+            env["PYTHONPATH"] = src + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+            self.proc = subprocess.Popen([sys.executable, "-m", "dpo.regions", "--json", *args], stdout=subprocess.PIPE,
+                                         stderr=subprocess.STDOUT, env=env, text=True, encoding="utf-8", errors="replace")
+            self.state, self.log, self.key, self.error, self.kind, self.t0 = "running", [], None, None, kind, time.time()
+        threading.Thread(target=self._read, daemon=True).start()
+
+    def _read(self):
+        p = self.proc
+        for ln in p.stdout:
+            ln = ln.strip()
+            if not ln:
+                continue
+            try:
+                d = json.loads(ln)
+            except ValueError:
+                d = dict(msg=ln)
+            with self.lock:
+                if d.get("error"):
+                    self.error = d["error"]
+                if d.get("done"):
+                    self.key = d.get("key")
+                if d.get("msg"):
+                    self.log.append(dict(t=round(time.time() - self.t0, 1), step=d.get("step"), n=d.get("n"), msg=d["msg"]))
+        rc = p.wait()
+        with self.lock:
+            if self.state == "running":
+                self.state = "done" if rc == 0 and self.key else "failed"
+                if self.state == "failed" and not self.error:
+                    self.error = (self.log[-1]["msg"] if self.log else f"종료 코드 {rc}")
+
+    def cancel(self):
+        with self.lock:
+            if self.state == "running" and self.proc is not None:
+                self.proc.terminate()
+                self.state, self.error = "failed", "사용자가 중단함"
+
+    def status(self):
+        with self.lock:
+            return dict(state=self.state, kind=self.kind, key=self.key, error=self.error, log=self.log[-30:],
+                        elapsed=None if self.t0 is None else round(time.time() - self.t0, 1))
+
+
+JOB = RegionJob()
 
 
 class App:
@@ -88,6 +157,7 @@ class App:
         self.live = LiveEngine(self.site, self.drone, self._adsb_live)
         self.lives = {"m100": self.live}          # 기체별 실시간 엔진 (계획기를 기체마다 따로 둔다)
         self._truth = None
+        self.busy = False                         # 지역 전환 중
         self.link = None                          # MAVLink 연결 (--mavlink 로 지정했을 때)
         # JIT 예열
         t = time.time()
@@ -116,7 +186,12 @@ class App:
             raise ValueError("기준 주소 주변에 비행 가능한 지점이 없습니다")
 
         hub = near(x0, y0)
-        tour = [near(x0 + R * math.cos(math.radians(a)), y0 + R * math.sin(math.radians(a)))
+        k = min(1.0, 0.33 * min(s.nx, s.ny) * s.dx / 1100.0)      # 작은 지역은 경유점 반경을 줄임
+        W, H = s.nx * s.dx, s.ny * s.dx
+
+        def inside(x, y):
+            return (float(np.clip(x, 3 * s.dx, W - 3 * s.dx)), float(np.clip(y, 3 * s.dx, H - 3 * s.dx)))
+        tour = [near(*inside(x0 + k * R * math.cos(math.radians(a)), y0 + k * R * math.sin(math.radians(a))))
                 for a, R in ((20, 1000), (95, 800), (165, 1100), (235, 900), (300, 1000))]
         return hub, tour[0], tour
 
@@ -151,6 +226,72 @@ class App:
         plt.close(fig)
         return buf.getvalue()
 
+    # ---------------------------------------------------------------- 지역
+    def regions(self):
+        from .. import regions as RG
+        C._load_user_sites()
+        return dict(current=C.SITE_KEY, sites=RG.list_sites(), job=JOB.status(), size=[RG.SIZE_MIN, RG.SIZE_MAX],
+                    vworld=bool(os.environ.get("DPO_VWORLD_KEY")))
+
+    def geo_search(self, req):
+        from .. import regions as RG
+        from ..data_terrain import ll2xy
+        items = RG.geocode(str(req.get("q", "")), limit=int(req.get("limit", 8)))
+        s = self.site
+        for it in items:
+            x, y = (float(v) for v in ll2xy(it["lon"], it["lat"]))
+            it["x"], it["y"] = x, y
+            it["inside"] = bool(2 * s.dx <= x < (s.nx - 2) * s.dx and 2 * s.dx <= y < (s.ny - 2) * s.dx)
+        return dict(items=items, site=C.SITE_KEY)
+
+    def region_create(self, req):
+        from .. import regions as RG
+        try:
+            lat, lon, size = float(req["lat"]), float(req["lon"]), float(req.get("size_km", 5.0))
+        except (KeyError, TypeError, ValueError):
+            raise ValueError("위도·경도·크기를 숫자로 넣으십시오")
+        if not (RG.SIZE_MIN <= size <= RG.SIZE_MAX):
+            raise ValueError(f"지역 크기는 {RG.SIZE_MIN:g}–{RG.SIZE_MAX:g} km")
+        name = str(req.get("name") or "").strip()[:40] or f"{lat:.4f}, {lon:.4f}"
+        args = ["create", "--name", name, "--lat", repr(lat), "--lon", repr(lon), "--size", repr(size)]
+        if req.get("date"):
+            args += ["--date", str(req["date"])]
+        JOB.start("create", args)
+        return JOB.status()
+
+    def region_wind(self, req=None):
+        if not C.SITE.get("user"):
+            raise ValueError("기본 지역(판교·창원)의 바람은 보고서 재현용으로 고정되어 있습니다. 새로 만든 지역에서 쓰십시오")
+        args = ["wind", C.SITE_KEY] + (["--date", str(req["date"])] if req and req.get("date") else [])
+        JOB.start("wind", args)
+        return JOB.status()
+
+    def region_open(self, req):
+        """서버를 끄지 않고 지역을 바꾼다 (새 지역의 자료를 읽고 계산 코드를 데우는 데 수 초)."""
+        key = str(req.get("key", ""))
+        C._load_user_sites()
+        if key not in C.SITES:
+            raise ValueError(f"알 수 없는 지역: {key}")
+        missing = C.check_data(key)
+        if missing:
+            raise ValueError("이 지역의 자료가 아직 없습니다: " + ", ".join(Path(m).name for m in missing))
+        with SWITCH:
+            old = C.SITE_KEY
+            self.busy = True
+            try:
+                for e in self.lives.values():
+                    e.stop()
+                link = self.link
+                C.use_site(key)
+                new = App()
+                new.link = link
+            except Exception:
+                C.use_site(old)
+                self.busy = False
+                raise
+            self.__dict__ = new.__dict__              # 한 번에 바꿔 끼움 (진행 중 요청은 옛 객체를 끝까지 씀)
+        return dict(ok=True, key=key, label=C.SITE["label"])
+
     # ---------------------------------------------------------------- API
     def site_info(self):
         s = self.site
@@ -164,7 +305,9 @@ class App:
                            dir_from=float((math.degrees(math.atan2(-u, -v))) % 360)))
         return dict(W=s.nx * s.dx, H=s.ny * s.dx, dx=s.dx, z=[float(z) for z in s.z],
                     ground=[float(s.ground.min()), float(s.ground.max())], hub=self.hub0, dst=self.dst0,
-                    tour=self.tour0, site=dict(key=C.SITE_KEY, label=C.SITE["label"], hub_name=C.SITE["hub_name"]),
+                    tour=self.tour0, site=dict(key=C.SITE_KEY, label=C.SITE["label"], hub_name=C.SITE["hub_name"],
+                                               user=bool(C.SITE.get("user")), lon=list(C.SITE["lon"]), lat=list(C.SITE["lat"]),
+                                               truth=bool(C.SITE.get("gfs_truth"))),
                     nfz=self.nfz[0] if self.nfz else None, wind=ws, limits=LIMITS, drone=dict(name=self.drone.name, battery_wh=self.drone.battery_wh,
                                                                 m_empty=self.drone.m_empty),
                     drones=[dict(key=k, label=DR.LABEL[k], name=d.name, battery_wh=d.battery_wh, m_empty=d.m_empty,
@@ -175,6 +318,8 @@ class App:
     def truth_site(self):
         """평가용 '실제 바람': 같은 날 더 늦게 발표된 예보 (지역 등록표의 gfs_truth)."""
         if self._truth is None:
+            if not C.SITE.get("gfs_truth"):
+                raise ValueError("이 지역에는 평가용 '실제 바람'(더 늦은 예보) 자료가 없습니다. 예보와 같음 또는 풍향·풍속 바꾸기를 쓰십시오")
             f = C.RAW / C.SITE["gfs_truth"]
             if not f.exists():
                 raise ValueError(f"실제 바람 자료가 없습니다: {f.name}")
@@ -1045,6 +1190,12 @@ def make_handler(app):
                 return self._send(200, app.live.snapshot(int(q.get("since", 0)), int(q.get("plan_ver", -1))))
             if path == "/api/health":
                 return self._send(200, app.health())
+            if path == "/api/regions":
+                return self._send(200, app.regions())
+            if app.busy:
+                return self._send(503, dict(error="지역을 바꾸는 중입니다. 잠시 뒤 다시 시도하십시오"))
+            if path == "/region.js":
+                return self._send(200, (STATIC / "region.js").read_bytes(), "text/javascript; charset=utf-8")
             if path == "/api/live/mission":
                 return self._send(200, app.live_mission())
             if path in ("/api/live/mission.waypoints", "/api/live/mission.csv"):
@@ -1078,6 +1229,10 @@ def make_handler(app):
                 f = (STATIC / "vendor" / Path(path).name)
                 if f.is_file() and f.suffix == ".js":
                     return self._send(200, f.read_bytes(), "text/javascript; charset=utf-8")
+                if f.is_file() and f.suffix == ".css":
+                    return self._send(200, f.read_bytes(), "text/css; charset=utf-8")
+                if f.is_file() and f.suffix == ".png":
+                    return self._send(200, f.read_bytes(), "image/png")
                 return self._send(404, dict(error="not found"))
             if path == "/api/scene3d":
                 return self._send(200, app.scene3d())
@@ -1121,6 +1276,22 @@ def make_handler(app):
             try:
                 n = int(self.headers.get("Content-Length", 0))
                 req = json.loads(self.rfile.read(n) or b"{}")
+                if self.path == "/api/region/open":
+                    return self._send(200, app.region_open(req))
+                if self.path == "/api/region/create":
+                    return self._send(200, app.region_create(req))
+                if self.path == "/api/region/cancel":
+                    JOB.cancel()
+                    return self._send(200, JOB.status())
+                if self.path == "/api/geo/search":
+                    try:
+                        return self._send(200, app.geo_search(req))
+                    except ConnectionError as ex:
+                        return self._send(502, dict(error=str(ex)))
+                if app.busy:
+                    return self._send(503, dict(error="지역을 바꾸는 중입니다. 잠시 뒤 다시 시도하십시오"))
+                if self.path == "/api/region/wind":
+                    return self._send(200, app.region_wind(req))
                 if self.path == "/api/validate":
                     ok, errs = app._parse(req)
                     return self._send(200, dict(valid=[o.to_dict() for o in ok], errors=errs))
@@ -1169,7 +1340,8 @@ def main(argv=None):
     ap.add_argument("--port", type=int, default=int(os.environ.get("DPO_PORT", 8765)), help="포트 (환경변수 DPO_PORT)")
     ap.add_argument("--host", default=os.environ.get("DPO_HOST", "127.0.0.1"),
                     help="바인드 주소 (환경변수 DPO_HOST). 외부에 열려면 0.0.0.0 – 인증이 없으므로 신뢰하는 망에서만")
-    ap.add_argument("--site", default=C.SITE_KEY, choices=list(C.SITES), help="대상 지역 (기본: 환경변수 DPO_SITE 또는 pangyo)")
+    ap.add_argument("--site", default=C.SITE_KEY, choices=list(C.SITES),
+                    help="대상 지역 (기본: 환경변수 DPO_SITE 또는 pangyo). 새 지역은 dpo-site create 또는 3D 화면의 '새 지역'으로 만든다")
     ap.add_argument("--open", action="store_true", help="준비되면 브라우저로 3D 지도 화면을 연다")
     ap.add_argument("--mavlink", default=os.environ.get("DPO_MAVLINK"), metavar="URL",
                     help="기체 MAVLink 연결 (예: udpin:0.0.0.0:14550). 주면 속도 명령을 기체로 보낸다")

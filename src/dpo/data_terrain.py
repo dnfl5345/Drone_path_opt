@@ -47,32 +47,59 @@ def xy2ll(x, y, fr=None):
 
 
 # ---------------------------------------------------------------- DSM
-def fetch_dsm():
-    out = C.RAW / C.SITE["dsm_file"]
+def fetch_dsm(tile=None):
+    """Copernicus GLO-30 DSM 타일 하나를 받아 둔다. 바다 등 타일이 없으면 None."""
+    tile = tile or C.SITE["dsm_tile"]
+    out = C.RAW / (C.SITE["dsm_file"] if tile == C.SITE.get("dsm_tile") and C.SITE.get("dsm_file") else C.dsm_file(tile))
     if not out.exists():
-        r = requests.get(C.COP_URL, timeout=300)
+        r = requests.get(C.dsm_url(tile), timeout=300)
+        if r.status_code in (403, 404):            # 바다 위 등 타일이 없는 곳
+            return None
         r.raise_for_status()
-        out.write_bytes(r.content)
+        tmp = out.with_suffix(".part")
+        tmp.write_bytes(r.content)
+        tmp.replace(out)
     return out
+
+
+def dsm_tiles(fr=None):
+    """지역이 걸치는 1° 타일 목록 (경계를 넘는 지역도 처리)."""
+    if C.SITE.get("dsm_tiles"):
+        return list(C.SITE["dsm_tiles"])
+    if C.SITE.get("dsm_tile"):
+        return [C.SITE["dsm_tile"]]
+    return [C.dsm_tile_name(la, lo) for la in range(math.floor(C.LAT_MIN), math.floor(C.LAT_MAX) + 1)
+            for lo in range(math.floor(C.LON_MIN), math.floor(C.LON_MAX) + 1)]
 
 
 def dsm_on_grid(fr):
     import rasterio
     from scipy.ndimage import map_coordinates
 
-    path = fetch_dsm()
-    with rasterio.open(path) as ds:
-        inv = ~ds.transform
-        xs = (np.arange(fr["nx"]) + 0.5) * C.DX
-        ys = (np.arange(fr["ny"]) + 0.5) * C.DX
-        X, Y = np.meshgrid(xs, ys)
-        lon, lat = xy2ll(X, Y, fr)
-        col, row = inv * (lon, lat)
-        # 필요한 창만 읽기
-        r0, r1 = int(np.floor(row.min())) - 2, int(np.ceil(row.max())) + 3
-        c0, c1 = int(np.floor(col.min())) - 2, int(np.ceil(col.max())) + 3
-        arr = ds.read(1, window=((r0, r1), (c0, c1))).astype(np.float64)
-        z = map_coordinates(arr, [row - r0 - 0.5, col - c0 - 0.5], order=1, mode="nearest")
+    xs = (np.arange(fr["nx"]) + 0.5) * C.DX
+    ys = (np.arange(fr["ny"]) + 0.5) * C.DX
+    X, Y = np.meshgrid(xs, ys)
+    lon, lat = xy2ll(X, Y, fr)
+    z = np.zeros(lon.shape)                         # 타일이 없는 곳(바다) = 0 m
+    done = np.zeros(lon.shape, bool)
+    for tile in dsm_tiles(fr):
+        path = fetch_dsm(tile)
+        if path is None:
+            continue
+        with rasterio.open(path) as ds:
+            b = ds.bounds
+            sel = (lon >= b.left) & (lon <= b.right) & (lat >= b.bottom) & (lat <= b.top) & ~done
+            if not sel.any():
+                continue
+            inv = ~ds.transform                      # 아핀 역변환을 직접 계산 (라이브러리 판에 따라 * 연산이 없어짐)
+            x_, y_ = lon[sel], lat[sel]
+            col, row = inv.a * x_ + inv.b * y_ + inv.c, inv.d * x_ + inv.e * y_ + inv.f
+            # 필요한 창만 읽기
+            r0, r1 = max(int(np.floor(row.min())) - 2, 0), min(int(np.ceil(row.max())) + 3, ds.height)
+            c0, c1 = max(int(np.floor(col.min())) - 2, 0), min(int(np.ceil(col.max())) + 3, ds.width)
+            arr = ds.read(1, window=((r0, r1), (c0, c1))).astype(np.float64)
+            z[sel] = map_coordinates(arr, [row - r0 - 0.5, col - c0 - 0.5], order=1, mode="nearest")
+            done |= sel
     return z, lon, lat
 
 

@@ -1,6 +1,6 @@
 {
- "load_s": 4.462,
- "plan_s": 18.583,
+ "load_s": 4.334,
+ "plan_s": 18.352,
  "downloads": [
   "pangyo_m4t_15h_out.waypoints",
   "pangyo_m4t_15h_back.waypoints",
@@ -11,7 +11,7 @@
  "steps": [
   {
    "name": "01_start",
-   "note": "첫 화면 (4.5 s)"
+   "note": "첫 화면 (4.3 s)"
   },
   {
    "name": "02_drone",
@@ -39,7 +39,7 @@
   },
   {
    "name": "07_result",
-   "note": "경로 생성 18.6 s"
+   "note": "경로 생성 18.4 s"
   },
   {
    "name": "08_play",

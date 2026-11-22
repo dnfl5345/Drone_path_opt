@@ -18,6 +18,7 @@ dependencies = [
 
 [project.optional-dependencies]
 mavlink = ["pymavlink>=2.4.40"]                       # 기체 연결 (속도 명령 송신, 바람 수신, 미션 올리기)
+region = ["requests", "rasterio", "pyarrow", "fsspec", "aiohttp", "eccodes"]   # 새 지역 만들기 (지형·건물·예보 바람 받기)
 data = ["requests", "rasterio", "pygrib", "pyarrow", "fsspec", "aiohttp", "shapely", "pandas"]   # 지형·건물·예보 내려받기
 report = ["python-pptx", "pillow", "imageio", "lxml"]  # 발표자료·그림 생성 스크립트
 dev = ["pytest>=7", "pymavlink>=2.4.40", "build"]
@@ -27,6 +28,7 @@ dpo-server = "dpo.webapp.server:main"
 dpo-plan = "dpo.cli:main"
 dpo-fly = "dpo.flight:main"
 dpo-calibrate = "dpo.logcal:main"
+dpo-site = "dpo.regions:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

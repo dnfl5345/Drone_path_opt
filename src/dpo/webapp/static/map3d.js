@@ -11,6 +11,13 @@ const hex = c => "#" + c.toString(16).padStart(6, "0");
 const S = { site: null, sc: null, hub: null, dst: null, tour: [], obs: [], sel: -1, plan: null, mission: null, track: [],
             t: 0, tEnd: 300, playing: false, mode: null, example: null, wind: null, dirty: false };
 window.__map3d = S;                      // 자동 시험에서 상태를 읽을 수 있게 노출
+// 장소 검색(region.js)이 출발지·도착지·경유점을 정할 때 쓰는 입구
+S.setPoint = (type, x, y) => {
+  if (type === "hub") S.hub = [x, y];
+  else if (type === "dst") { S.dst = [x, y]; if ($("mtype").value === "tour") { $("mtype").value = "ab"; refreshMissionType(); } }
+  else if (type === "via") { S.tour.push([x, y]); if ($("mtype").value !== "tour") { $("mtype").value = "tour"; refreshMissionType(); } }
+  drawMarks(); markDirty(); frame();
+};
 
 function legIndex(name) { return name === "out" ? 0 : name === "back" ? 1 : (parseInt(name.slice(1), 10) - 1) || 0; }
 function legColor(name) { return PALETTE[legIndex(name) % PALETTE.length]; }

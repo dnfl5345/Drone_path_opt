@@ -6,8 +6,10 @@
   2. sh install_linux_mac.sh               (가상환경 → 프로그램 설치 → 자료 풀기 → 점검)
   3. sh run_linux_mac.sh                   (서버 준비 시간, /api/health)
   4. node scripts/client_acceptance.js     (3D 화면 T2–T6, 실시간 모의 비행) – 판교
-  5. sh run_linux_mac.sh changwon + 4      – 창원
-  6. dpo-plan … (매뉴얼 6장 명령)
+  5. 창원으로 전환한 뒤 4 반복 (서버를 끄지 않고 지역 전환)
+  6. dpo-site create (명령줄로 새 지역) → node scripts/region_acceptance.js (화면으로 지역 전환·장소 검색·새 지역 만들기)
+  7. dpo-plan … (매뉴얼 명령)
+  8. Windows 판 정적 검사 (실행 파일 글자 코드·줄바꿈, DLL 의존성, 경로 길이 – make_release 기록)
 기록: docs/manual_img/install_log.json (매뉴얼의 터미널 화면·시험 기록 표가 이 기록을 쓴다).
 Windows 설치 파일(.bat)은 이 환경에서 실행할 수 없어, 인코딩·줄바꿈·명령이 ASCII 인지만 검사한다.
 """
@@ -30,7 +32,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from dpo import __version__ as VER  # noqa: E402
 
-NAME = f"DronePathOpt_v{VER}"
+NAME = f"DronePathOpt_v{VER}_Linux_macOS"
+WIN = f"DronePathOpt_v{VER}_Windows"
 PORT = 8765
 
 
@@ -115,11 +118,18 @@ def main():
             bad.append(f)
     n_sum = len((W / "SHA256SUMS.txt").read_text(encoding="utf-8").splitlines())
     S["sha"] = dict(cmd="sha256sum -c SHA256SUMS.txt", rc=1 if bad else 0, sec=0.0, out=f"{n_sum}개 파일 모두 일치" if not bad else "불일치: " + ", ".join(bad))
-    S["bat"] = dict(cmd="Windows 실행 파일 정적 검사", rc=0, sec=0.0, out="")
-    for f in ("install_windows.bat", "run_windows.bat", "run_windows_changwon.bat"):
-        p = check_bat(W / f)
-        S["bat"]["out"] += f"{f}: {'통과' if not p else '; '.join(p)}\n"
-        S["bat"]["rc"] |= bool(p)
+    S["bat"] = dict(cmd="Windows 판 정적 검사", rc=0, sec=0.0, out="")
+    wdir = ROOT / "dist" / WIN
+    if wdir.is_dir():
+        for f in sorted(wdir.glob("*.bat")):
+            p = check_bat(f)
+            S["bat"]["out"] += f"{f.name}: {'통과' if not p else '; '.join(p)}\n"
+            S["bat"]["rc"] |= bool(p)
+        info = ROOT / "dist" / f"{WIN}.info.json"
+        if info.exists():
+            S["bat"]["win"] = json.loads(info.read_text(encoding="utf-8"))
+    else:
+        S["bat"]["out"] = "Windows 판 없음 (make_release.py --only windows 먼저)"
     # 2. 설치
     S["install"] = run(["sh", "install_linux_mac.sh"], W, env, show="sh install_linux_mac.sh")
     bin_ = W / "dpo-env" / "bin"
@@ -137,7 +147,20 @@ def main():
             acc = json.loads((out_dir / f"acceptance_{site}.json").read_text(encoding="utf-8")) if r and (out_dir / f"acceptance_{site}.json").exists() else None
             log["acceptance"][site] = acc or dict(ok=False, error=(r or {}).get("out", "")[-800:])
         stop(srv)
-    # 6. 명령줄 (매뉴얼 6장)
+    # 6. 새 지역: 명령줄로 하나 만들고, 화면에서 그 지역으로 바꾼 뒤 대화창으로 또 하나 만든다
+    S["site_create"] = run([str(bin_ / "dpo-site"), "create", "--name", "강릉경포", "--lat", "37.795", "--lon", "128.896", "--size", "4"], W, venv_env,
+                           show="dpo-site create --name 강릉경포 --lat 37.795 --lon 128.896 --size 4", timeout=1800)
+    key = next((ln.split("만들었습니다:")[1].split()[0] for ln in S["site_create"]["out"].splitlines() if "만들었습니다:" in ln), None)
+    S["site_list"] = run([str(bin_ / "dpo-site"), "list"], W, venv_env, show="dpo-site list")
+    if key and not a.skip_ui:
+        srv, h, sec = server(W, "pangyo", env, W0 / "server_region.log")
+        r = run(["node", str(ROOT / "scripts" / "region_acceptance.js"), f"http://127.0.0.1:{PORT}", str(W0 / "acc_region"), key, "35.1630, 129.1630", "3"],
+                W0, dict(env, NODE_PATH=subprocess.run(["npm", "root", "-g"], capture_output=True, text=True).stdout.strip()),
+                show="새 지역 화면 시험", timeout=2400)
+        f = W0 / "acc_region" / "region_acceptance.json"
+        log["acceptance"]["region"] = json.loads(f.read_text(encoding="utf-8")) if f.exists() else dict(ok=False, steps=[], errors=[r["out"][-800:]])
+        stop(srv)
+    # 7. 명령줄 (매뉴얼)
     S["plan"] = run([str(bin_ / "dpo-plan"), "--drone", "m4t", "--payload", "0.2", "--dep-hour", "15", "--out", "missions"], W, venv_env,
                     show="dpo-plan --drone m4t --payload 0.2 --dep-hour 15 --out missions")
     S["plan_wpml"] = run([str(bin_ / "dpo-plan"), "--drone", "m4t", "--payload", "0.2", "--dep-hour", "15", "--one-way", "--wpml-template",
@@ -154,6 +177,7 @@ def main():
         print(f"[{k}] rc={v.get('rc')} {v.get('sec', '')} s :: {v.get('cmd')}")
     for site, v in log["acceptance"].items():
         print(f"[화면 {site}] {'통과' if v.get('ok') else '실패'}", [(s['id'], s['ok']) for s in v.get("steps", [])], v.get("errors"))
+    print(S["bat"]["out"], S["bat"].get("win"))
     print("통과" if log["ok"] else "실패", "→ docs/manual_img/install_log.json")
     return 0 if log["ok"] else 1
 

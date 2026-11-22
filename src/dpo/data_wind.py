@@ -39,6 +39,49 @@ def _get(url, **kw):
             time.sleep(2 ** k)
 
 
+def _decode(b: bytes, lat1, lat2, lon1, lon2):
+    """GRIB2 메시지 하나를 풀어 위경도 범위(경계 포함)만 잘라 (값, 위도 2차원, 경도 2차원) 으로 돌려준다.
+
+    ecCodes(eccodes 패키지 – Windows·macOS·Linux 모두 설치 파일 있음)를 먼저 쓰고, 없으면 pygrib 을 쓴다.
+    정규 위경도 격자(GFS 0.25°)만 다룬다. 행은 파일의 주사 순서(북 → 남), 열은 경도 오름차순 (pygrib 의 data() 와 같음)."""
+    try:
+        import eccodes as ec
+    except ImportError:
+        ec = None
+    if ec is None:
+        import pygrib
+        with tempfile.NamedTemporaryFile(suffix=".grb2", delete=False) as tf:
+            tf.write(b)
+            name = tf.name
+        try:
+            g = pygrib.open(name).message(1)
+            return g.data(lat1=lat1, lat2=lat2, lon1=lon1, lon2=lon2)
+        finally:
+            import os
+            os.unlink(name)
+    h = ec.codes_new_from_message(b)
+    try:
+        if ec.codes_get(h, "gridType") != "regular_ll":
+            raise ValueError("정규 위경도 격자가 아닙니다")
+        ni, nj = ec.codes_get(h, "Ni"), ec.codes_get(h, "Nj")
+        la0, la1 = ec.codes_get_double(h, "latitudeOfFirstGridPointInDegrees"), ec.codes_get_double(h, "latitudeOfLastGridPointInDegrees")
+        lo0 = ec.codes_get_double(h, "longitudeOfFirstGridPointInDegrees")
+        dlo = ec.codes_get_double(h, "iDirectionIncrementInDegrees")
+        vals = ec.codes_get_values(h).reshape(nj, ni)
+    finally:
+        ec.codes_release(h)
+    lats = np.linspace(la0, la1, nj)
+    lons = (lo0 + dlo * np.arange(ni)) % 360.0
+    lo_a, lo_b = lon1 % 360.0, lon2 % 360.0
+    eps = 1e-6
+    rj = np.where((lats >= lat1 - eps) & (lats <= lat2 + eps))[0]
+    ci = np.where((lons >= lo_a - eps) & (lons <= lo_b + eps))[0] if lo_a <= lo_b else \
+        np.where((lons >= lo_a - eps) | (lons <= lo_b + eps))[0]
+    sub = vals[np.ix_(rj, ci)]
+    LO, LA = np.meshgrid(lons[ci], lats[rj])
+    return sub, LA, LO
+
+
 def _idx(url):
     t = _get(url + ".idx")
     lines = t.text.strip().splitlines()
@@ -67,7 +110,6 @@ def _want(var, lev):
 
 def fetch_gfs_hour(cycle: datetime, fh: int):
     """한 예보시각의 U/V 고도별 필드를 대상지역 주변만 잘라 dict로 반환."""
-    import pygrib
 
     ymd, hh = cycle.strftime("%Y%m%d"), cycle.strftime("%H")
     url = f"{C.GFS_BUCKET}/gfs.{ymd}/{hh}/atmos/gfs.t{hh}z.pgrb2.0p25.f{fh:03d}"
@@ -76,12 +118,7 @@ def fetch_gfs_hour(cycle: datetime, fh: int):
     for var, lev, s, e in msgs:
         rng = f"bytes={s}-{e}" if e else f"bytes={s}-"
         b = _get(url, headers={"Range": rng}).content
-        with tempfile.NamedTemporaryFile(suffix=".grb2") as tf:
-            tf.write(b)
-            tf.flush()
-            g = pygrib.open(tf.name).message(1)
-            data, lats, lons = g.data(lat1=C.LAT_MIN - PAD, lat2=C.LAT_MAX + PAD,
-                                      lon1=C.LON_MIN - PAD, lon2=C.LON_MAX + PAD)
+        data, lats, lons = _decode(b, C.LAT_MIN - PAD, C.LAT_MAX + PAD, C.LON_MIN - PAD, C.LON_MAX + PAD)
         kind, lv = _want(var, lev)
         key = f"{var}_{kind}{lv}"
         out[key] = data.astype(np.float32)
@@ -90,31 +127,26 @@ def fetch_gfs_hour(cycle: datetime, fh: int):
     for var, lev, s, e in _idx(url):
         if var == "HGT" and lev in [f"{p} mb" for p in C.GFS_LEVELS_P]:
             b = _get(url, headers={"Range": f"bytes={s}-{e}"}).content
-            with tempfile.NamedTemporaryFile(suffix=".grb2") as tf:
-                tf.write(b)
-                tf.flush()
-                g = pygrib.open(tf.name).message(1)
-                data, _, _ = g.data(lat1=C.LAT_MIN - PAD, lat2=C.LAT_MAX + PAD,
-                                    lon1=C.LON_MIN - PAD, lon2=C.LON_MAX + PAD)
+            data, _, _ = _decode(b, C.LAT_MIN - PAD, C.LAT_MAX + PAD, C.LON_MIN - PAD, C.LON_MAX + PAD)
             out[f"HGT_p{lev.split()[0]}"] = data.astype(np.float32)
         if var == "HGT" and lev == "surface":
             b = _get(url, headers={"Range": f"bytes={s}-{e}"}).content
-            with tempfile.NamedTemporaryFile(suffix=".grb2") as tf:
-                tf.write(b)
-                tf.flush()
-                g = pygrib.open(tf.name).message(1)
-                data, _, _ = g.data(lat1=C.LAT_MIN - PAD, lat2=C.LAT_MAX + PAD,
-                                    lon1=C.LON_MIN - PAD, lon2=C.LON_MAX + PAD)
+            data, _, _ = _decode(b, C.LAT_MIN - PAD, C.LAT_MAX + PAD, C.LON_MIN - PAD, C.LON_MAX + PAD)
             out["HGT_sfc"] = data.astype(np.float32)
     out["valid"] = np.datetime64(cycle + timedelta(hours=fh))
     return out
 
 
-def fetch_gfs_series(cycle: datetime, fhs, tag: str):
+def fetch_gfs_series(cycle: datetime, fhs, tag: str, workers: int = 1):
     path = C.RAW / f"gfs_{tag}.npz"
     if path.exists():
         return dict(np.load(path, allow_pickle=True))
-    frames = [fetch_gfs_hour(cycle, fh) for fh in fhs]
+    if workers > 1:
+        import concurrent.futures as cf
+        with cf.ThreadPoolExecutor(workers) as ex:
+            frames = list(ex.map(lambda fh: fetch_gfs_hour(cycle, fh), fhs))
+    else:
+        frames = [fetch_gfs_hour(cycle, fh) for fh in fhs]
     keys = [k for k in frames[0] if k not in ("lat", "lon", "valid")]
     pack = {k: np.stack([f[k] for f in frames]) for k in keys}
     pack["lat"], pack["lon"] = frames[0]["lat"], frames[0]["lon"]
@@ -126,7 +158,6 @@ def fetch_gfs_series(cycle: datetime, fhs, tag: str):
 
 def site_wind_100m(cycle: datetime, fh: int):
     """사이트 중심 100 m 풍속만 빠르게 조회(강풍일 선정용)."""
-    import pygrib
 
     ymd, hh = cycle.strftime("%Y%m%d"), cycle.strftime("%H")
     url = f"{C.GFS_BUCKET}/gfs.{ymd}/{hh}/atmos/gfs.t{hh}z.pgrb2.0p25.f{fh:03d}"
@@ -134,11 +165,7 @@ def site_wind_100m(cycle: datetime, fh: int):
     for var, lev, s, e in _idx(url):
         if var in ("UGRD", "VGRD") and lev == "100 m above ground":
             b = _get(url, headers={"Range": f"bytes={s}-{e}"}).content
-            with tempfile.NamedTemporaryFile(suffix=".grb2") as tf:
-                tf.write(b)
-                tf.flush()
-                g = pygrib.open(tf.name).message(1)
-                d, la, lo = g.data(lat1=37.25, lat2=37.5, lon1=127.0, lon2=127.25)
+            d, la, lo = _decode(b, 37.25, 37.5, 127.0, 127.25)
             vals[var] = float(d.mean())
     return vals["UGRD"], vals["VGRD"]
 

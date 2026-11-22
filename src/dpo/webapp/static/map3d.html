@@ -68,16 +68,47 @@
   input[type=text] { font-size:12px; padding:3px 5px; border:1px solid #C9D3DB; border-radius:4px; width:180px; }
   button.warn { border-color:var(--red); color:var(--red); }
   #dirty { display:none; font-size:12px; background:#FFF4E8; border:1px solid #F2C79A; border-radius:5px; padding:6px 8px; margin-top:6px; }
+  #regionbar { font-size:13px; display:flex; gap:6px; align-items:center; margin-left:auto; }
+  #regionbar select { max-width:220px; }
+  #regionbar + a { margin-left:8px; }
+  .dlg { position:fixed; inset:0; background:rgba(22,32,42,.45); z-index:50; display:flex; align-items:center; justify-content:center; }
+  .dlgbox { background:#fff; border-radius:10px; padding:14px 16px; width:min(760px, 96vw); max-height:94vh; overflow:auto; box-shadow:0 8px 30px rgba(0,0,0,.25); }
+  .dlgbox h2 { font-size:16px; color:var(--teal); margin:0 0 10px; }
+  #rg_map { height:340px; border:1px solid #C9D3DB; border-radius:6px; margin:8px 0; background:#EEF2F5; }
+  ul.reslist { list-style:none; padding:0; margin:4px 0; max-height:150px; overflow:auto; }
+  ul.reslist li { font-size:12px; padding:4px 6px; border-bottom:1px solid #eee; display:flex; gap:6px; align-items:center; justify-content:space-between; }
+  ul.reslist li:hover { background:var(--light); }
+  ul.reslist li button { padding:1px 6px; font-size:11px; }
+  #rg_log { margin:6px 0 4px 18px; padding:0; }
   @media (max-width: 900px) { main { grid-template-columns:1fr; } aside { overflow:visible; } body { height:auto; } #view { min-height:420px; } }
 </style>
+<link rel="stylesheet" href="/vendor/leaflet.css">
+<script src="/vendor/leaflet.js"></script>
 <script type="importmap">{ "imports": { "three": "/vendor/three.module.min.js" } }</script>
 </head>
 <body>
 <header>
   <h1>3D 지도 경로 생성</h1>
   <span id="sub">지형·건물·바람 위에서 SOC 최소 경로를 만들고 ArduPilot 미션으로 내보냅니다</span>
+  <span id="regionbar"><label>지역 <select id="rg_sel"></select></label>
+    <button id="rg_new">+ 새 지역</button><button id="rg_wind" style="display:none" title="이 지역의 예보 바람을 받을 수 있는 최신으로 바꿉니다">바람 새로 받기</button></span>
   <a href="/">2D 장애물 편집</a><a href="/live">실시간 운용</a>
 </header>
+<div id="rg_dlg" class="dlg" style="display:none"><div class="dlgbox">
+  <h2>새 지역 만들기 <button id="rg_close" style="float:right">닫기</button></h2>
+  <div class="row"><input type="text" id="rg_q" placeholder="장소·주소 (예: 강릉 경포대) 또는 37.795, 128.896" style="width:360px">
+    <button id="rg_go" class="primary">찾기</button></div>
+  <ul id="rg_res" class="reslist"></ul>
+  <div id="rg_map"></div>
+  <div class="row"><label>이름</label><input type="text" id="rg_name" maxlength="40" style="width:160px">
+    <label class="inl">크기 <select id="rg_size"><option value="3">3 km</option><option value="4">4 km</option><option value="5" selected>5 km</option><option value="6">6 km</option><option value="8">8 km</option></select></label>
+    <span class="hint" id="rg_center">지도를 눌러 가운데를 정합니다</span></div>
+  <div class="row"><button id="rg_make" class="primary" disabled>이 영역으로 만들기</button><button id="rg_cancel" class="warn" style="display:none">중단</button>
+    <span class="hint">지형·건물·최신 예보 바람을 인터넷에서 받아 만듭니다 (보통 1–3분)</span></div>
+  <ol id="rg_log" class="hint"></ol>
+  <div class="hint">지도 © OpenStreetMap 기여자 · 지형 Copernicus GLO-30 · 건물 Overture Maps · 바람 NOAA GFS.
+    <b>비행 금지·제한 구역은 이 자료에 없습니다</b> – 장애물 편집으로 넣고 운용 전에 따로 확인하십시오.</div>
+</div></div>
 <main>
   <div id="left">
     <div id="view">
@@ -130,6 +161,8 @@
         <span class="hint">장애물 위치 오차를 고려한 팽창</span></div>
       <div class="row"><label>위치</label><button id="pickhub">출발지 찍기</button><button id="pickdst">도착지 찍기</button>
         <span class="hint" id="ptinfo"></span></div>
+      <div class="row"><label>장소 검색</label><input type="text" id="pt_q" placeholder="주소·장소 또는 위도, 경도" style="width:190px"><button id="pt_go">찾기</button></div>
+      <ul id="pt_res" class="reslist"></ul>
       <div class="row"><button id="plan" class="primary">경로 생성</button><span id="status"></span></div>
       <div id="dirty">임무나 장애물이 바뀌었습니다. <b>경로 생성</b>을 다시 눌러 주세요.</div>
       <div id="errors"></div>
@@ -199,5 +232,6 @@
   </aside>
 </main>
 <script type="module" src="/map3d.js"></script>
+<script type="module" src="/region.js"></script>
 </body>
 </html>

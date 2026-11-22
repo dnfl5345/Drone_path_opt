@@ -59,6 +59,56 @@ SITES = {
         gfs_truth="gfs_changwon_20261027_06z.npz", t0="2026-10-27T00:00", date="2026-10-27 (GFS 00Z 예보)",
         anchor=(128.64658, 35.23923), hub=None, dst=None, tour=None, nfz=[], hub_name="창이대로 71"),
 }
+BUILTIN_SITES = tuple(SITES)
+USER_SITES_DIR = ROOT / "sites"          # 사용자가 만든 지역 (dpo-site create, 3D 화면 '새 지역') – 지역마다 <key>.json
+
+
+def _load_user_sites():
+    import json as _json
+    if not USER_SITES_DIR.is_dir():
+        return
+    for f in sorted(USER_SITES_DIR.glob("*.json")):
+        try:
+            d = _json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        d["lon"], d["lat"] = tuple(d["lon"]), tuple(d["lat"])
+        d.setdefault("nfz", [])
+        d.setdefault("tour", None)
+        d["user"] = True
+        SITES[f.stem] = d
+
+
+def register_site(key: str, site: dict):
+    """사용자 지역을 등록(저장)한다. 같은 key 가 있으면 덮어쓴다 (기본 지역은 못 바꿈)."""
+    import json as _json
+    if key in BUILTIN_SITES:
+        raise ValueError(f"기본 지역은 바꿀 수 없습니다: {key}")
+    USER_SITES_DIR.mkdir(parents=True, exist_ok=True)
+    d = {k: (list(v) if isinstance(v, tuple) else v) for k, v in site.items() if k != "user"}
+    (USER_SITES_DIR / f"{key}.json").write_text(_json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+    site = dict(site, user=True)
+    site["lon"], site["lat"] = tuple(site["lon"]), tuple(site["lat"])
+    SITES[key] = site
+    return site
+
+
+def dsm_tile_name(lat_floor: int, lon_floor: int) -> str:
+    """Copernicus GLO-30 타일 이름 (1° × 1°, 남서쪽 모서리 기준). 예: N37_00_E127_00"""
+    ns, ew = ("N" if lat_floor >= 0 else "S"), ("E" if lon_floor >= 0 else "W")
+    return f"{ns}{abs(lat_floor):02d}_00_{ew}{abs(lon_floor):03d}_00"
+
+
+def dsm_url(tile: str) -> str:
+    return f"https://copernicus-dem-30m.s3.amazonaws.com/Copernicus_DSM_COG_10_{tile}_DEM/Copernicus_DSM_COG_10_{tile}_DEM.tif"
+
+
+def dsm_file(tile: str) -> str:
+    a, b = tile.split("_00_")
+    return f"cop_dsm_{a}_{b.replace('_00', '')}.tif"
+
+
+_load_user_sites()
 SITE_KEY = None
 SITE = None
 SITE_NAME = None
@@ -74,8 +124,7 @@ def use_site(key: str):
     SITE_KEY, SITE = key, SITES[key]
     SITE_NAME = SITE["name"]
     (LON_MIN, LON_MAX), (LAT_MIN, LAT_MAX) = SITE["lon"], SITE["lat"]
-    t = SITE["dsm_tile"]
-    COP_URL = f"https://copernicus-dem-30m.s3.amazonaws.com/Copernicus_DSM_COG_10_{t}_DEM/Copernicus_DSM_COG_10_{t}_DEM.tif"
+    COP_URL = dsm_url(SITE["dsm_tile"]) if SITE.get("dsm_tile") else None
     return SITE
 
 

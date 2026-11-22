@@ -18,6 +18,7 @@ const shots = {
     O(S.server_pangyo.out.split("\n").filter(l => l && !/"(GET|POST) /.test(l)).join("\n")) +
     `<div class="c"># 서버 준비 ${S.server_pangyo.sec} s, v${S.server_pangyo.health.version}, 기체 ${S.server_pangyo.health.drones.join(", ")}. 끄기: Ctrl+C</div>`,
   t4_cli: P("source dpo-env/bin/activate", false, "명령줄을 쓸 때 (Windows: dpo-env\\Scripts\\activate)") + P(S.plan.cmd) + O(S.plan.out) + T(S.plan),
+  t6_site: (S.site_create ? P(S.site_create.cmd) + O(S.site_create.out) + T(S.site_create) + P(S.site_list.cmd) + O(S.site_list.out) : ""),
   t5_cli_wpml: P(S.plan_wpml.cmd) + O(S.plan_wpml.out) + T(S.plan_wpml) + P(S.files.cmd) + O(S.files.out.split("\n").filter(Boolean).join("  ")),
 };
 const css = `body{margin:0;background:#fff}.w{width:1180px;background:#1E222B;border-radius:12px;overflow:hidden;font:15.5px/1.55 'NanumGothicCoding','D2Coding','NanumGothic',monospace;color:#E6E6E6}
