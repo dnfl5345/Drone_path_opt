@@ -1,0 +1,340 @@
+{
+ "version": "1.4.0",
+ "steps": {
+  "unzip_release": {
+   "cmd": "unzip DronePathOpt_v1.4.0_Linux_macOS.zip && cd DronePathOpt_v1.4.0_Linux_macOS",
+   "rc": 0,
+   "sec": 0.0,
+   "out": "README.txt\nSHA256SUMS.txt\ndpo_data_1.4.0.zip\ndrone_path_opt-1.4.0-py3-none-any.whl\ninstall_linux_mac.sh\nrun_linux_mac.sh\n사용자매뉴얼.docx"
+  },
+  "sha": {
+   "cmd": "sha256sum -c SHA256SUMS.txt",
+   "rc": 0,
+   "sec": 0.0,
+   "out": "6개 파일 모두 일치"
+  },
+  "bat": {
+   "cmd": "Windows 판 정적 검사",
+   "rc": 0,
+   "sec": 0.0,
+   "out": "드론경로계획_실행.bat: 통과\n명령창_열기.bat: 통과\n",
+   "win": {
+    "python": "3.13.17",
+    "pe_files": 332,
+    "longest_path": 148,
+    "size_mb": 656
+   }
+  },
+  "install": {
+   "cmd": "sh install_linux_mac.sh",
+   "rc": 0,
+   "sec": 42.1,
+   "out": "[platform] 준비 완료 (7.6s)\n정상: v1.4.0 · 성남 판교·분당 · 격자 [22, 221, 247] · 바람 13시각 · 기체 m100, x650, m4t\n설치가 끝났습니다. 실행: sh run_linux_mac.sh\n"
+  },
+  "server_pangyo": {
+   "cmd": "sh run_linux_mac.sh",
+   "rc": 0,
+   "sec": 4.5,
+   "health": {
+    "status": "ok",
+    "version": "1.4.0",
+    "site": "pangyo",
+    "site_label": "성남 판교·분당",
+    "drones": [
+     "m100",
+     "x650",
+     "m4t"
+    ],
+    "live": "idle",
+    "grid": [
+     22,
+     221,
+     247
+    ],
+    "wind_hours": 13,
+    "mavlink": null
+   },
+   "out": "[platform] 지역: 성남 판교·분당 · 자료 폴더: ~/dpo/dpo_data\n[platform] 준비 중… (설치 후 처음 한 번은 계산 코드를 컴파일하느라 수십 초 걸립니다)\n[platform] 준비 완료 (1.6s)\n[platform] 3D 지도:    http://127.0.0.1:8765/3d\n[platform] 실시간 운용: http://127.0.0.1:8765/live\n[platform] http://127.0.0.1:8765  (Ctrl+C 종료)\n"
+  },
+  "server_changwon": {
+   "cmd": "sh run_linux_mac.sh changwon",
+   "rc": 0,
+   "sec": 2.7,
+   "health": {
+    "status": "ok",
+    "version": "1.4.0",
+    "site": "changwon",
+    "site_label": "창원 창이대로 71 주변",
+    "drones": [
+     "m100",
+     "x650",
+     "m4t"
+    ],
+    "live": "idle",
+    "grid": [
+     18,
+     159,
+     176
+    ],
+    "wind_hours": 13,
+    "mavlink": null
+   },
+   "out": "[platform] 지역: 창원 창이대로 71 주변 · 자료 폴더: ~/dpo/dpo_data\n[platform] 준비 중… (설치 후 처음 한 번은 계산 코드를 컴파일하느라 수십 초 걸립니다)\n[platform] 준비 완료 (0.3s)\n[platform] 3D 지도:    http://127.0.0.1:8765/3d\n[platform] 실시간 운용: http://127.0.0.1:8765/live\n[platform] http://127.0.0.1:8765  (Ctrl+C 종료)\n"
+  },
+  "site_create": {
+   "cmd": "dpo-site create --name 강릉경포 --lat 37.795 --lon 128.896 --size 4",
+   "rc": 0,
+   "sec": 43.0,
+   "out": "[1/5] 예보 확인\n[2/5] 지형 받기 (Copernicus GLO-30, 타일 N37_00_E128_00) – 격자 160×160\n[2/5] 지형 완료 (3 s)\n[3/5] 건물 받기 (Overture Maps) – 처음에는 수 분 걸릴 수 있음\n[3/5] 건물 1,110동 (9 s)\n[4/5] 격자 만들기\n[4/5] 지면 -2–80 m, 최고 건물 66 m\n[5/5] 예보 바람 받기 (GFS 2026-11-22 00Z, 09–21시 13시각)\n[5/5] 예보 바람 완료 (29 s, 100 m 풍속 0.3–6.8 m/s)\n[5/5] 완료: 강릉경포 (r20261122150300)\n만들었습니다: r20261122150300  → dpo-server --site r20261122150300 --open  (명령줄: dpo-plan --site r20261122150300)\n"
+  },
+  "site_list": {
+   "cmd": "dpo-site list",
+   "rc": 0,
+   "sec": 0.0,
+   "out": "pangyo             기본   준비됨    37.4000, 127.1100  성남 판교·분당  [2026-10-27 (GFS 00Z 예보)]\nchangwon           기본   준비됨    35.2392, 128.6466  창원 창이대로 71 주변  [2026-10-27 (GFS 00Z 예보)]\nr20261122150300    사용자  준비됨    37.7950, 128.8960  강릉경포  [2026-11-22 (GFS 00Z 예보)]\n"
+  },
+  "plan": {
+   "cmd": "dpo-plan --drone m4t --payload 0.2 --dep-hour 15 --out missions",
+   "rc": 0,
+   "sec": 23.6,
+   "out": "[platform] 준비 완료 (2.2s)\n성남 판교·분당 · DJI Matrice 4T (실증 기체, 공식 사양 보정) · 15시 출발 · 안전장치 켬\n    out: SOC   9.7 %p ·   228 s ·  2.50 km · 대기 0 s\n   back: SOC  28.8 %p ·   412 s ·  2.88 km · 대기 0 s\n  합계 SOC 소모 38.5 %p → 도착 SOC 61.5 % (예비 확보)\n  → missions/pangyo_m4t_15h_out.waypoints\n  → missions/pangyo_m4t_15h_out.csv\n  → missions/pangyo_m4t_15h_back.waypoints\n  → missions/pangyo_m4t_15h_back.csv\n  참고: Matrice 4T 는 ArduPilot 미션(.waypoints)이 아니라 DJI 경로 파일로 올립니다. DJI Pilot 2 에서 그 기체로 내보낸 경로 파일을 --wpml-template FILE.kmz 로 주십시오.\n"
+  },
+  "plan_wpml": {
+   "cmd": "dpo-plan --drone m4t --payload 0.2 --dep-hour 15 --one-way --wpml-template pilot2_m4t.kmz --out missions",
+   "rc": 0,
+   "sec": 6.1,
+   "out": "[platform] 준비 완료 (1.9s)\n성남 판교·분당 · DJI Matrice 4T (실증 기체, 공식 사양 보정) · 15시 출발 · 안전장치 켬\n    out: SOC   9.7 %p ·   228 s ·  2.50 km · 대기 0 s\n  합계 SOC 소모 9.7 %p → 도착 SOC 90.3 % (예비 확보)\n  → missions/pangyo_m4t_15h_out.waypoints\n  → missions/pangyo_m4t_15h_out.csv\n  → missions/pangyo_m4t_15h_out_template.kmz\n  DJI 경로 파일(WPML) – DJI 기체·소프트웨어에서 확인하지 못한 파일입니다. 불러온 뒤 고도·속도·복귀 고도를 확인하세요.\n      out: DJI Pilot 2 경로 파일의 기종 (droneEnumValue 99-1) · 경로점 18개 · 상대 고도 60–100 m · 속도 11–15 m/s · 복귀 고도 113 m · 검사 통과\n    ! 기종·카메라 번호와 선회 방식을 DJI Pilot 2 경로 파일에서 가져왔습니다 (DJI Pilot 2 경로 파일의 기종 (droneEnumValue 99-1)). 그 파일이 계획에 쓴 기체(DJI Matrice 4T (실증 기체, 공식 사양 보정))로 만든 것인지 확인하세요.\n"
+  },
+  "files": {
+   "cmd": "ls missions",
+   "rc": 0,
+   "sec": 0.0,
+   "out": "pangyo_m4t_15h_back.csv\npangyo_m4t_15h_back.waypoints\npangyo_m4t_15h_out.csv\npangyo_m4t_15h_out.waypoints\npangyo_m4t_15h_out_template.kmz\npangyo_m4t_15h_plan.json\n"
+  },
+  "bad_input": {
+   "cmd": "dpo-plan --drone m4t --payload 0.5",
+   "rc": 2,
+   "sec": 4.8,
+   "out": "[platform] 준비 완료 (1.8s)\n입력 오류: 탑재중량은 0~0.2 kg (최대 페이로드 200 g)\n",
+   "rc_expected": 2
+  }
+ },
+ "acceptance": {
+  "pangyo": {
+   "site": "pangyo",
+   "steps": [
+    {
+     "id": "T2-0",
+     "name": "3D 화면 열림",
+     "ok": true,
+     "detail": "3.6 s, 기본 기체 m4t · 탑재 0.2 kg"
+    },
+    {
+     "id": "T2",
+     "name": "경로 생성 (M4T 0.2 kg 왕복 15시)",
+     "ok": true,
+     "detail": "17.0 s · 61.5 % · 임무 가능 (예비 20 % 이상)"
+    },
+    {
+     "id": "T3",
+     "name": "기존 경로와 비교",
+     "ok": true,
+     "detail": "■ 기존 경로 (최단 + 정속 10 m/s) | 46.8 %p | 53.2 % | 699 s | 4.93 km | 7.9 m/s | 뒷 11.0 / 맞 11.0 | 94 / 93 / ■ 최단 경로 + 속도 최적화 (대조) | 42.8 %p | 57.2 % | 619 s | 4.93 km | 9.0 m/s | 뒷 11.0 / 맞 11.0 | 94 / 93 / ■ 제안 경로 | 38.5 %p | 61.5 % | 590 s | 5.38 km | 10.4 m/s | 뒷 10.7 / 맞 8.0 | 85 / 48"
+    },
+    {
+     "id": "T2-1",
+     "name": "미션 파일 내려받기 (.waypoints · .csv)",
+     "ok": true,
+     "detail": "pangyo_m4t_15h_out.waypoints, pangyo_m4t_15h_back.waypoints, pangyo_m4t_15h_out.csv, pangyo_m4t_15h_back.csv"
+    },
+    {
+     "id": "T5-0",
+     "name": "템플릿 없이 누르면 안내",
+     "ok": true,
+     "detail": "Pilot 2 경로 파일(.kmz)을 먼저 고르세요 (DJI Pilot 2 에서 그 기체로 내보낸 파일)"
+    },
+    {
+     "id": "T5",
+     "name": "Pilot 2 파일로 DJI 경로 파일 만들기",
+     "ok": true,
+     "detail": "pangyo_m4t_15h_back_template.kmz, pangyo_m4t_15h_out_template.kmz · 가는 편 | 18 | 60–100 m | 11–15 m/s | 0 | 113 m | 통과 / 오는 편 | 23 | 22–82 m | 5.5–9 m/s | 0 | 115 m | 통과 · 알림 3건: 기종·카메라 번호와 선회 방식을 DJI Pilot 2 경로 파일에서 가져왔습니다 (DJI Pilot 2 경로 파일의 기종 (droneEnumValue 99-1)). 그 파일이 계획에 쓴 기체(DJI Matrice 4T (실증 기체, 공식 사양 보정))로 만든 것인지 확인하세요. ; DJI 기체·DJI Pilot 2 에서 이 파일을 열어 확인하지 못했습니다. 불러온 뒤 경로점 고도·속도·복귀 고도·신호 두절 동작을 반드시 확인하세요. ; 비행 중 속도 갱신은 이 파일로 할 수 없습니다. 계획한 구간 속도만 들어 있습니다."
+    },
+    {
+     "id": "T2-2",
+     "name": "M4T 탑재 0.3 kg 입력 거부",
+     "ok": true,
+     "detail": "탑재중량은 0~0.2 kg (최대 페이로드 200 g)"
+    },
+    {
+     "id": "T6",
+     "name": "X650 경로와 미션 파일",
+     "ok": true,
+     "detail": "15.8 s · 51.8 % · 임무 가능 (예비 20 % 이상) · pangyo_x650_15h_out.waypoints, pangyo_x650_15h_back.waypoints"
+    },
+    {
+     "id": "L",
+     "name": "실시간 운용 화면 열림",
+     "ok": true,
+     "detail": "드론 실시간 운용"
+    },
+    {
+     "id": "L2",
+     "name": "실시간 모의 비행 (M4T, 기본 설정)",
+     "ok": true,
+     "detail": "36 s · 단계 · 완료 (올 때) · SoC 60.8 % · 최소 이격 –"
+    }
+   ],
+   "errors": [],
+   "files": [
+    "pangyo_m4t_15h_out.waypoints",
+    "pangyo_m4t_15h_back.waypoints",
+    "pangyo_m4t_15h_out.csv",
+    "pangyo_m4t_15h_back.csv",
+    "pangyo_m4t_15h_back_template.kmz",
+    "pangyo_m4t_15h_out_template.kmz",
+    "pangyo_x650_15h_out.waypoints",
+    "pangyo_x650_15h_back.waypoints"
+   ],
+   "ok": true
+  },
+  "changwon": {
+   "site": "changwon",
+   "steps": [
+    {
+     "id": "T2-0",
+     "name": "3D 화면 열림",
+     "ok": true,
+     "detail": "2.9 s, 기본 기체 m4t · 탑재 0.2 kg"
+    },
+    {
+     "id": "T2",
+     "name": "경로 생성 (M4T 0.2 kg 왕복 15시)",
+     "ok": true,
+     "detail": "0.8 s · 88.8 % · 임무 가능 (예비 20 % 이상)"
+    },
+    {
+     "id": "T3",
+     "name": "기존 경로와 비교",
+     "ok": true,
+     "detail": "■ 기존 경로 (최단 + 정속 10 m/s) | 12.4 %p | 87.6 % | 244 s | 1.95 km | 9.2 m/s | 뒷 1.2 / 맞 1.2 | 62 / 55 / ■ 최단 경로 + 속도 최적화 (대조) | 12.2 %p | 87.8 % | 221 s | 1.95 km | 10.3 m/s | 뒷 1.2 / 맞 1.2 | 62 / 55 / ■ 제안 경로 | 11.2 %p | 88.8 % | 210 s | 2.04 km | 11.4 m/s | 뒷 1.1 / 맞 1.1 | 33 / 33"
+    },
+    {
+     "id": "T2-1",
+     "name": "미션 파일 내려받기 (.waypoints · .csv)",
+     "ok": true,
+     "detail": "changwon_m4t_15h_out.waypoints, changwon_m4t_15h_back.waypoints, changwon_m4t_15h_out.csv, changwon_m4t_15h_back.csv"
+    },
+    {
+     "id": "T5-0",
+     "name": "템플릿 없이 누르면 안내",
+     "ok": true,
+     "detail": "Pilot 2 경로 파일(.kmz)을 먼저 고르세요 (DJI Pilot 2 에서 그 기체로 내보낸 파일)"
+    },
+    {
+     "id": "T5",
+     "name": "Pilot 2 파일로 DJI 경로 파일 만들기",
+     "ok": true,
+     "detail": "changwon_m4t_15h_back_template.kmz, changwon_m4t_15h_out_template.kmz · 가는 편 | 6 | 33–33 m | 10–14 m/s | 0 | 150 m | 통과 / 오는 편 | 6 | 31–31 m | 10–14 m/s | 0 | 150 m | 통과 · 알림 5건: 기종·카메라 번호와 선회 방식을 DJI Pilot 2 경로 파일에서 가져왔습니다 (DJI Pilot 2 경로 파일의 기종 (droneEnumValue 99-1)). 그 파일이 계획에 쓴 기체(DJI Matrice 4T (실증 기체, 공식 사양 보정))로 만든 것인지 확인하세요. ; DJI 기체·DJI Pilot 2 에서 이 파일을 열어 확인하지 못했습니다. 불러온 뒤 경로점 고도·속도·복귀 고도·신호 두절 동작을 반드시 확인하세요. ; 비행 중 속도 갱신은 이 파일로 할 수 없습니다. 계획한 구간 속도만 들어 있습니다. ; 가는 편: 복귀 고도를 150 m 로 제한했습니다 (일반 비행 고도 제한). 경로 주변에 이륙점보다 189 m 높은 지형·건물이 있어, 복귀 직선이 그 위를 지나면 부딪힐 수 있습니다. 복귀 경로를 지도에서 확인하십시오. ; 오는 편: 복귀 고도를 150 m 로 제한했습니다 (일반 비행 고도 제한). 경로 주변에 이륙점보다 187 m 높은 지형·건물이 있어, 복귀 직선이 그 위를 지나면 부딪힐 수 있습니다. 복귀 경로를 지도에서 확인하십시오."
+    },
+    {
+     "id": "T2-2",
+     "name": "M4T 탑재 0.3 kg 입력 거부",
+     "ok": true,
+     "detail": "탑재중량은 0~0.2 kg (최대 페이로드 200 g)"
+    },
+    {
+     "id": "T6",
+     "name": "X650 경로와 미션 파일",
+     "ok": true,
+     "detail": "0.6 s · 86.0 % · 임무 가능 (예비 20 % 이상) · changwon_x650_15h_out.waypoints, changwon_x650_15h_back.waypoints"
+    },
+    {
+     "id": "L",
+     "name": "실시간 운용 화면 열림",
+     "ok": true,
+     "detail": "드론 실시간 운용"
+    },
+    {
+     "id": "L2",
+     "name": "실시간 모의 비행 (M4T, 기본 설정)",
+     "ok": true,
+     "detail": "16 s · 단계 · 완료 (올 때) · SoC 88.7 % · 최소 이격 –"
+    }
+   ],
+   "errors": [],
+   "files": [
+    "changwon_m4t_15h_out.waypoints",
+    "changwon_m4t_15h_back.waypoints",
+    "changwon_m4t_15h_out.csv",
+    "changwon_m4t_15h_back.csv",
+    "changwon_m4t_15h_back_template.kmz",
+    "changwon_m4t_15h_out_template.kmz",
+    "changwon_x650_15h_out.waypoints",
+    "changwon_x650_15h_back.waypoints"
+   ],
+   "ok": true
+  },
+  "region": {
+   "steps": [
+    {
+     "id": "G1",
+     "name": "지역 목록",
+     "ok": true,
+     "detail": "pangyo=성남 판교·분당 (기본) | changwon=창원 창이대로 71 주변 (기본) | r20261122150300=강릉경포"
+    },
+    {
+     "id": "G2",
+     "name": "서버를 끄지 않고 지역 전환",
+     "ok": true,
+     "detail": "3.3 s · 2026-11-22 (GFS 00Z 예보) · 강릉경포 4.0×4.0 km · 건물 1,114동"
+    },
+    {
+     "id": "G3",
+     "name": "장소 검색으로 출발지·도착지 지정",
+     "ok": true,
+     "detail": "출발 (1200,1200) · 도착 (3000,2800) m"
+    },
+    {
+     "id": "G3b",
+     "name": "지역 밖 좌표는 지정 불가 안내",
+     "ok": true,
+     "detail": "좌표 10.00000, 10.00000 (10.00000, 10.00000 · 입력)이 지역 밖"
+    },
+    {
+     "id": "G4",
+     "name": "새 지역에서 경로 생성 (M4T 왕복)",
+     "ok": true,
+     "detail": "3.1 s · 78.4 % · 임무 가능 (예비 20 % 이상) "
+    },
+    {
+     "id": "G5",
+     "name": "새 지역에서 기존 경로와 비교",
+     "ok": true,
+     "detail": "■ 기존 경로 (최단 + 정속 10 m/s) 22.7 %p 77.3 % / ■ 최단 경로 + 속도 최적화 (대조) 21.6 %p 78.4 % / ■ 제안 경로 21.6 %p 78.4 %"
+    },
+    {
+     "id": "G6",
+     "name": "새 지역 대화창으로 만들기 → 자동으로 열림",
+     "ok": true,
+     "detail": "43 s · 예보 확인 → 지형 받기 (Copernicus GLO-30, 타일 N35_00_E129_00) – 격자 120×119 → 지형 완료 (2 s) → 건물 받기 (Overture Maps) – 처음에는 수 분 걸릴 수 있음 → 건물 2,708동 (9 s) → 격자 만들기 → 지면 -0–194 m, 최고 건물 167 m → 예보 바람 받기 (GFS 2026-11-22 00Z, 09–21시 13시각) → 예보 바람 완료 (29 s, 100 m 풍속 0.2–8.2 m/s) → 완료: 시험지역 (r20261122150402)"
+    },
+    {
+     "id": "G7",
+     "name": "만든 지역에서 경로 생성",
+     "ok": true,
+     "detail": "1.6 s · 71.6 % · 임무 가능 (예비 20 % 이상) "
+    },
+    {
+     "id": "G8",
+     "name": "기본 지역(판교)으로 돌아가기",
+     "ok": true,
+     "detail": "2026-10-27 (GFS 00Z 예보) · 성남 판교·분당 6.2×5.5 km · 건물 7,202동"
+    }
+   ],
+   "errors": [],
+   "new_key": "r20261122150402",
+   "ok": true
+  }
+ },
+ "ok": true
+}

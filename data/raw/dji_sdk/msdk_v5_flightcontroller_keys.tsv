@@ -1,0 +1,83 @@
+key	type	get	set	action	description
+KeyConnection	Boolean	get			Boolean true means flight controller is connected.
+KeyIsFlying	Boolean	get			true means aircraft is in flight.
+KeyFlightTimeInSeconds	Integer	get			Accumulated flight time since the aircraft motor started, unit: 0.1s. Reset after power on again.
+KeyAircraftTotalFlightDuration	Double	get			Total flight duration, unit: Second. It will not be reset after the aircraft is powered off.
+KeyAircraftTotalFlightDistance	Double	get			Total flight distance, unit: Meter. It will not be reset after the aircraft is powered off.
+KeyAircraftTotalFlightTimes	Integer	get			Total number of takeoffs and landings. It will not be reset after the aircraft is powered off.
+KeyAircraftLocation3D	LocationCoordinate3D	get			To get the position of the aircraft, including longitude, latitude and altitude.
+KeyAircraftAttitude	Attitude	get			Attitude Current aircraft attitude data. The value range of pitch, roll and yaw are [-180，180]. if the value of pitch, roll and yaw are 0, it means that the aircraft will hover horizontally heading north.
+KeyAircraftVelocity	Velocity3D	get			Velocity3D Current flight speed of the aircraft using NED coordinate system.
+KeyTakeoffLocationAltitude	Double	get			Double The taking off altitude of aircraft. Unit:meter.
+KeyIsLandingConfirmationNeeded	Boolean	get			Boolean true means that when the aircraft landed 0.5 meters above the ground, the forced landing command KeyConfirmLanding should be sent to continue the landing process.
+KeyFlightLogIndex	Integer	get			Integer To get the current index of the flight log, which is useful when one needs to find the corresponding flight log.
+KeySerialNumber	String	get			String To get the serial number of flight controller.
+KeyFirmwareVersion	String	get			String To get the firmware version of flight controller.
+KeyGPSSatelliteCount	Integer	get			Integer To get the number of GPS satellites. Usually the number can reach more than 12 when flying at a high altitude. When the period is good, the number can reach 18~19.
+KeyGPSSignalLevel	GPSSignalLevel	get			GPSSignalLevel To get the signal level of GPS.
+KeyCompassCount	Integer	get			Integer To get the number of compass.
+KeyCompassHeading	Double	get			Double To get the heading of the compass. Unit: degree. The north is 0 degrees, the east is 90 degrees. The value range is [-180,180].
+KeyCompassHasError	Boolean	get			Boolean true means that the compass data is wrong. When the aircraft is used in areas with strong interference or magnetic fields, compass data Key_Gimbal_RestoreFactorySettings might occur. KeyStartCompassCalibration should be called to calibrate compass.
+KeyStartCompassCalibration	EmptyMsg,EmptyMsg			action	To start compass calibration. Make sure there are not any magnets or metal objects near the aircraft and lift the aircraft to about 1.5m above the groud. Calibration status can be obtained through KeyCompassCalibrationStatus . The following is the operation process of compass calibration, taking M30
+KeyStopCompassCalibration	EmptyMsg,EmptyMsg			action	To stop compass calibration.
+KeyIsCompassCalibrating	Boolean	get			Boolean true means that the compass is calibrating.
+KeyCompassCalibrationStatus	CompassCalibrationState	get			CompassCalibrationState To get compass calibration status.
+KeyIMUCount	Integer	get			Integer To get the number of IMU.
+KeyStartIMUCalibration	EmptyMsg,EmptyMsg			action	To start IMU calibration. For aircraft with multiple IMUs, this method will calibrate all IMUs. Calling KeyRebootDevice to restart the device after IMU calibration is suggested. The following is the operation process of IMU calibration: 1. Call KeyStartIMUCalibration to start IMU calibration, and li
+KeyIMUCalibrationInfo	IMUCalibrationInfo	get			IMUCalibrationInfo To get IMU calibration information. IMU calibration includes IMU calibration of multiple aircraft orientations. IMU calibration information includes the overall calibration status of IMU, the calibration status of each aircraft orientation, as well as the list of uncalibrated airc
+KeyUltrasonicHeight	Integer	get			Integer To get the height of ultrasound distance measuring, unit:dm. The height is the distance measured from top to bottom after the aircraft takes off. Barometer altitude is often incorporated to make the data more accurate. note: The maximum measurable distance at this altitude is usually 25.5 me
+KeyWindWarning	WindWarning	get			WindWarning To get current wind speed level.
+KeyWindSpeed	Integer	get			Integer To get current wind speed, unit: dm/s.
+KeyWindDirection	WindDirection	get			WindDirection To get current wind direction and the world coordinate is used.
+KeyMultipleFlightModeEnabled	Boolean	get	set		Boolean true means that flight mode switch is allowed. KeyFlightMode can be set to T - tripod, A - attitude, P(N) - position, S - sport mode by flipping the three-segment selector switch on the remote control. false means the flight mode will maintain P(N) - position mode and can not be changed.
+KeyRemoteControllerFlightMode	RemoteControllerFlightMode	get			RemoteControllerFlightMode To get the remote controller switch Mode.
+KeyFlightMode	FlightMode	get			FlightMode To get the flight Mode.
+KeyIsFailSafe	Boolean	get			Boolean true means that the aircraft is out of control and is about to perform fail safe behavior.
+KeyFailsafeAction	FailsafeAction	get	set		FailsafeAction To set and get fail safe behavior. When the remote controller loses connection with the aircraft, the aircraft will perform according to the set fail safe behavior.
+KeyLowBatteryWarningThreshold	Integer	get	set		Integer To set and get the threshold for battery low power warning. The threshold is a percentage and the range is [15,50]. When the battery power is lower than the threshold, the aircraft will make a low battery alarm.
+KeyIsLowBatteryWarning	Boolean	get			Boolean true means that the battery is in low power status.
+KeySeriousLowBatteryWarningThreshold	Integer	get	set		Integer To get the threshold of severely low battery warning. The default threshold is 10%, and it can not be set for Matrice 30 Series. If the battery power is lower than the threshold, the aircraft will go back to home.
+KeyIsSeriousLowBatteryWarning	Boolean	get			Boolean true means that the battery is in severely low status.
+KeyLEDsSettings	LEDsSettings	get	set		LEDsSettings LED related settings. The settings for forearm lights, status indicators and night lights are supported. Supportd since MSDK 5.0 Motor ESC KeyAreMotorsOn final KeyAreMotorsOn static final DJIKeyInfo<Boolean> KeyAreMotorsOn = new DJIKeyInfo
+KeyLockMotors	Boolean		set		Boolean true means that the motor is locked and will not turn when the remote controller stick is moved.
+KeyESCBeepEnabled	Boolean	get	set		Boolean true means the ESC beeping function is opened. When the aircraft loses contact by accident, this function can be turned on to identify the position of the aircraft by sound. If motors are running, Stop them and try again.
+KeyCoordinatedTurnEnabled	Boolean	get	set		Boolean true means the coordinated turn function is opened. When the aircraft turns, the node follows the flight direction. There is no sideslip flight, and the resistance of flight is smaller.
+KeyNavigationSatelliteSystemSource	NavigationSatelliteSystem	get	set		NavigationSatelliteSystem To set the GNSS used. The GNSS is only supported when the RTK location function is closed, and can not be changed when the aircraft is in the air. After the GNSS is switched, do not take off until satellite signal strength reaches at least level 3. If RTK location function 
+KeyStartTakeoff	EmptyMsg,EmptyMsg			action	To start the automatic taking off of the aircraft. When the aircraft hovers at an altitude of 1.2 meters(4 feet) above the ground, taking off is completed. If the motor is already opened, this command can not be executed.
+KeyStopTakeoff	EmptyMsg,EmptyMsg			action	To stop the automatic take-off of the aircraft. If this interface is called before automatic take-off is finished, the aircraft will stop taking off and hover at the current altitude.
+KeyStartAutoLanding	EmptyMsg,EmptyMsg			action	To start the automatic landing of the aircraft.
+KeyStopAutoLanding	EmptyMsg,EmptyMsg			action	To stop the autonomuous landing of the aircraft. If this interface is called during the automatic landing process, the aircraft will stop landing and hover at the current altitude.
+KeyConfirmLanding	EmptyMsg,EmptyMsg			action	To confirm continue landing. When the aircraft is at an altitude of less than 0.7 meters above the ground, the aircraft will stop landing and wait for confirmation. KeyIsLandingConfirmationNeeded can be used to check whether landing confirmation is needed.
+KeyRebootDevice	EmptyMsg,EmptyMsg			action	To restart the core device of the aircraft. It is suggested to call this method after IMU calibration. note: Please do not restart the core device of the aircraft after the aircraft motor starts. call KeyAreMotorsOn to judge whether the aircraft motor starts.
+KeyLookAt	LookAtInfo, EmptyMsg			action	LookAtInfo The aircraft will look at the GPS point you set up.
+KeyHeightLimitRange	IntValueConfig	get			IntValueConfig To get the height limit setting range. Unit: meter.
+KeyHeightLimit	Integer	get	set		Integer To set the maximum flight altitude of the aircraft. Unit: meter. KeyHeightLimitRange can be used to get setting range.
+KeyIsNearHeightLimit	Boolean	get			Boolean true means the aircraft has reached the maximum flight altitude.
+KeyDistanceLimitEnabled	Boolean	get	set		Boolean true means the distance limitation switch is opened. After this switch is opened, KeyDistanceLimit can be used to set the maximum flight distance of the aircraft.
+KeyDistanceLimitRange	IntValueConfig	get			IntValueConfig To get diatance limitation setting range. Unit: meter.
+KeyDistanceLimit	Integer	get	set		Integer To set the maximum flight distance of the aircraft. Unit: meter. This value is the distance between aircraft and home point. KeyDistanceLimitRange can be used to get the setting range.
+KeyIsNearDistanceLimit	Boolean	get			Boolean true means the aircraft has reached the maximum flight distance.
+KeyStartMultiGimbalSyncControl	MultiGimbalSyncControlInfo,EmptyMsg			action	MultiGimbalSyncControlInfo Enable multi-gimbal Synchronization control. Multiple gimbals can be controlled at the same time through one remote controller. Please make sure that the set gimbals have been mounted on the aircraft. This interface is suitable for aircraft that can mount multiple gimbals,
+KeyStopMultiGimbalSyncControl	EmptyMsg,EmptyMsg			action	Disable multi-gimbal Synchronization control.
+KeyMultiGimbalSyncStatus	MultiGimbalSyncStatus	get			MultiGimbalSyncStatus Gets multi-gimbal Synchronization control status.
+KeyPropellerRotation	PropellerRotationCommand,PropellerRotationCommandResult			action	Boolean Aircraft slow propeller function. Note: Currently, only the M400 model supports this interface, but it does not support LOW_SPEED_REVERSE_ROTATION. Therefore, the aircraft slow propeller currently supports rotation in only one direction.
+KeyIsHomeLocationSet	Boolean	get			Boolean true means home point has been set. When the GPS signal is good, the aircraft will automatically set the current position as home point. KeyIsHomeLocationSet will return true .
+KeyHomeLocation	LocationCoordinate2D	get	set		LocationCoordinate2D To set and get current home point location, including longitude and latitude. When GPS signal is good, aircraft will automatically set current position as home point. This key can also be used to change home point location.
+KeyGoHomeHeight	Integer	get	set		Integer To set and get relative altitude when returning home. Unit: meter. This value is related to the altitude when taking off. KeyGoHomeHeightRange can be used to get return-to-home height setting range. If the horizontal distance between aircraft and home point is within 50 meters, the aircraft 
+KeyGoHomeHeightRange	IntValueConfig	get			IntValueConfig To get the setting range of the return-to-home altitude. Unit: meter.
+KeyHomeLocationUsingCurrentAircraftLocation	EmptyMsg,EmptyMsg			action	To set current aircraft location as home point location.
+KeyStartGoHome	EmptyMsg,EmptyMsg			action	To start intelligent return-to-home. When the GPS signal is not good, intelligent return-to-home can not be started. Intelligent return-to-home can also be started by the smart return-to-home button on the remote controller. During the return-to-home home process, the user can control the altitude o
+KeyStopGoHome	EmptyMsg,EmptyMsg			action	To stop intelligent return-to-home.
+KeyGoHomeStatus	GoHomeState	get			GoHomeState To get intelligent return-to-home status.
+KeyGoHomeInfo	GoHomeInfo	get			GoHomeInfo Get the information related to return-to-home. When the obtained getType status is NORMAL , you need to call the KeyGoHomeConfirm interface to confirm or cancel the return-to-home operation. Note: KeyGoHomeInfo currently only supports DJI_MATRICE_4_SERIES
+KeyGoHomeConfirm	Boolean, EmptyMsg			action	Boolean Confirm or cancel the return home operation. When the status of getType obtained by calling KeyGoHomeInfo is NORMAL , you need to call this interface to confirm or cancel the return-to-home operation. true means confirming the return-to-home. false means canceling the return-to-home.
+KeyLowBatteryRTHEnabled	Boolean	get	set		Boolean true means intelligent low battery return-to-home function is opened. To avoid unnecessary dangers dangerous due to the low battery, aircraft will intelligently judge whether the current battery is sufficient according to the flight position information. If current battery power is only enou
+KeyLowBatteryRTHInfo	LowBatteryRTHInfo	get			LowBatteryRTHInfo To get related information of the intelligent low battery power. This function is only valid when KeyLowBatteryRTHEnabled is enabled.
+KeyLowBatteryRTHConfirm	Boolean, EmptyMsg			action	Boolean Confirm or cancel the return home operation. When calling KeyLowBatteryRTHInfo and the status obtained is COUNTING_DOWN , you can call this interface to confirm or cancel the return operation. true indicates confirmation of return. false means to cancel the return flight.
+KeyAccessLockerAllDeviceStatus	List<AccessLockerDeviceStatus>	get			List< AccessLockerDeviceStatus > Get the security code status of the storage device. Through this interface, you can obtain whether the storage device on the aircraft supports the security code function, whether the security code function is enabled, and whether the security code needs to be verifie
+KeyAccessLockerSetSecurityCode	AccessLockerSetSecurityCodeInfo,EmptyMsg			action	AccessLockerSetSecurityCodeInfo Set a security code. The device and storage type can be selected for security code setting through this interface. The storage device will be formatted after setting the security code, please make sure the media data has been backed up. Please keep the security code i
+KeyAccessLockerVerifySecurityCode	AccessLockerVerifySecurityCodeInfo,EmptyMsg			action	AccessLockerVerifySecurityCodeInfo Verify the security code. The security code can be verified through this interface. After the verification is passed, you can take photos, record videos and read and write media data in the storage device.
+KeyAccessLockerModifySecurityCode	AccessLockerModifySecurityCodeInfo,EmptyMsg			action	AccessLockerModifySecurityCodeInfo Modify the security code.
+KeyAccessLockerResetSecurityCode	AccessLockerResetSecurityCodeInfo,EmptyMsg			action	AccessLockerResetSecurityCodeInfo Reset the security code. Reset the security security code will format the storage device, please make sure the media data is backed up.
+KeyAirSenseSystemSupported	Boolean	get			Boolean Whether to support DJI AirSense system.
+KeyAirSenseSystemInformation	AirSenseSystemInformation	get			AirSenseSystemInformation Gets information about the DJI AirSense system. Contains warning levels and detailed status of detected airplanes (Manned aircraft with AirSense system. For example, civil aircraft, helicopter and so on. It is referred to airplane.). DJI AirSense only sends out warnings of 

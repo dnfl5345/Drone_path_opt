@@ -1,0 +1,1033 @@
+"""최종 보고서(HWPX, 한글 문서) 생성기.
+
+    python scripts/build_final_report_hwpx.py [--out docs/drone_soc_final_report.hwpx]
+
+필요: python-hwpx (pip install python-hwpx), Pillow.  저장소 결과 파일(results/*.json, results/figures)을 읽는다.
+
+서식: 기관 양식(민간수탁연구사업 계획서, 2026. 7. 16.)에서 서식만 남긴 docs/templates/report_base.hwpx 위에 쓴다
+(scripts/make_report_base_hwpx.py). 양식의 글자·문단 모양 번호를 그대로 써서 여백·자간·장평·줄 간격이 같다.
+    쪽       A4, 여백 왼쪽·오른쪽 25 mm, 위·아래 15 mm, 머리말·꼬리말 12.7 mm, 쪽 번호 '- n -' 아래 가운데
+    1수준    '1. 제목'          휴먼명조 11 pt 굵게, 장평 99 %, 자간 0, 줄 간격 160 %   (글자 36 · 문단 33)
+    2수준    '  1-1. 제목'      휴먼명조 11 pt, 앞 공백 2칸                             (37 · 33)
+    3수준    '   (1) 제목'      앞 공백 3칸                                             (37 · 33)
+    글머리   '    - 내용'       앞 공백 4칸, 양쪽 정렬, 내어쓰기 3000 HWPUNIT(10.6 mm)  (37 · 45)
+    하위     '      · 내용'     앞 공백 6칸                                             (37 · 45)
+    참고     '      ＊ 내용'    왼쪽 정렬, 줄 간격 150 %                                (37 · 16)
+    묶음 사이  5 pt 빈 줄                                                            (75 · 45)
+    표       돋움 10 pt, 제목 줄 #BFBFBF, 바깥 0.15 mm·안쪽 0.12 mm, 셀 여백 1.8/0.5 mm
+    그림 제목  '< 제목 >' 휴먼명조 12 pt 가운데                                         (72)
+"""
+from __future__ import annotations
+
+import argparse
+import io
+import json
+from pathlib import Path
+
+import sys
+
+from hwpx import HwpxDocument
+from PIL import Image
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+ROOT = Path(__file__).resolve().parents[1]
+RES = ROOT / "results"
+FIG = RES / "figures"
+BASE = ROOT / "docs" / "templates" / "report_base.hwpx"
+MM = 7200 / 25.4  # HWPUNIT per mm
+TEXT_W_MM = 160.0  # A4 210 - 좌우 여백 25 mm
+FONT_G = "돋움"  # (호환용 이름) 표 글꼴
+
+# 양식의 글자 모양(charPr)·문단 모양(paraPr) 번호
+C_H1, C_BODY, C_SP, C_TITLE, C_COVER, C_FIGCAP, C_TBL = "36", "37", "75", "20", "21", "72", "68"
+P_HEAD, P_BUL, P_NOTE, P_CENTER = "33", "45", "16", "22"
+# 표 테두리(borderFill): [왼쪽 열, 가운데 열, 오른쪽 열]
+BF_HEAD, BF_BODY, BF_LAST, BF_TABLE = ("63", "64", "65"), ("67", "5", "68"), ("69", "71", "72"), "5"
+BF_LABEL = "26"  # 회색(#D3D3D3) 칸: 표지 항목명
+
+
+class Writer:
+    def __init__(self, base: Path = BASE) -> None:
+        self.doc = HwpxDocument.open(str(base))
+        self.st = self.doc.styles
+        self._para: dict[str, str] = {}
+        self._run: dict[str, str] = {}
+        self.n_tab = {}
+        self.n_fig = {}
+        self.chapter = 0
+        self.first_used = False
+        self.last = None  # 직전 문단 종류 (묶음 사이 5 pt 빈 줄 판단)
+
+    # 양식 모양을 바탕으로 한 파생 모양
+    def para(self, key, *, base=P_CENTER, align="CENTER", line=150, **_ignored):
+        if key not in self._para:
+            self._para[key] = self.st.ensure_paragraph_format(base_para_pr_id=base, alignment=align, line_spacing_percent=line)
+        return self._para[key]
+
+    def run(self, key, *, base=C_BODY, bold=None, size=None, **_ignored):
+        if key not in self._run:
+            self._run[key] = self.st.ensure_run(base_char_pr_id=base, bold=bold, size=size)
+        return self._run[key]
+
+    def _p(self, text, pid, cid, page_break=False, kind="p"):
+        if not self.first_used:
+            p = self.doc.paragraphs[0]
+            p.para_pr_id_ref = pid
+            p.add_run(text, char_pr_id_ref=cid)
+            self.first_used = True
+        else:
+            p = self.doc.add_paragraph(text, para_pr_id_ref=pid, char_pr_id_ref=cid)
+        if page_break:
+            p.element.set("pageBreak", "1")
+        self.last = kind
+        return p
+
+    def spacer(self):
+        """양식의 묶음 사이 5 pt 빈 줄."""
+        return self._p("", P_BUL, C_SP, kind="sp")
+
+    # ── 제목 수준 ──
+    def h1(self, text, page_break=False):
+        self.chapter = int(text.split(".")[0]) if text[0].isdigit() else self.chapter
+        if self.last not in (None, "cover", "sp") and not page_break:
+            self._p("", P_HEAD, C_BODY, kind="blank")
+        return self._p(text, P_HEAD, C_H1, page_break=page_break, kind="h1")
+
+    def h2(self, text):
+        if self.last not in ("h1", "sp", "blank", None):
+            self.spacer()
+        return self._p("  " + text, P_HEAD, C_BODY, kind="h2")
+
+    def h3(self, text):
+        return self._p("   " + text, P_HEAD, C_BODY, kind="h3")
+
+    # ── 본문 ──
+    def b(self, text):
+        return self._p("    - " + text, P_BUL, C_BODY, kind="b")
+
+    def bb(self, text):
+        return self._p("      · " + text, P_BUL, C_BODY, kind="b")
+
+    def p(self, text):
+        return self._p("    " + text, P_BUL, C_BODY, kind="b")
+
+    def note(self, text):
+        t = text[1:].strip() if text.startswith("※") else text
+        return self._p("      ＊ " + t, P_NOTE, C_BODY, kind="note")
+
+    def blank(self, size=6):
+        return self._p("", P_HEAD, C_BODY, kind="blank")
+
+    def center(self, text, size, bold=False, before=0, after=0, font=None, page_break=False, color=None):
+        cid = self.run(f"c{size}{bold}", base=C_TITLE if size >= 20 else C_COVER, bold=bold, size=size)
+        return self._p(text, P_CENTER, cid, page_break=page_break, kind="cover")
+
+    # ── 표 ──
+    def table(self, caption, header, rows, widths=None, width_mm=150.0, font_pt=10.0, align=None, label_col=False, merge=()):
+        """merge: [(행1, 열1, 행2, 열2)] – 표 전체 기준 행 번호(머리행 = 0)로 칸을 합친다."""
+        ch = self.chapter
+        self.n_tab[ch] = self.n_tab.get(ch, 0) + 1
+        if caption:
+            self._p(f"(표 {ch}-{self.n_tab[ch]}. {caption})", P_NOTE, C_BODY, kind="cap")
+        nr, nc = len(rows) + 1, len(header)
+        width_mm = min(width_mm, TEXT_W_MM - 2)
+        t = self.doc.add_table(nr, nc, width=int(width_mm * MM), border_fill_id_ref=BF_TABLE)
+        holder = t.element.getparent()
+        while holder is not None and not holder.tag.endswith("}p"):
+            holder = holder.getparent()
+        if holder is not None:
+            holder.set("paraPrIDRef", P_CENTER)
+        t.set_treat_as_char(True)
+        t.element.set("repeatHeader", "1")
+        im = t.element.find("{*}inMargin")
+        if im is not None:
+            im.attrib.update({"left": "510", "right": "510", "top": "141", "bottom": "141"})
+        if widths:
+            t.set_column_widths(widths)
+        p_c = self.para("cell_c", base="68", align="CENTER", line=160)
+        p_l = self.para("cell_l", base="68", align="LEFT", line=160)
+        c_b = C_TBL
+        c_bb = self.run("cell_bold", base=C_TBL, bold=True)
+        al = align or (["L"] + ["C"] * (nc - 1))
+        for r in range(nr):
+            vals = header if r == 0 else rows[r - 1]
+            bfs = BF_HEAD if r == 0 else (BF_LAST if r == nr - 1 else BF_BODY)
+            for c in range(nc):
+                raw = str(vals[c])
+                bold = raw.startswith("**")
+                txt = raw[2:] if bold else raw
+                t.set_cell_text(r, c, txt)
+                cell = t.cell(r, c)
+                for para in cell.paragraphs:
+                    para.para_pr_id_ref = p_c if (r == 0 or al[c] == "C") else p_l
+                    for run in para.runs:
+                        run.char_pr_id_ref = c_bb if bold else c_b
+                cell.element.set("borderFillIDRef", bfs[0] if c == 0 else (bfs[2] if c == nc - 1 else bfs[1]))
+                cm = cell.element.find("{*}cellMargin")
+                if cm is not None:
+                    cm.attrib.update({"left": "510", "right": "510", "top": "141", "bottom": "141"})
+                if r == 0:
+                    cell.element.set("header", "1")
+        for (r1, c1, r2, c2) in merge:
+            mc = t.element.merge_cells(r1, c1, r2, c2) if hasattr(t, "element") and hasattr(t.element, "merge_cells") else t.merge_cells(r1, c1, r2, c2)
+            if r2 == nr - 1:
+                mc.element.set("borderFillIDRef", BF_LAST[0] if c1 == 0 else (BF_LAST[2] if c2 == nc - 1 else BF_LAST[1]))
+        self.last = "tbl"
+        return t
+
+    def cover_table(self, rows, widths=(1.4, 3.1), width_mm=150.0):
+        """표지 항목표: 항목명 칸은 회색(양식의 표지 표와 같은 휴먼명조 12 pt)."""
+        t = self.doc.add_table(len(rows), 2, width=int(width_mm * MM), border_fill_id_ref="4")
+        holder = t.element.getparent()
+        while holder is not None and not holder.tag.endswith("}p"):
+            holder = holder.getparent()
+        if holder is not None:
+            holder.set("paraPrIDRef", P_CENTER)
+        t.set_treat_as_char(True)
+        t.set_column_widths(list(widths))
+        p_c = self.para("cover_c", base=P_CENTER, align="CENTER", line=150)
+        p_l = self.para("cover_l", base=P_CENTER, align="LEFT", line=150)
+        for r, (k, v) in enumerate(rows):
+            for c, txt in enumerate((k, v)):
+                t.set_cell_text(r, c, txt)
+                cell = t.cell(r, c)
+                for para in cell.paragraphs:
+                    para.para_pr_id_ref = p_c if c == 0 else p_l
+                    for run in para.runs:
+                        run.char_pr_id_ref = C_COVER
+                cell.element.set("borderFillIDRef", BF_LABEL if c == 0 else "12")
+                sub = cell.element.find("{*}subList")
+                if sub is not None:
+                    sub.set("vertAlign", "CENTER")
+        self.last = "cover"
+        return t
+
+    def finish(self):
+        """표·그림을 품은 문단과 조판 부호에 붙은 양식 기본 글자 모양(0번, 휴먼옛체 20 pt)을 본문 모양으로 바꾼다
+        (그대로 두면 그 줄의 높이가 20 pt 기준으로 잡힌다)."""
+        for p in self.doc.paragraphs:
+            for r in p.element.findall("{*}run"):
+                if r.get("charPrIDRef") == "0":
+                    r.set("charPrIDRef", C_BODY)
+
+    # ── 그림 ──
+    def figure(self, path: Path, caption, width_mm=150.0):
+        ch = self.chapter
+        self.n_fig[ch] = self.n_fig.get(ch, 0) + 1
+        im = Image.open(path).convert("RGB")
+        if im.width > 1800:
+            im = im.resize((1800, int(im.height * 1800 / im.width)), Image.LANCZOS)
+        buf = io.BytesIO()
+        im.save(buf, "JPEG", quality=86)
+        width_mm = min(width_mm, TEXT_W_MM - 5)
+        h_mm = width_mm * im.height / im.width
+        self.doc.add_picture(buf.getvalue(), "jpg", width_mm=width_mm, height_mm=h_mm, align="CENTER",
+                             para_pr_id_ref=P_CENTER, char_pr_id_ref=C_BODY)
+        self._p(f"< 그림 {ch}-{self.n_fig[ch]}. {caption} >", P_CENTER, C_FIGCAP, kind="cap")
+
+
+from report_values import (wind_trend, E15_CASES, SETS_M4T, SETS_REF, _f, _rng, cmp3d_rows, e13_n, e13_range, e13_rows,  # noqa: E402,F401
+                           e13_split_rows, e15_table, j, kpi, m4t_model, pct, summary_values)
+
+
+# ───────────────────────── 내용 ─────────────────────────
+def build(out: Path, pi: str = "") -> None:
+    w = Writer()
+    doc = w.doc
+    V = summary_values()
+    K = kpi()
+    IL = json.loads((ROOT / "docs" / "manual_img" / "install_log.json").read_text(encoding="utf-8"))
+
+    # ===== 표지 (양식의 표지와 같은 제목 20 pt · 항목표 12 pt) =====
+    w.center("민간수탁연구사업 연구개발 결과보고서", 20, bold=True)
+    doc.paragraphs[0].add_page_hiding(header=True, footer=True, page_num=True)  # 표지: 쪽 번호 감춤
+    w.blank()
+    w.cover_table([
+        ("과  제  명", "배터리 잔존 용량을 고려한 드론 경로 최적화 알고리즘 개발"),
+        ("연 구 기 간", "2026. 09. 01. ~ 2026. 12. 31.(4개월)"),
+        ("기  관  명", "한국전자기술연구원"),
+        ("연구책임자", pi),
+        ("실 증 기 체", "DJI Matrice 4T"),
+        ("시험비행 · 개발 기체", "Holybro X650 (Pixhawk 6X + ArduCopter), Holybro X500"),
+        ("작  성  일", "2026. 11. 22."),
+    ])
+
+    # ===== 요약 =====
+    w.chapter = 0
+    w.center("요  약", 14, bold=True, page_break=True)
+    w.blank()
+    w.table(
+        None,
+        ["구분", "내용"],
+        [
+            ["최종목표", "· SoC를 명시 상태 변수로 포함한 무인 운반 드론 특화 에너지 인식 경로 최적화 알고리즘 개발\n· 가상 시뮬레이션 및 하드웨어 실증을 통한 알고리즘 성능 검증"],
+            ["개발 내용", "· 경로 탐색 알고리즘 5종 비교 후 Lazy Theta* 선정, 바람·시간·고도를 더한 3차원 시공간 에너지 탐색(WE-LT*)으로 확장\n· 회전익 전력 모델 + 배터리 내부저항 기반 SoC 환산, DJI M100 실측 보정, 실증 기체 M4T 공식 사양 보정, X650 제원 모델\n· 수치예보(GFS) 바람장, 실제 지형·건물·비행 금지 구역(판교·창원), 이동 장애물 안전 구간\n· 비행 중 30초 주기 속도 갱신, 예보 시점별 오차 모형에 따른 출발 판정(go / caution / no-go)\n· ArduPilot 미션(.waypoints)·MAVLink 실시간 연동, DJI 경로 파일(WPML .kmz) 내보내기, 웹 3D 계획 화면"],
+            ["주요 결과", f"· 정량 목표 '외란을 고려한 배터리 안전여유 확보율': {K['rate']} % ({K['k']}/{K['N']}, 95 % 신뢰구간 {K['lo']}–{K['hi']} %, 목표 95.0 % 이상) - 실증 기체 M4T 모델 기반 가상 시뮬레이션(PoC) 검증임\n· 실증 기체 DJI Matrice 4T(탑재 0.2 kg): 기존 경로(최단 + 정속 10 m/s) 대비 SoC 소모 {V['r4']} 감소 (판교·창원 × 7일, {V['n4']}건) - 가상 시뮬레이션 검증임\n· 비교 기체(X650·M100): 같은 조건에서 {V['rR']} 감소 ({V['nR']}건)\n· 비행 중 30초 속도 갱신(폐루프): M4T SoC 소모 {V['e15_m4']} 감소, 이동 장애물 {V['obs_n']}건 침범 {V['obs_col']}건\n· 틀린 예보(불확실성 검토)로 생긴 손해를 30초 속도 갱신이 42–73 % 회복\n· 95 % 신뢰 상한 포함 성공 횟수 - 409/432 (94.7 %) (비교 기체 X650·M100 기준)\n· ArduCopter SITL: 미션 13항목 업로드·읽기 일치, 속도 명령 전부 수락\n· X650 시험비행(2026-11-13): 시간 예측 오차 3 %, 에너지는 제원 중량 기준 16 % 과소 예측(중량 보정 시 2 % 이내)\n· M4T 전력 모델은 DJI 공식 사양(무탑재 호버 42분, 9 m/s 정속 49분)에 맞춘 값이며, 탑재·고속 비행은 실측 미검증"],
+            ["남은 과제", "· 실증 기체 DJI Matrice 4T: 반복 실외 비행으로 정량 목표(안전여유 확보율) 재산정, 실측 비행 기록으로 전력 모델 확인(탑재·고속 구간), Pilot 2 파일 방식 경로 파일의 불러오기 확인, Mobile SDK V5 기반 비행 중 속도 갱신\n· 시험비행 기체 X650: 이륙 중량 실측, 5 m/s 이상 속도별 전력 보정, 기체 바람 추정(EK3_DRAG_BCOEF) 활성화"],
+        ],
+        widths=[1, 5.2],
+        width_mm=158,
+        align=["C", "L"],
+    )
+
+    # ===== 목차 =====
+    w.center("목  차", 14, bold=True, page_break=True)
+    w.blank()
+    toc = [
+        ("1. 연구개발과제의 개요", ["1-1. 연구개발의 필요성", "1-2. 연구개발의 범위"]),
+        ("2. 국내외 기술개발 현황", ["2-1. 드론 경로계획 기술의 분류", "2-2. 국내외 연구 동향", "2-3. 기존 기술의 한계와 본 과제의 차별성"]),
+        ("3. 기술개발의 목표 및 내용", ["3-1. 최종목표 및 평가방법", "3-2. 기술개발 내용", "3-3. 추진 일정 및 경과"]),
+        ("4. 연구개발 수행 내용 및 결과", ["4-1. 경로 탐색 알고리즘 비교 및 선정", "4-2. 최단 경로와 에너지 최적 경로", "4-3. 에너지·SoC 모델",
+                                     "4-4. 실제 지도 기반 3차원 시공간 경로계획", "4-5. 기존 경로 대비 성능", "4-6. 비행 중 갱신과 신뢰도",
+                                     "4-7. 대상 기체와 취득 데이터", "4-8. 가상 시뮬레이션(SITL) 검증", "4-9. 하드웨어 시험비행 (Holybro X650)", "4-10. 운용 소프트웨어"]),
+        ("5. 목표 달성도 및 관련 분야 기여도", ["5-1. 목표 달성도", "5-2. 관련 분야 기여도"]),
+        ("6. 연구개발 결과의 활용계획 및 향후 과제", ["6-1. 활용 계획", "6-2. 향후 과제", "6-3. 한계"]),
+        ("7. 참고문헌", []),
+        ("부록. 산출물 목록", []),
+    ]
+    for t1, subs in toc:
+        w._p(t1, P_HEAD, C_H1, kind="toc")
+        for s_ in subs:
+            w._p("  " + s_, P_HEAD, C_BODY, kind="toc")
+    w.last = "cover"
+
+    # ===== 1장 =====
+    w.h1("1. 연구개발과제의 개요", page_break=True)
+    w.h2("1-1. 연구개발의 필요성")
+    w.h3("(1) 기술적 필요성")
+    w.b("무인 운반 드론의 임무 성패는 배터리 잔량(SoC, State of Charge)으로 결정되나, 일반적인 경로계획은 이동 거리 최소화를 목표로 하여 바람·고도·속도에 따른 에너지 차이를 반영하지 못함")
+    w.b("DJI M100 실측 비행 자료에서 이동 거리는 비행 에너지를 설명하지 못하였고(결정계수 R²−1.47), 최단 경로 계획은 강풍일 12회 모두 임무 불가로 판정됨 [7]")
+    w.b("10 m/s 바람은 비행 방향에 따라 미터당 에너지를 -38 %에서 +150 %까지 변화시키며, 이는 탑재중량 전 범위의 영향(14 %)과 공기밀도의 영향(6 %)보다 큼")
+    w.b("바람은 고도와 시간에 따라 변하고 방향에 따라 이득과 손해가 바뀌므로, 크기와 방향을 가진 시공간 바람장으로 다루어야 함")
+    w.b("비행 금지 구역·건물·이동 장애물(유인기 등)을 회피하면서 동시에 SoC 소모를 최소화하는 3차원·시간 의존 경로계획 기술이 필요함")
+    w.h3("(2) 경제·산업적 필요성")
+    w.b("배송 드론의 에너지 소비는 운용 거리, 배터리 용량, 예비 전력 설계를 좌우하며, 이에 관한 에너지 모델·운용 계획 연구가 활발히 보고됨 [17, 18, 19]")
+    w.b("주문이 정해진 뒤 운용자가 바꿀 수 있는 것은 경로·고도·속도뿐이므로, 이를 에너지 기준으로 정하는 계획 도구가 같은 배터리로 더 먼 거리와 더 큰 예비 전력을 확보하는 수단이 됨")
+    w.b("시험비행 기체(ArduPilot 계열 Holybro X650)와 실증 기체(DJI Matrice 4T)에 공통으로 적용할 수 있는 경로 파일·실시간 연동 체계가 필요함")
+    w.h2("1-2. 연구개발의 범위")
+    w.table(
+        "연구개발 범위",
+        ["구분", "범위"],
+        [
+            ["알고리즘", "경로 탐색(Lazy Theta* 기반), 에너지·SoC 모델, 바람장 반영 3차원 시공간 탐색, 이동 장애물 안전 구간, 비행 중 속도 갱신, 출발 신뢰도 판정"],
+            ["데이터", "실제 지형(DSM)·건물·비행 금지 구역, GFS 수치예보 바람(고도·시간별), 기체 텔레메트리(MAVLink, DJI SDK 제공된 데이터에 한함)"],
+            ["검증", f"정량 목표(안전여유 확보율) PoC {K['n']}개 임무 × 외란 4종, 가상 시뮬레이션(실증 기체 M4T 420건 + 비교 기체 630건, 폐루프, 432건 신뢰도), ArduCopter SITL, Holybro X650 시험비행"],
+            ["운용 SW", "웹 3D 계획 화면, ArduPilot 미션(.waypoints)·DJI 경로 파일(.kmz) 내보내기, 실시간 연동 서버, 사용자 매뉴얼"],
+        ],
+        widths=[1, 5],
+        align=["C", "L"],
+    )
+
+    # ===== 2장 =====
+    w.h1("2. 국내외 기술개발 현황")
+    w.h2("2-1. 드론 경로계획 기술의 분류")
+    w.b("자율비행 기술은 상태 추정, 환경 인지, 경로계획으로 구분되며, 경로계획은 추정한 상태와 환경 정보를 바탕으로 장애물을 회피하며 목표 지점까지의 경로를 생성함 [1]")
+    w.b("임무에 맞는 경로를 고르기 위해 비용 함수(또는 이득 함수)를 설계하는 것이 핵심이며, 본 과제는 비용을 이동 거리 대신 SoC 소모로 정의함")
+    w.table(
+        "드론 경로계획 기술 분류",
+        ["대분류\n(계획 범위)", "중분류\n(공간 표현·탐색 방식)", "대표 기법"],
+        [
+            ["전역 / 지역 경로계획", "그래프·격자 탐색", "Dijkstra, A*, D*, Hybrid A*, Theta*, Lazy Theta*"],
+            ["", "샘플링 기반", "RRT, RRT*, Informed RRT*, PRM"],
+            ["", "포텐셜·벡터장 기반", "APF, VFH / 3D-VFH"],
+            ["", "궤적 최적화 기반", "CHOMP, MPC"],
+            ["", "메타휴리스틱·학습 기반", "GA, ACO, PSO, 강화학습(Q-learning), Neural RRT"],
+        ],
+        widths=[1.3, 1.6, 3],
+        align=["C", "C", "L"],
+        merge=[(1, 0, 5, 0)],
+    )
+    w.h2("2-2. 국내외 연구 동향")
+    w.h3("(1) 탐사형 경로계획")
+    w.b("ETH Zürich(Autonomous Systems Lab)의 Receding Horizon Next-Best-View 계획기는 깊이 센서로 새로 관측할 공간의 양을 가시적 이득으로 정의하여 순간마다 탐사 경로를 갱신함")
+    w.b("HKUST(Aerial Robotics Group)의 Frontier 기반 계획기는 아직 보지 못한 공간과의 경계면(frontier)을 후보 지점으로 삼아 방문 경로를 구성함")
+    w.h3("(2) 에너지·바람 인식 경로계획")
+    w.b("바람이 변하는 조건에서 에너지 제약을 둔 배송 경로 연구 [8]와 기상 불확실성에 강건한 임무 계획 연구 [9]가 보고됨")
+    w.b("최근 동적 바람장에서의 에너지 인식 경로계획(WA-LPA*) [10], 바람장 반영 최적 경로 [11], 도시 물류용 바람장 분석 결합 경로계획 [12] 연구가 활발함")
+    w.h3("(3) 이동 장애물과 불확실성")
+    w.b("시간 축 안전 구간(Safe Interval)으로 이동 장애물을 다루는 SIPP [3]와 그 any-angle 확장 [4], 확률 제약(chance-constrained) 기반 충돌 회피 [13, 14]가 대표적임")
+    w.h2("2-3. 기존 기술의 한계와 본 과제의 차별성")
+    w.table(
+        "일반적인 최단 경로 계획과 본 과제의 비교",
+        ["구분", "일반적인 최단 경로 계획", "본 과제"],
+        [
+            ["목적 함수", "이동 거리", "SoC 소모 (명시 상태 변수, 예비 20 % 제약)"],
+            ["바람", "미반영 또는 고정값", "고도·시간별 수치예보 바람장, 순풍·역풍·측풍 반영"],
+            ["탐색 공간", "2차원 격자", "3차원 + 시간 (26방향, 구간 속도 동시 결정)"],
+            ["장애물", "정적 장애물", "정적 + 이동 장애물 안전 구간, 불확실성 여유"],
+            ["호버링 판단", "우회 vs 대기 시간 비교", "우회 vs 대기 에너지 비교"],
+            ["비행 중", "출발 전 계획 고정", "30초 주기 속도 갱신, 장애물 변경 시 재계획"],
+            ["검증", "시뮬레이션", "시뮬레이션 + SITL + 실기체 시험비행"],
+        ],
+        widths=[1, 2, 3],
+        align=["C", "L", "L"],
+    )
+
+    # ===== 3장 (요청 이미지의 서식) =====
+    w.h1("3. 기술개발의 목표 및 내용")
+    w.h2("3-1. 최종목표 및 평가방법")
+    w.h3("(1) 최종목표")
+    w.b("SoC를 명시 상태 변수로 포함한 무인 운반 드론 특화 에너지 인식 경로 최적화 알고리즘 개발")
+    w.b("가상 시뮬레이션 및 하드웨어 실증을 통한 알고리즘 성능 검증")
+    w.h3("(2) 개발내용 및 범위 (2026. 7. 28. 계획서)")
+    w.table(
+        "계획서의 개발내용과 수행 결과",
+        ["단계", "계획서 개발내용", "수행 결과", "해당 절"],
+        [
+            ["[1단계]\n에너지 소비\n모델 수립", "체공 전력, 속도 의존 공력 전력, 고도 변화, 풍향 의존 전력 분리 모델링",
+             "회전익 전력 모델(유도·형상·동체 항력)에 상승·하강 전력과 바람장(대기속도 = 대지속도 − 바람)을 분리 반영. M100 실측 보정, M4T 공식 사양 보정, X650 제원·시험비행 비교", "4-3"],
+            ["", "SoH 기반 유효 용량 감소 및 내부저항 반영 검토",
+             "배터리 내부저항 손실(I²R)을 평균 전력 기준 계수로 SoC 환산에 반영. SoH(노화)에 따른 유효 용량 감소는 검토 단계로, 기체별 노화 자료가 없어 배터리 용량 입력값으로만 다룸", "4-3"],
+            ["[2단계]\nSoC 통합\n경로 최적화", "확장 상태 공간 (x, y, z, SoC) 파라미터화",
+             "3차원 격자 위치(x, y, z)와 시각을 탐색 상태로 하고 누적 에너지(= SoC 소모)를 경로 비용으로 가짐. 구간 속도를 함께 결정 (WE-LT*)", "3-2, 4-4"],
+            ["", "에너지·시간·안전 마진 가중합 비용 함수, SoC 하한 제약",
+             "비용은 SoC 소모(에너지) 하나로 두고 고도 변화는 상승·하강 전력으로 그 안에 포함. 시간 가중항은 두지 않음. 안전 마진은 가중합 대신 제약으로 둠: 예비 SoC 하한(기본 20 %, 미달 시 임무 불가), 이동 장애물 위험 한도 ε의 안전 구간", "3-2, 4-4"],
+            ["", "에너지 인식 경로 기반 전략 및 충전/비상 착륙 포인트 통합",
+             "비행 중 예비 SoC 도달 시 현 위치 비상 착륙, 남은 배터리로 복귀할 수 없으면 목적지에서 복귀 보류(지상 대기). 충전 지점 경유 계획은 구현하지 않음", "4-6"],
+            ["[3단계]\n시뮬레이션\n및 실증", "지형 시뮬레이션 검증 + 실제 드론 하드웨어 실증 비행",
+             "판교·창원 실제 지형·건물·예보 바람 시뮬레이션, ArduCopter SITL, Holybro X650 시험비행. 실증 기체 M4T 비행은 미실시", "4-5, 4-8, 4-9"],
+            ["", "기존 에너지 인식 알고리즘과 성능 비교",
+             "기존 경로(최단 + 정속), 최단 + 속도 최적화, 에너지 A* 등과 비교 (X650 판교 2026-10-27 왕복 단일 사례: 에너지 A* 50.1 %p, WE-LT* 47.4 %p)", "4-1, 4-5"],
+        ],
+        widths=[1.1, 2.3, 3.6, 0.9],
+        font_pt=8.5,
+        align=["C", "L", "L", "C"],
+        merge=[(1, 0, 2, 0), (3, 0, 5, 0), (6, 0, 7, 0)],
+    )
+    w.h3("(3) 개발기술의 평가방법 및 평가항목")
+    w.table(
+        "정량적 목표 항목 (계획서 표2)",
+        ["평가항목\n(주요성능 Spec)", "단위", "비중\n(%)", "세계최고 수준\n(보유국/보유기업)", "연구개발 전\n국내 수준", "개발\n목표치", "평가방법", "비고"],
+        [["외란을 고려한 배터리 안전여유 확보율", "%", "100", "중국/DJI\n98.0 이상", "85.0 수준", "95.0 이상",
+          "승인된 임무 종료 후 정상 복귀/착륙 여부와 종료 시 Reserve가 정책 마진 이상인지 확인하여 성공률을 산정", "자체시험\n평가"]],
+        widths=[1.6, 0.5, 0.6, 1.1, 0.9, 0.8, 2.6, 0.8],
+        font_pt=8.5,
+        align=["C", "C", "C", "C", "C", "C", "L", "C"],
+    )
+    w.note("※ 기준설정 근거 : 배터리 안전여유 기반 미션 보증의 최종 결과지표임. 실제 사업화 관점에서는 “예측을 잘했다”보다 “정상 복귀를 보장했는가”가 더 중요한 성능임")
+    w.note("※ 평가환경 : 동일 기체·배터리·페이로드 조건의 반복 실외 비행 시험을 고려하여 시뮬레이션 환경 기반 정상 복귀 지점이 사전 정의된 PoC 시험환경")
+    w.h3("(4) 평가 시험 설계 (PoC 시험환경)")
+    w.b("정책 마진(Reserve): 예비 SoC 20 %. 성공 = 승인된 임무가 완료(목적지 하역 후 출발지로 정상 복귀·착륙)되고, 이동 장애물 침범이 없으며, 종료 SoC ≥ 20 %")
+    w.b("승인: 플랫폼의 출발 판정과 같은 규칙. 계획에 쓴 예보로 구한 SoC 소모의 95 % 상한이 '출발 SoC − 20 %' 이하이면 승인(go)")
+    w.b("가장 엄한 조건으로, 승인이 겨우 나는 출발 SoC(= 20 % + 명목 소모 + 95 % 여유)에서 비행시킴. 배터리가 이보다 많으면 성공이 더 쉬움")
+    w.b(f"기체·배터리·탑재: 실증 기체 DJI Matrice 4T 모델, 99 Wh, 탑재 0.2 kg으로 고정. 판교·창원 × {K['days']}일(2025-11–2026-10, 사계절) × 경로 3개 = {K['n']}개 왕복 임무 (편도 {K['dist']} km)")
+    w.b("외란: ① 실제 예보 오차(계획은 00Z 예보, 비행은 6시간 뒤 06Z 예보 바람), ② ① + 경로를 가로지르는 이동 장애물 → 평가항목 산정. ③ 풍향 30° 회전, ④ 풍속 1.3배 → 오차 모형 밖 스트레스(참고)")
+    w.b("비행: 배포 프로그램의 실시간 엔진(안전장치 켬, 30초 속도 갱신)으로 이륙–순항–착륙–하역–복귀까지 폐루프 모의 비행")
+    w.h3("(5) 보조 지표")
+    w.table(
+        "보조 지표 (계획서 평가항목을 뒷받침하는 세부 성능)",
+        ["번호", "보조 지표", "평가 방법", "판단 기준"],
+        [
+            ["1", "기존 경로 대비 SoC 소모", "실증 기체 M4T: 2지역 × 7일 × 출발 3회 × 출발·도착 쌍 10 = 420건 (비교 기체 630건), 날짜 단위 부트스트랩 95 % 구간", "95 % 구간 상한 < 0 %"],
+            ["2", "틀린 예보에 대한 대응", "예보 오차 시나리오별 갱신 주기에 따른 손해 회복률", "30초 갱신 시 회복률 제시"],
+            ["3", "이동 장애물 안전", "가로지르는 이동 장애물 시나리오의 침범 횟수", "0건"],
+            ["4", "출발 신뢰도 보정", "95 % 상한 안에 실제 SoC 소모가 든 비율 (432건)", "93–97 %"],
+            ["5", "비행제어기 연동", "ArduCopter SITL 미션 업로드·속도 명령", "항목 수 일치, 명령 수락"],
+            ["6", "실기체 예측 정확도", "X650 시험비행 로그 대비 에너지·시간 예측", "오차 ±10 % 이내"],
+            ["7", "운용성", "배포판 설치부터 경로 생성까지 소요 시간", "설치 후 1분 이내"],
+        ],
+        widths=[0.6, 1.7, 3.4, 1.9],
+        font_pt=9,
+        align=["C", "L", "L", "C"],
+    )
+    w.note("※ 보조 지표의 판단 기준은 본 보고서에서 설정한 값임. 과제의 정량 목표는 위 (3)의 안전여유 확보율 하나임")
+    w.h3("(6) 평가 환경")
+    w.b("지역: 성남 판교(6.2 × 5.5 km), 창원 창이대로 71 주변(4.4 × 4.0 km)의 실제 지형·건물·비행 금지 구역")
+    w.b("바람: 미국 해양대기청(NOAA) GFS 수치예보, 계획에는 00Z 발표분, 평가에는 6시간 뒤 06Z 발표분 사용(계획 때는 모르는 값으로 취급)")
+    w.b("기체: 실증 기체 DJI Matrice 4T(공식 사양으로 보정한 전력 모델, 탑재 0.2 kg)를 기준으로 하고, Holybro X650(제원 추정, 탑재 1.0 kg)·DJI M100(CMU 실측 보정, 탑재 0.5 kg)을 비교용으로 함께 계산")
+    w.b("SITL·시험비행: ArduCopter 4.7.2 SITL, Holybro X650 실기체(ArduCopter 4.7.1, Pixhawk 6X)")
+    w.b("실증 기체: DJI Matrice 4T (공식 사양 보정 전력 모델, DJI Pilot 2 경로 파일 지정 방식의 WPML 내보내기). 실측 비행 비교는 6-2절 과제")
+
+    w.h2("3-2. 기술개발 내용")
+    w.h3("(1) 경로 탐색 알고리즘 선정")
+    w.b("A*, Lazy Theta*, Q-learning, Lazy Theta* + Q-learning, RRT* 5종을 같은 지도에서 계산 시간·이동 거리·경로점 수로 비교하여 Lazy Theta*를 기본 탐색기로 선정 [2]")
+    w.h3("(2) 에너지·SoC 모델")
+    w.b("회전익 전력 모델(유도 동력 + 형상 동력 + 동체 항력 동력)로 대기속도·상승률·질량에 따른 전력을 계산하고 [5, 6], 배터리 내부저항을 반영하여 SoC로 환산")
+    w.b("DJI M100은 CMU 공개 실측 비행 자료로 계수를 보정하고 [7], 실증 기체 DJI Matrice 4T는 DJI 공식 사양 두 점(무탑재 호버 42분, 9 m/s 정속 49분)으로 효율과 항력 면적을 맞추며, Holybro X650은 제원과 제조사 호버 시간으로 추정")
+    w.h3("(3) 바람장 반영 3차원 시공간 경로계획(WE-LT*)")
+    w.b("고도·시간별 바람장에서 대지속도와 대기속도의 관계를 풀어 구간 에너지를 계산하고, 26방향 3차원 탐색과 구간 속도를 함께 결정")
+    w.b("가는 편과 오는 편의 바람이 다르므로 왕복 경로를 따로 최적화하고, 우회와 호버 대기 중 에너지가 적은 쪽을 선택")
+    w.h3("(4) 비행 금지 구역과 이동 장애물")
+    w.b("비행 금지 구역·건물은 3차원 점유 격자로, 이동 장애물은 시간 축 안전 구간(SIPP)으로 표현하고 [3], 실측 ADS-B 예측 오차로 만든 불확실성 여유를 더함 [15, 16]")
+    w.b("비행 중 장애물·금지 구역이 바뀌면 남은 구간을 다시 계획")
+    w.h3("(5) 비행 중 갱신과 출발 신뢰도")
+    w.b("기체가 잰 바람으로 예보를 보정하여 30초마다 남은 구간 속도를 다시 정하고, 예보 기준으로 불리한 경로 변경은 막는 안전장치를 둠")
+    w.b("예보 시점(발표 후 경과 시간)별 오차 모형으로 SoC 소모 분포를 구해 출발 판정(go / caution / no-go)을 냄")
+    w.h3("(6) 기체 연동과 운용 소프트웨어")
+    w.b("ArduPilot 미션 파일(QGC WPL 110), MAVLink 실시간 속도 명령·바람 수신, DJI WPML 경로 파일(.kmz) 내보내기")
+    w.b("웹 기반 3차원 계획 화면, 실시간 연동 서버, 설치 패키지와 사용자 매뉴얼")
+
+    w.h2("3-3. 추진 일정 및 경과")
+    w.table(
+        "추진 일정 (계획서 5장)과 수행 경과",
+        ["번호", "개발내용 (계획서)", "기간", "수행 경과"],
+        [
+            ["1", "경로 알고리즘 설계를 위한 자료 조사", "4주", "경로계획 기술 분류·동향, 경로 탐색 알고리즘 5종 비교, 기체 에너지 실험 계획, MAVLink 수신 메시지 점검 (2026. 6. 30., 7. 1., 9. 4. 회의)"],
+            ["2", "SoH, SoC 임의 데이터 기반 시나리오 시뮬레이션", "8주", "에너지·SoC 모델, 판교·창원 실제 지도, 3차원 시공간 에너지 탐색(WE-LT*), 기존 경로 대비 비교(M4T 420건·비교 기체 630건), 폐루프, 출발 신뢰도"],
+            ["3", "실측 경로 운행 데이터 기반 시나리오 테스트", "8주", "CMU M100 실측 비행 보정, ArduCopter SITL, Holybro X650 시험비행(2026. 11. 13.)과 로그 비교, 정량 목표 PoC 시험"],
+            ["4", "실측 비교 평가 및 알고리즘 최적화 보고서 작성", "8주", "M4T 모델 반영, 업체 시험용 배포판·사용자 매뉴얼·시험 안내서, 결과 보고서 작성 (실증 기체 M4T 실측 비교는 남은 과제)"],
+        ],
+        widths=[0.6, 2.4, 0.6, 4.2],
+        font_pt=9,
+        align=["C", "L", "C", "L"],
+    )
+    w.note("※ 연구기간 2026. 09. 01. ~ 2026. 12. 31.(4개월). 1번 자료 조사는 과제 시작 전 회의(2026. 6.–7.)부터 진행함")
+
+    # ===== 4장 =====
+    w.h1("4. 연구개발 수행 내용 및 결과")
+    w.h2("4-1. 경로 탐색 알고리즘 비교 및 선정")
+    w.h3("(1) 비교 조건")
+    w.b("2차원 지도에 건물(사각형)과 나무(원형)를 무작위로 배치하고 장애물 안전 영역을 두어, 같은 시작·목적·복귀 지점으로 5종 알고리즘을 실행")
+    w.h3("(2) 비교 결과")
+    w.table(
+        "경로 탐색 알고리즘 5종 비교 (2026. 6. 30. 회의자료)",
+        ["알고리즘", "구분", "계산 시간 (s)", "이동 거리 (m)", "경로점 수"],
+        [
+            ["A*", "그래프 기반", "0.3017", "533.16", "12"],
+            ["**Lazy Theta*", "**Any-angle 기반", "**0.2593", "**526.88", "**9"],
+            ["Q-learning", "강화학습 기반", "0.6512", "533.77", "13"],
+            ["Lazy Theta* + Q-learning", "하이브리드", "4.7769", "533.77", "13"],
+            ["RRT*", "샘플링 기반", "1.3528", "539.64", "9"],
+        ],
+        widths=[2.2, 1.6, 1.3, 1.3, 1],
+    )
+    w.b("Lazy Theta*가 계산 시간(0.2593 s)과 이동 거리(526.88 m)가 가장 작고, 경로점 수(9개)는 RRT*와 같이 가장 적음")
+    w.b("RRT*는 무작위 표본으로 실행마다 결과가 달라 재현성이 낮고, Q-learning 계열은 학습 횟수·보상 설계에 민감하여 단일 정적 지도에서는 탐색 알고리즘보다 느림")
+    w.h3("(3) 선정")
+    w.b("가시선 검사를 필요한 때로 미루어 Theta* 수준의 자유각 경로를 적은 계산으로 얻고 결과가 항상 같은 Lazy Theta*를 기본 탐색기로 선정 [2]")
+    w.b("경로점이 적어 비행제어기 미션 입력이 단순하며, 이후 비용을 거리에서 에너지로 바꾸고 바람·시간·고도 차원을 더하는 방식으로 확장")
+
+    w.h2("4-2. 최단 경로와 에너지 최적 경로")
+    w.table(
+        "최단 경로와 최적 경로의 정의 (2026. 9. 4. 회의자료)",
+        ["구분", "최단 경로", "최적 경로"],
+        [
+            ["최소화 목표", "이동 거리", "배터리 소모 (SoC)"],
+            ["바람 정보", "미반영", "반영 (순풍·역풍·측풍)"],
+            ["왕복 경로", "갈 때·올 때 비슷한 길", "갈 때·올 때 다른 길 (순풍 활용)"],
+            ["필요한 정보", "지도 + 장애물 시간표", "지도 + 장애물 시간표 + 바람 지도"],
+            ["호버링 판단", "시간 기준 (예: 우회 5초 vs 대기 3초 → 대기)", "에너지 기준 (예: 우회 589 W vs 대기 491 W → 대기)"],
+        ],
+        widths=[1.2, 2.4, 2.6],
+        align=["C", "L", "L"],
+    )
+    w.table(
+        "개발 순서",
+        ["단계", "탐색 알고리즘", "결과물"],
+        [
+            ["1. 최단 경로", "Lazy Theta*", "거리, 경로점"],
+            ["2. 최단 경로 (실제 지도)", "Lazy Theta*", "거리, 경로점"],
+            ["3. 최적 경로 (바람)", "A* (8방향)", "거리, 경로점, 비행 시간, 에너지"],
+            ["4. 최적 경로 (바람 + 이동 장애물)", "시공간 A* (8방향 + 시간)", "+ 경로점별 통과 시각"],
+            ["5. 3차원 최적 경로", "3차원 시공간 탐색 (26방향 + 시간)", "+ 고도"],
+        ],
+        widths=[2.2, 2.2, 2.4],
+        align=["L", "C", "L"],
+    )
+    w.b("5단계는 Lazy Theta*의 가시선 단축을 에너지 비용에 적용한 시공간 탐색(WE-LT*)으로 구현하였으며, 4-5절의 '제안 경로'가 이 결과임")
+
+    w.h2("4-3. 에너지·SoC 모델")
+    w.h3("(1) 전력 모델")
+    w.b("필요 전력 = 유도 동력(추력 생성) + 형상 동력(블레이드 항력) + 동체 항력 동력 + 상승 동력 + 항전 장비 전력으로 구성 [5, 6]")
+    w.b("바람장에서 원하는 대지속도를 내기 위한 대기속도를 구간마다 풀어 전력과 비행 시간을 곱해 구간 에너지를 계산")
+    w.b("배터리 전압 강하(내부저항)를 반영하여 소모 에너지를 SoC로 환산하고, 도착 시 예비 SoC 20 % 이상을 제약으로 둠")
+    w.h3("(2) 보정과 검증")
+    w.b("DJI M100은 CMU 공개 실측 비행 198회로 계수를 보정하고, 보정에 쓰지 않은 날짜 56회로 예측을 확인함 [7]")
+    w.figure(FIG / "F3_energy_validation.png", "DJI M100 실측 비행에 대한 에너지 모델 검증", 155)
+    M = V["M"]
+    b0, b2 = M["by_payload"]["0.0"], M["by_payload"]["0.2"]
+    w.h3("(3) 실증 기체 DJI Matrice 4T 모델")
+    w.b("DJI 공식 사양의 두 측정 조건에 맞추어 효율과 동체 항력 면적을 정함: ① 무풍 호버 42분(100 % → 0 %), ② 무탑재 약 9 m/s 정속 49분(100 % → 0 %)")
+    w.table(
+        "DJI Matrice 4T 전력 모델의 계수와 출처",
+        ["계수", "값", "출처"],
+        [
+            ["질량 (이륙 무게)", "1.219 kg (+ 탑재 최대 0.2 kg)", "공식 사양"],
+            ["회전면 면적", f"{M['area']:.3f} m²", "공식 사양 (10.8 in 프로펠러 4개)"],
+            ["배터리 에너지", "99 Wh (14.76 V, 6741 mAh, 리튬이온 4S)", "공식 사양"],
+            ["종합 효율", f"{M['eta']:.3f}", "호버 42분 · 9 m/s 49분에 맞춘 값"],
+            ["동체 항력 면적 CdA", f"{M['cda']:.4f} m²", "호버 42분 · 9 m/s 49분에 맞춘 값"],
+            ["형상 동력 · 항전 전력", f"{M['p0']:.0f} W · {M['p_av']:.0f} W", "가정 (형상 동력 10–30 W에서 효율 0.57–0.75)"],
+            ["상승률 / 하강률", f"{M['vz_up']:.0f} / {M['vz_dn']:.0f} m/s", "가정 (운용 값, 최대 10 / 8 m/s)"],
+            ["대기속도 / 대지속도 상한", f"{M['va_max']:.0f} / {M['vg_max']:.0f} m/s", "가정 (최대 수평 21 m/s, 운용 여유)"],
+        ],
+        widths=[1.6, 2.2, 3],
+        align=["L", "C", "L"],
+    )
+    w.table(
+        "M4T 탑재중량별 호버 전력과 효율 속도 (모델)",
+        ["탑재", "총 질량", "호버 전력", "호버 시간", "미터당 에너지 최소 속도", "최대 거리"],
+        [[f"{k} kg", f"{v['mass']:.3f} kg", f"{v['hover_w']:.0f} W", f"{v['hover_min']:.1f} 분", f"{v['v_best']:.1f} m/s",
+          f"{v['range_km']:.1f} km"] for k, v in M["by_payload"].items()],
+        widths=[1, 1, 1, 1, 1.6, 1.2],
+        align=["C"] * 6,
+    )
+    w.b(f"모델의 무탑재 최대 거리는 {b0['range_km']:.1f} km로 DJI 표기 35 km보다 짧음. 35 km의 측정 조건은 확인하지 못하였으며, 모델은 고속 구간 전력을 크게 보는 쪽(보수적)임 [확인요망: 35 km 측정 조건]")
+    w.b(f"최대 탑재(0.2 kg)에서 호버 시간은 {b2['hover_min']:.1f}분, 미터당 에너지가 가장 작은 속도는 {b2['v_best']:.0f} m/s임")
+    w.h3("(4) 시험비행 기체 Holybro X650 모델")
+    w.table(
+        "Holybro X650 전력 모델의 계수와 출처",
+        ["계수", "값", "출처"],
+        [
+            ["무탑재 질량", "4.1 kg", "제원표"],
+            ["회전면 면적", "0.456 m²", "제원 (15 in 프로펠러 4개)"],
+            ["배터리 에너지", "222 Wh (6S 10,000 mAh)", "제원"],
+            ["상승률 / 하강률", "2.5 / 1.5 m/s", "ArduCopter 기본값"],
+            ["종합 효율", "0.726", "무탑재 호버 30분에 맞춘 값"],
+            ["형상 동력", "30 W", "가정 (M100 보정값 환산)"],
+            ["동체 항력 면적 CdA", "0.08 m²", "가정 (M100 보정값 0.070 m²와 비슷한 크기)"],
+            ["대지속도 상한", "15 m/s", "가정 (실증 운용 여유)"],
+        ],
+        widths=[1.6, 1.8, 3],
+        align=["L", "C", "L"],
+    )
+    w.table(
+        "X650 탑재중량별 호버 전력과 효율 속도 (모델)",
+        ["탑재", "총 질량", "호버 전력", "호버 시간", "미터당 에너지 최소 속도", "미터당 에너지"],
+        [
+            ["0 kg", "4.1 kg", "433 W", "30.0 분", "13.5 m/s", "29.4 J/m"],
+            ["1 kg", "5.1 kg", "581 W", "22.4 분", "15.0 m/s", "35.2 J/m"],
+            ["2.2 kg", "6.3 kg", "779 W", "16.7 분", "15.0 m/s", "43.1 J/m"],
+        ],
+        widths=[1, 1, 1, 1, 1.6, 1.2],
+        align=["C"] * 6,
+    )
+    w.note("※ 항력 면적 등 가정 계수는 4-9절 시험비행과 6-2절의 속도별 시험으로 보정해야 함")
+
+    w.h2("4-4. 실제 지도 기반 3차원 시공간 경로계획")
+    w.h3("(1) 입력 자료")
+    w.b("지형·건물: 수치표면모델(DSM)과 건물 높이로 3차원 점유 격자 구성, 비행 금지 구역 반영")
+    w.b("바람: GFS 수치예보의 고도별·시간별 바람을 계획 영역에 보간하여 시공간 바람장 구성")
+    w.figure(FIG / "F4_paths_realmap.png", "실제 지도(판교)에서의 최단 경로와 에너지 최적 경로", 160)
+    w.h3("(2) 3차원 계획 화면에서의 비교 (2026-10-27 예보, 15시 출발 왕복)")
+    rows = cmp3d_rows(SETS_M4T) + cmp3d_rows([("pangyo_x650", "판교 · X650 (비교)"), ("changwon_x650", "창원 · X650 (비교)"), ("pangyo_m100", "판교 · M100 (비교)")])
+    w.table(
+        "기존 경로와 제안 경로의 왕복 SoC 소모 (3차원 화면 비교 결과)",
+        ["지역 · 기체", "기존 (최단 + 정속 10 m/s)", "최단 + 속도 최적화", "제안 경로", "기존 대비", "비행 시간"],
+        rows,
+        widths=[1.3, 1.8, 1.5, 1.1, 1, 1.3],
+    )
+    by = j("platform_3d_compare_pangyo_m4t.json")["by"]
+    w.b(f"실증 기체 M4T(탑재 0.2 kg)는 바람이 강한 판교에서 절감이 크고, 바람이 약한 창원에서는 작음. 이 판교 사례에서는 경로 모양의 몫({_f(by['path_pct'])} %)이 속도의 몫({_f(by['speed_pct'])} %)보다 컸으나, 여러 날 평균(4-5절)에서는 속도의 몫이 더 큼")
+    w.b("이날 판교 15시는 맞바람이 약 11 m/s로 M4T 내풍 한계(12 m/s)에 가까운 조건이므로, 실제 운용에서는 출발 판정(4-6절)으로 걸러야 함")
+    w.b("판교 M100은 기존 경로로는 SoC가 바닥나 임무가 성립하지 않으나, 제안 경로는 예비 20 %를 지키며 완주함")
+    w.figure(FIG / "platform_3d_compare_pangyo_m4t.png", "3차원 계획 화면의 경로 비교 (판교 · 실증 기체 M4T)", 160)
+
+    w.h2("4-5. 기존 경로 대비 성능")
+    w.h3("(1) 비교 방법")
+    w.b("7일(2026-10-01–31 중, 지면 위 100 m 평균 풍속 0.5–11.6 m/s) × 출발 시각 3 × 출발·도착 쌍 10 = 지역·기체 조합마다 210건 (편도 1.5–2.8 km)")
+    w.b(f"실증 기체 M4T: 판교·창원 {V['n4']}건, 탑재 0.2 kg(최대 페이로드). 비교 기체: 창원·판교 X650(탑재 1.0 kg), 판교 M100(0.5 kg) {V['nR']}건")
+    w.b("기존 경로는 최단 경로 + 정속 10 m/s(ArduCopter 기본 수평 속도), 제안 경로는 에너지 탐색(WE-LT*) + 구간 속도 최적화")
+    w.h3("(2) 결과")
+    w.table(
+        "기존 경로 대비 SoC 소모 (실증 기체 M4T 와 비교 기체)",
+        ["조합", "기존 SoC 소모", "제안 SoC 소모", "변화 (95 % 구간)", "제안이 우수한 경우", "비행 시간"],
+        e13_rows(SETS_M4T) + [[f"{r[0]} (비교)"] + r[1:] for r in e13_rows(SETS_REF)],
+        widths=[1.2, 1.1, 1.1, 2, 1.3, 1],
+    )
+    w.table(
+        "절감의 출처 분해",
+        ["조합", "속도만 바꾼 효과", "경로 모양의 효과 (95 % 구간)", "안전장치 적용 시"],
+        e13_split_rows(SETS_M4T) + [[f"{r[0]} (비교)"] + r[1:] for r in e13_split_rows(SETS_REF)],
+        widths=[1.2, 1.4, 2, 2],
+    )
+    w.b(f"실증 기체 M4T: 기존 경로 대비 SoC 소모 {V['r4']} 감소(95 % 구간 상한 {V['ci4']} 감소), 제안이 우수한 경우 {V['win4']}건")
+    wt = wind_trend()
+    w.b(f"바람이 셀수록 절감이 커짐: M4T는 바람이 가장 약한 날(평균 {wt['w_lo']:.1f} m/s) {_f(wt['p_lo'])} %, 가장 강한 날({wt['w_hi']:.1f} m/s) {_f(wt['p_hi'])} %")
+    w.b(f"M4T의 절감은 속도 선택 {V['sp4']}, 경로 모양 {V['pa4']}로 나뉨 (비교 기체: 속도 선택 {V['spR']}, 경로 모양 {V['paR']})")
+    w.b(f"M4T는 효율 속도(약 12 m/s)가 기존 정속 10 m/s와 가까워 속도 선택의 몫({V['sp4']})이 비교 기체({V['spR']})보다 작고, 그만큼 전체 절감도 작음. 경로 모양의 몫({V['pa4']})은 비교 기체({V['paR']})와 비슷함")
+    w.b("'기존 경로'를 최단 경로 + 속도 최적화로 정의하면 절감은 경로 모양의 몫만 남음. 비교 기준의 정의를 발주처와 확정해야 함 [확인요망]")
+    w.figure(FIG / "F28_superiority.png", "기존 경로 대비 SoC 소모 비교 (실증 기체 M4T 와 비교 기체)", 150)
+
+    w.h2("4-6. 비행 중 갱신과 신뢰도")
+    w.h3("(1) 기상 정보 갱신 주기 (E14)")
+    w.b("예보가 맞을 때는 비행 중 갱신의 이득이 0.0–0.3 %로 작으나, 예보가 틀릴 때 손해를 2분 주기 갱신은 12–35 %, 30초 주기 갱신은 42–73 % 되찾음 (비교 기체 X650·M100으로 계산, 갱신 주기의 효과는 아래 (2)에서 M4T로도 확인)")
+    w.b("이득은 경로 재계획이 아니라 속도 갱신에서 나오며, 경로 재계획은 장애물·금지 구역이 바뀔 때 수행")
+    w.h3("(2) 실시간 엔진 폐루프 (E15)")
+    T15 = e15_table()
+    w.table(
+        "연결 전 플랫폼 대비 SoC 소모 변화 (안전장치 + 속도 갱신 30초, 경우마다 24건)",
+        T15["head"], T15["rows"],
+        widths=[2.4] + [1.2] * T15["n_sets"],
+        font_pt=9,
+    )
+    if T15["m4"]:
+        w.b(f"실증 기체 M4T: 바람 경우에 따라 SoC 소모 {T15['m4']} 감소")
+    w.b(f"속도 갱신은 {T15['n_cases']}건 모두에서 안전장치만 쓴 경우보다 나쁘지 않았고(최악 {_f(T15['worst'], 2)} %), 판단 1회에 2–3 ms 소요")
+    w.b(f"가로지르는 이동 장애물을 넣은 {T15['obs_n']}건 중 {T15['obs_done']}건 완주, 침범 {T15['obs_col']}건(최소 이격 {T15['obs_sep'][0]:.0f}–{T15['obs_sep'][1]:.0f} m)")
+    w.h3("(3) 예보 시점별 오차와 출발 신뢰도 (E16)")
+    w.table(
+        "예보 시점별 바람 오차 σ (성분별, m/s; 2025-11–2026-10, 36일)",
+        ["예보 시점 (발표 후)", "전체", "겨울", "봄", "여름", "가을"],
+        [
+            ["6시간", "0.31", "0.26", "0.22", "0.43", "0.27"],
+            ["9시간", "0.40", "0.36", "0.36", "0.50", "0.36"],
+            ["12시간", "0.40", "0.24", "0.29", "0.44", "0.55"],
+            ["30시간", "1.00", "1.06", "0.97", "1.16", "0.78"],
+            ["54시간", "1.33", "1.71", "1.21", "1.38", "0.90"],
+            ["78시간", "1.74", "1.88", "1.17", "2.42", "1.19"],
+        ],
+        widths=[1.6, 1, 1, 1, 1, 1],
+    )
+    w.b("95 % 상한 안에 실제 SoC 소모가 든 비율은 432건 중 409건(94.7 %)으로 목표 신뢰수준과 거의 같음 (창원 X650·판교 M100으로 계산. 예보 오차 모형은 기체와 무관하므로 M4T에도 같은 모형을 씀)")
+    w.b("95 % 신뢰수준에 필요한 SoC 여유는 6시간 전 예보에서 명목값의 3.7 %, 30시간 전 14 %, 78시간 전 27 %")
+    w.b("계절별로 알고리즘을 바꿀 근거는 없었으며, 설정은 하나로 두고 여유만 예보 시점과 계절에 맞춤")
+    w.figure(FIG / "F34_forecast_age.png", "예보 시점에 따른 바람 오차와 필요 SoC 여유", 160)
+    w.h3("(4) 외란을 고려한 배터리 안전여유 확보율 – 정량 목표 PoC 시험 (E17)")
+    w.b(f"3-1 (4)의 설계대로 실증 기체 M4T 모델의 왕복 {K['n']}개 임무를 승인이 겨우 나는 출발 SoC({K['s0']} %)에서 외란 4종으로 폐루프 비행 (명목 소모 {K['used_rng']} %p, 95 % 여유 {K['margin_rng']} %p)")
+    C4 = K["cases"]
+    w.table(
+        "외란별 안전여유 확보율 (출발 SoC = 승인 경계, 정책 마진 20 %)",
+        ["외란", "구분", "95 % 신뢰 승인 (제안)", "명목 승인 (여유 없음, 비교)", "제안 방식의 실패 내용"],
+        [
+            ["실제 예보 오차", "평가항목 산정", C4["real"]["conf"], C4["real"]["nom"], f"없음 (최저 종료 SoC {C4['real']['end_min']} %)"],
+            ["실제 예보 오차 + 이동 장애물", "평가항목 산정", C4["obs"]["conf"], C4["obs"]["nom"], f"정상 복귀했으나 종료 SoC 20 % 미만 {C4['obs']['below']}건 (최저 {C4['obs']['end_min']} %)"],
+            ["**합계 (평가항목)", "", f"**{K['k']}/{K['N']} ({K['rate']} %)", f"{K['nom_k']}/{K['nom_N']} ({K['nom_rate']} %)", f"95 % 신뢰구간 {K['lo']}–{K['hi']} %"],
+            ["풍향 30° 회전", "스트레스 (참고)", C4["rot30"]["conf"], C4["rot30"]["nom"], f"복귀 보류 {C4['rot30']['hold']}건, 20 % 미만 {C4['rot30']['below']}건"],
+            ["풍속 1.3배", "스트레스 (참고)", C4["spd1.3"]["conf"], C4["spd1.3"]["nom"], f"비상 착륙 {C4['spd1.3']['emerg']}건, 복귀 보류 {C4['spd1.3']['hold']}건, 20 % 미만 {C4['spd1.3']['below']}건"],
+        ],
+        widths=[1.7, 1.1, 1.5, 1.6, 2.4],
+        font_pt=8.5,
+        align=["L", "C", "C", "C", "L"],
+    )
+    w.figure(FIG / "F39_kpi_reserve.png", "외란별 안전여유 확보율 (막대: 성공률, 선: 95 % 신뢰구간)", 160)
+    w.b(f"평가항목(실제 예보 오차, 이동 장애물 포함) 확보율은 {K['rate']} %({K['k']}/{K['N']})로 목표 95.0 % 이상을 만족하며, 95 % 신뢰구간 하한({K['lo']} %)도 목표보다 높음")
+    w.b(f"같은 임무를 여유 없이(명목 소모만으로) 승인하면 확보율이 {K['nom_rate']} %로 떨어짐. 예보 오차 모형으로 정한 평균 {K['margin']} %p의 여유가 확보율 차이를 만듦")
+    w.b(f"모든 경우에서 이동 장애물 침범은 {K['col_total']}건. 평가항목 산정 외란의 실패 {K['N'] - K['k']}건은 모두 정상 복귀했으나 종료 SoC가 20 %에 약간 못 미친 경우(최저 {C4['obs']['end_min']} %)였고, 스트레스 외란에서는 안전장치가 목적지에서 복귀를 보류(지상 대기)하거나 비상 착륙한 경우가 더해짐")
+    w.b("오차 모형 밖의 외란(풍향 30° 회전, 풍속 1.3배)에서는 목표에 못 미침. 이런 조건은 출발 전 판정에서 더 오래된 예보 시점(큰 σ)이나 높은 신뢰수준(99 %)을 써야 하며, 실측 바람으로 오차 모형을 보정해야 함")
+    w.note("※ 이 결과는 공식 사양으로 맞춘 M4T 전력 모델과 예보 바람을 쓴 가상 시뮬레이션(PoC)이며, 계획서 평가환경의 반복 실외 비행 시험은 실증 기체 비행 후 같은 방법으로 다시 산정해야 함 [자료필요: M4T 반복 실외 비행 기록]")
+
+    w.h2("4-7. 대상 기체와 취득 데이터")
+    w.h3("(1) 실증 기체 DJI Matrice 4T 사양")
+    w.table(
+        "실증 기체 DJI Matrice 4T 주요 사양",
+        ["항목", "사양"],
+        [
+            ["이륙 무게 / 최대 이륙 무게", "1219 g (표준 프로펠러) / 1420 g"],
+            ["최대 페이로드", "200 g"],
+            ["크기 (펼침)", "307.0 × 387.5 × 149.5 mm, 대각선 축간거리 438.8 mm, 프로펠러 10.8 in"],
+            ["최대 상승 / 하강 속도", "10 m/s / 8 m/s (액세서리 사용 시 6 / 6 m/s)"],
+            ["최대 수평 속도", "21 m/s (전진), 18 m/s (후진), 19 m/s (측면)"],
+            ["최대 비행 / 호버 시간", "49 분 / 42 분 (무풍, 표준 프로펠러)"],
+            ["최대 비행 거리", "35 km (무풍)"],
+            ["내풍 최대 풍속 · 최대 피치각", "12 m/s · 35°"],
+            ["작동 온도 · 최고 고도", "−10–40 °C · 6000 m"],
+            ["GNSS · RTK 정확도", "GPS + Galileo + BeiDou + GLONASS, RTK 1 cm + 1 ppm (수평), 1.5 cm + 1 ppm (수직)"],
+            ["호버링 정확도", "±0.1 m (비전·RTK), ±0.5 m (GNSS)"],
+            ["확장 포트", "E-Port × 1, E-Port Lite × 1 (타사 PSDK 기기 지원)"],
+            ["레이저 거리계", "1800 m (1 Hz, 반사율 20 %)"],
+            ["카메라", "광각 1/1.3″ 48 MP, 미디엄 망원 1/1.3″ 48 MP (70 mm), 망원 1/1.5″ 48 MP (168 mm)"],
+            ["열화상 카메라", "비냉각 VOx, 640 × 512 (초해상도 1280 × 1024), 30 Hz [21]"],
+        ],
+        widths=[2, 5],
+        font_pt=8.5,
+        align=["L", "L"],
+    )
+    w.note("※ 기체·비행 성능은 첨부 사양서의 값(Matrice 4 시리즈 공통)이며, 첨부 사양서 본문은 'Matrice 4E 사양'으로 표기되어 있어 카메라는 4T의 DJI 공식 사양 [21]으로 적음")
+    w.b("최대 수평 속도 21 m/s, 내풍 12 m/s, 최대 페이로드 200 g을 계획기의 대지속도 상한·운용 풍속·탑재 조건에 반영해야 함")
+    w.b("이륙 무게 약 1.2 kg으로 X650(4.1 kg)·M100과 전력 특성이 크게 달라, M4T 전용 전력 모델을 공식 사양으로 보정하여 가상 시뮬레이션에 씀(4-3절 (3)). 탑재·고속 구간은 M4T 실측 비행 기록으로 확인해야 함 [자료필요: M4T 호버·속도별 비행 기록]")
+    w.h3("(2) 실증 기체(M4T)에서 얻을 수 있는 데이터")
+    w.b("DJI 공식 SDK 3종(Mobile SDK V5, Onboard SDK, Payload SDK)의 비행 관련 항목 200개를 모두 검토하여 경로계획에서의 역할로 분류함")
+    w.b("Mobile SDK V5는 v5.12.0(2025-01-08)부터 Matrice 4E/4T를 지원하며 [23], M4T는 E-Port를 통한 Payload SDK 기기도 지원함")
+    w.table(
+        "DJI SDK 항목과 경로계획에서의 역할",
+        ["구분", "DJI 항목 (예)", "역할"],
+        [
+            ["풍속 · 풍향", "MSDK KeyWindSpeed (dm/s), KeyWindDirection", "비용 변인 (바람장 보정)"],
+            ["강풍 경고", "MSDK KeyWindWarning, PSDK FLIGHT_ANOMALY", "안전 감시 (등급만 제공)"],
+            ["주변 유인기", "MSDK KeyAirSenseSystemInformation (ADS-B)", "제약 (이동 장애물)"],
+            ["배터리", "KeyChargeRemainingInPercent, KeyVoltage (mV), KeyCurrent (mA), KeyCellVoltages", "목적·제약 (SoC)"],
+            ["배터리 노화 · 온도", "KeyFullChargeCapacity, KeyNumberOfDischarges, KeyBatteryTemperature", "고정 입력 (용량 보정)"],
+            ["위치 · 속도 · 자세", "KeyAircraftLocation3D, KeyAircraftVelocity, KeyAircraftAttitude", "결정 변수의 결과 (추종 확인)"],
+            ["비행 상태 · GNSS", "KeyFlightMode, KeyGPSSatelliteCount", "안전 감시"],
+            ["탑재중량", "해당 키 없음", "주문 정보로 입력"],
+        ],
+        widths=[1.4, 3.6, 1.8],
+        font_pt=8.5,
+        align=["C", "L", "L"],
+    )
+    w.b("M4T는 MAVLink를 쓰지 않으므로, 비행 중 속도 갱신을 하려면 Mobile SDK V5 기반 조종기 앱이 필요함 (현재 실시간 연동은 MAVLink만 구현)")
+    w.b("DJI가 주는 외생 조건은 바람(비용)과 주변 비행체·장애물(제약) 두 가지이며, 본 계획기는 정확히 이 둘을 다룸")
+    w.b("풍속·풍향 키는 현재 위치의 기체 추정값만 주며, M4T에서 실제로 값을 주는지와 추정 정확도는 실기체에서 확인해야 함 [확인요망]")
+    w.h3("(3) 실증 기체용 경로 파일(WPML) 내보내기")
+    w.b("계획 경로를 DJI Pilot 2·FlightHub 2·MSDK V5가 읽는 경로 파일(.kmz: template.kml, waylines.wpml)로 내보냄. 고도는 이륙점 기준 상대 고도, 구간 대지속도는 경로점 속도로 기록")
+    w.b("DJI WPML 문서는 Matrice 4E/4T를 경로 파일 지원 기종으로 명시함 [24, 25]. 본 도구의 현재 지원 기종은 M30·M300·M350·Mavic 3 계열로, M4T의 기종·카메라 번호를 넣고 DJI Pilot 2에서 불러오기를 확인해야 함 [자료필요: M4T 기종 번호, DJI Pilot 2 불러오기 결과]")
+    w.h3("(4) 시험비행 기체 Holybro X650")
+    w.table(
+        "Holybro X650 구성",
+        ["구분", "내용"],
+        [
+            ["기체", "쿼드콥터, 휠베이스 650 mm, 자체 무게 4.1 kg, 최대 이륙 중량 6.3 kg"],
+            ["비행제어", "Holybro Pixhawk 6X + ArduCopter (MAVLink2, AUTO·RTL·Geofence)"],
+            ["추진", "T-Motor MN4014 KV330 × 4, Tekko32 F4 45A ESC, 15 × 5.5 in 카본 프로펠러"],
+            ["전원", "LiPo 6S 10,000 mAh (22.2 V, 222 Wh), PM02D 전압·전류 측정"],
+            ["측위 · 통신", "H-RTK F9P (RTK 8 Hz), Skydroid H12 Pro (2.4 GHz), C11 3축 짐벌"],
+            ["호버 시간", "무탑재 약 30분 (제조사)"],
+        ],
+        widths=[1, 5],
+        align=["C", "L"],
+    )
+    w.h3("(5) X650 비행 중 실시간 수신 데이터 (MAVLink)")
+    w.b("Mission Planner의 MAVLink Inspector(Ctrl+F)로 개발 기체의 수신 메시지와 주기를 지상에서 점검함 (2026. 6. 30.–7. 1.)")
+    w.table(
+        "MAVLink 수신 메시지와 경로계획에서의 활용",
+        ["메시지", "주기", "주요 값 (단위)", "활용"],
+        [
+            ["HEARTBEAT", "1 Hz", "비행 모드, 시동 상태, 기체 종류", "상태 확인"],
+            ["GLOBAL_POSITION_INT", "2 Hz", "위도·경도 (degE7), 상대 고도 (mm), 속도 (cm/s), 방위 (cdeg)", "위치 추종, 남은 구간 계산"],
+            ["GPS_RAW_INT", "2 Hz", "고정 유형, 위성 수, HDOP·VDOP", "측위 품질 감시"],
+            ["ATTITUDE", "4 Hz", "롤·피치·요 (rad), 각속도 (rad/s)", "관측"],
+            ["VFR_HUD", "4 Hz", "대기속도·대지속도 (m/s), 방위, 스로틀 (%), 상승률", "속도 추종 확인"],
+            ["BATTERY_STATUS", "2 Hz", "셀 전압 (mV), 전류 (cA), 사용량 (mAh), 에너지 (hJ), 잔량 (%), 온도 (cdegC)", "SoC 추적"],
+            ["SYS_STATUS", "–", "배터리 전압·전류·잔량, 센서 상태", "상태 확인"],
+            ["EKF_STATUS_REPORT", "2 Hz", "속도·위치·고도 추정 분산", "추정 신뢰도"],
+            ["MISSION_CURRENT", "–", "현재 경로점 번호", "진행 상황"],
+            ["NAV_CONTROLLER_OUTPUT", "–", "목표 방위, 경로점 거리, 경로 이탈 거리", "추종 오차"],
+            ["SCALED_PRESSURE", "–", "절대 기압 (hPa), 온도 (cdegC)", "공기밀도"],
+            ["VIBRATION", "2 Hz", "진동 (m/s²), 가속도계 포화 횟수", "기체 상태"],
+            ["SERVO_OUTPUT_RAW", "–", "모터 출력 PWM (µs)", "관측"],
+            ["RADIO_STATUS", "–", "수신 세기, 잡음, 오류 수", "링크 품질"],
+            ["WIND", "약 2 Hz", "풍향 (°), 풍속 (m/s), 수직 풍속", "바람장 보정"],
+        ],
+        widths=[2.3, 0.7, 3.1, 1.3],
+        font_pt=8.5,
+        align=["L", "C", "L", "L"],
+    )
+    w.note("※ 주기 '–'는 점검 화면에서 확인하지 못한 항목. WIND는 점검 화면 목록에는 없었고, 시험비행 정리 문서(발주처)에서 약 2 Hz 수신이 확인됨. 멀티콥터는 EK3_DRAG_BCOEF_X/Y를 설정해야 바람 추정이 켜짐(기본 0 = 꺼짐)")
+    w.h3("(6) X650 착륙 후 비행 로그 (DataFlash .bin)")
+    w.b("배터리(전압·전류·누적 사용량) 10 Hz, GPS 5 Hz, 제어·EKF 기록을 담으며, 비행 후 전력 모델 보정과 경로 추종 분석에 사용")
+    w.h3("(7) 개발용 기체 Holybro X500")
+    w.b("PX4 Development Kit X500: 휠베이스 500 mm, 프레임 610 g, 2216 KV920 모터, 4S 배터리, PM02 V3 전원 모듈, M10 GPS, SiK 텔레메트리, 무탑재 호버 약 18분(5000 mAh), 최대 탑재 약 1 kg")
+    w.b("MAVLink 수신 점검(4-7절 (5))과 지상 시험에 사용")
+
+    w.h2("4-8. 가상 시뮬레이션(SITL) 검증")
+    s = j("sitl_check.json")
+    c, m = s["checks"], s["mission"]
+    w.table(
+        "ArduCopter SITL 연동 시험 (창원 · X650 미션)",
+        ["점검 항목", "결과"],
+        [
+            ["펌웨어", s["firmware"]],
+            ["미션 업로드 / 읽기", f"{c['mission_count_sent']} / {c['mission_count_readback']} 항목 (일치)"],
+            ["AUTO 모드 시동 · 완주", "성공" if c["armed_in_auto"] and c["flight_completed"] else "실패"],
+            ["구간 속도 명령 (DO_CHANGE_SPEED)", "모두 수락" if c["speed_cmds_all_accepted"] else "일부 거부"],
+            ["바람 메시지 수신", "수신" if c["wind_received"] else "미수신"],
+            ["비행 로그 읽기", "가능" if c["dataflash_readable"] else "불가"],
+            ["미션 규모", f"거리 {m['distance_m']/1000:.2f} km, 예상 {m['duration_s']:.0f} s, 경로점 {m['n_waypoints']}개"],
+        ],
+        widths=[2.2, 4],
+        align=["L", "L"],
+    )
+
+    w.h2("4-9. 하드웨어 시험비행 (Holybro X650)")
+    w.h3("(1) 시험 개요 (2026. 11. 13.)")
+    f = j("flight_20261113.json")
+    w.b("Holybro X650(ArduCopter 4.7.1)으로 이륙 15 m → 경로점 4개(30, 30, 30, 20 m) → 자동 복귀(RTL) 미션을 3 m/s로 비행하고 기체 로그를 분석")
+    w.table(
+        "시험비행 결과 (기체 로그에서 계산)",
+        ["항목", "값"],
+        [
+            ["비행 시간 (이륙–착륙)", "103 s"],
+            ["사용 에너지", "14.6 Wh (630 mAh), 배터리 222 Wh의 6.6 %"],
+            ["평균 전류 · 평균 전력", "22.1 A · 512 W"],
+            ["전압", "24.2 V → 23.3 V"],
+            ["최고 고도 · 최고 수평 속도", "30.2 m · 3.5 m/s"],
+            ["배터리 내부저항 (로그 추정)", "0.028 Ω (계획기 가정 0.03 Ω)"],
+        ],
+        widths=[2.2, 4],
+        align=["L", "L"],
+    )
+    w.h3("(2) 모델과의 비교")
+    w.table(
+        "구간별 측정 전력과 모델",
+        ["구간", "시간", "측정", "모델 (4.1 kg)", "모델 (4.66 kg)"],
+        [
+            ["이륙 (0 → 15 m)", "8.8 s", "515 W", "530 W", "625 W"],
+            ["상승하며 이동 (15 → 30 m)", "15.9 s", "523 W", "474 W", "561 W"],
+            ["수평 이동 (30 m, 3 m/s)", "20.5 s", "496–518 W", "416–418 W", "496–498 W"],
+            ["하강하며 이동 (30 → 20 m)", "9.1 s", "500 W", "406 W", "484 W"],
+            ["RTL 복귀 · 대기 · 착륙", "48.3 s", "509–515 W", "424–442 W", "504–524 W"],
+            ["**합계 에너지", "**103 s", "**14.6 Wh", "**12.5 Wh (−16 %)", "**14.9 Wh (+2 %)"],
+        ],
+        widths=[2.2, 0.9, 1.1, 1.4, 1.4],
+    )
+    w.b("제원 중량(4.1 kg)의 모델은 에너지를 16 % 적게 예측함. 측정 호버 전력 515 W는 모델 434 W보다 높음")
+    w.b("모델 중량을 4.66 kg으로 두면 측정 호버 전력과 같아지고 전체 에너지가 2 % 안으로 맞음. 카메라·짐벌·RTK를 단 실제 이륙 중량이 제원보다 무거운 것으로 보이나, 중량을 재지 않아 확정할 수 없음 [자료필요: 이륙 중량 실측]")
+    w.b("상승 구간은 모델이 17–20 % 크게 예측함")
+    w.b("시간 예측은 경로점 구간 실제 45.4 s, 계획기 46.9 s로 오차 3 %")
+    w.b("이번 비행은 3.5 m/s 이하로만 날아, 계획기가 속도를 고르는 데 쓰는 고속 전력(동체 항력)은 검증하지 못함")
+    w.figure(FIG / "F37_flight_20261113.png", "2026-11-13 시험비행: 구간별 전력과 모델 비교", 160)
+    w.h3("(3) 실증 지역(고성) 왕복 400 m 재추정")
+    w.table(
+        "고성 왕복 400 m의 예상 비행 시간과 에너지 (보정 모델)",
+        ["수평 속도", "고도 30 m: 시간", "고도 30 m: 에너지", "고도 20 m: 시간", "고도 20 m: 에너지"],
+        [
+            ["5 m/s", "2분 30초", "19.9 Wh (9.0 %)", "2분 17초", "18.2 Wh (8.2 %)"],
+            ["**7 m/s", "**2분 11초", "16.9 Wh (7.6 %)", "**1분 58초", "15.1 Wh (6.8 %)"],
+            ["8 m/s", "2분 6초", "16.1 Wh (7.2 %)", "1분 53초", "14.3 Wh (6.4 %)"],
+            ["10 m/s", "2분 0초", "15.2 Wh (6.8 %)", "1분 48초", "13.4 Wh (6.0 %)"],
+        ],
+        widths=[1, 1.3, 1.5, 1.3, 1.5],
+    )
+    w.b("2분 안에 왕복하려면 고도 20 m에서 7–8 m/s가 필요하며, 고도 30 m에서는 7 m/s로 약 2분 11초가 예상됨")
+
+    w.h2("4-10. 운용 소프트웨어")
+    w.b("웹 기반 3차원 계획 화면에서 지도의 출발·도착 지점을 찍고 기체·탑재·출발 시각을 넣으면 기존 경로와 제안 경로를 함께 계산하여 비교 표와 함께 보여줌")
+    w.b("결과는 ArduPilot 미션(.waypoints), 경로표(.csv), DJI 경로 파일(.kmz)로 내려받으며, 실시간 화면은 MAVLink로 기체와 연결하여 속도 갱신을 보냄")
+    w.table(
+        "설치부터 경로 생성까지 소요 시간 (사용자 매뉴얼 시험)",
+        ["단계", "소요 시간"],
+        [["패키지 설치", "약 17 s"], ["설치 점검", "8 s"], ["서버 시작", "3.8 s"], ["화면 열기", "4.0 s"], ["경로 계획 (왕복 비교)", "13.1 s"]],
+        widths=[2, 1.5],
+        width_mm=110,
+        align=["L", "C"],
+    )
+    w.figure(FIG / "platform_3d.png", "3차원 계획 화면", 150)
+
+    # ===== 5장 =====
+    w.h1("5. 목표 달성도 및 관련 분야 기여도")
+    w.h2("5-1. 목표 달성도")
+    w.table(
+        "정량적 목표 달성도 (계획서 표2)",
+        ["평가항목", "개발 목표치", "실적", "평가 환경", "판정"],
+        [["외란을 고려한 배터리 안전여유 확보율", "95.0 % 이상", f"{K['rate']} % ({K['k']}/{K['N']})\n95 % 신뢰구간 {K['lo']}–{K['hi']} %",
+          f"PoC 시험환경 (M4T 모델, 판교·창원 {K['days']}일, 실제 예보 오차 + 이동 장애물)", "달성\n(시뮬레이션)"]],
+        widths=[1.9, 1.0, 1.7, 2.6, 1.0],
+        font_pt=9,
+        align=["L", "C", "C", "L", "C"],
+    )
+    w.note("※ 오차 모형 밖 스트레스(풍향 30° 회전 92.1 %, 풍속 1.3배 54.6 %)는 목표 미달이며, 실외 반복 비행 시험에 따른 재산정이 남아 있음 (4-6 (4))".replace("92.1 %", C4["rot30"]["conf"].split("(")[1].rstrip(")")).replace("54.6 %", C4["spd1.3"]["conf"].split("(")[1].rstrip(")")))
+    w.table(
+        "보조 지표별 달성도",
+        ["번호", "보조 지표", "판단 기준", "실적", "판정"],
+        [
+            ["1", "기존 경로 대비 SoC 소모 (M4T)", "95 % 구간 상한 < 0 %", f"{V['r4']} 감소 (상한 {V['ci4']} 감소), 비교 기체 {V['rR']} 감소", "달성"],
+            ["2", "틀린 예보 대응", "회복률 제시", f"M4T 폐루프 {V['e15_m4']} 감소, 30초 갱신 42–73 % 회복 (X650·M100)", "달성 (시뮬레이션)"],
+            ["3", "이동 장애물 안전", "침범 0건", f"{V['obs_n']}건 중 {V['obs_col']}건 (M4T 포함)", "달성 (시뮬레이션)"],
+            ["4", "출발 신뢰도 보정", "93–97 %", "409/432 (94.7 %, X650·M100)", "달성"],
+            ["5", "비행제어기 연동", "항목 일치·명령 수락", "13/13, 속도 명령 전부 수락 (SITL)", "달성"],
+            ["6", "실기체 에너지 예측", "±10 %", "−16 % (제원 중량), +2 % (호버 보정 중량)", "부분 달성"],
+            ["6", "실기체 시간 예측", "±10 %", "+3 %", "달성"],
+            ["7", "운용성", "설치 후 1분 이내", f"설치 파일 {IL['steps']['install']['sec']:.0f} s, 이후 서버 {IL['steps']['server_pangyo']['sec']:.0f} s · 경로 생성 {IL['acceptance']['pangyo']['steps'][1]['detail'].split(' s')[0]} s (배포판 인수 시험)", "달성"],
+            ["–", "실비행 중 속도 갱신", "실기체 폐루프", "미실시", "미검증"],
+            ["–", "실증 기체(M4T) 경로 파일", "DJI Pilot 2 불러오기", "Pilot 2 파일의 기종 번호를 쓰는 방식 구현, 실제 M4T 파일·불러오기 미확인", "미검증"],
+            ["–", "실증 기체(M4T) SoC 예측", "±10 %", "공식 사양 두 점에 맞춘 모델 (실측 비행 비교 없음)", "미검증"],
+        ],
+        widths=[0.6, 1.7, 1.5, 3, 1.2],
+        font_pt=8.5,
+        align=["C", "L", "C", "L", "C"],
+    )
+    w.note("※ 1–5는 시뮬레이션·SITL 결과이며, 6의 실기체 에너지 예측은 이륙 중량 실측과 고속 구간 시험 후 다시 판정해야 함")
+    w.h2("5-2. 관련 분야 기여도")
+    w.h3("(1) 학술적 기여")
+    w.b("SoC를 목적·제약 상태 변수로 두고 시공간 바람장·이동 장애물·구간 속도를 한 번에 다루는 3차원 탐색(WE-LT*)을 제시")
+    w.b("절감을 속도 선택과 경로 모양의 몫으로 분해하여, 기체의 효율 속도에 따라 속도 선택의 몫이 달라짐을 보임 (M4T 6–8 %, X650·M100 15–18 %)")
+    w.b("예보 시점별 실측 오차로 SoC 신뢰 구간을 보정하여 출발 판정의 포함률을 검증(94.7 %)하고, 그 판정으로 승인한 임무의 안전여유 확보율을 폐루프로 산정(가상 시뮬레이션)")
+    w.h3("(2) 기술적 기여")
+    w.b("ArduPilot 미션·MAVLink와 DJI WPML 등 공개 형식으로 계획 결과를 내보내 특정 기체에 묶이지 않는 운용 체계를 마련")
+    w.b("시험비행 로그를 계획기 모델과 바로 비교하는 분석 도구로 실기체 보정 절차를 정립")
+    w.h3("(3) 산업적 기여")
+    w.b("같은 배터리로 더 큰 예비 전력을 확보하여 배송·점검 임무의 성립 범위를 넓힘 (판교 M100 사례: 기존 경로 임무 불가 → 제안 경로 완주)")
+
+    # ===== 6장 =====
+    w.h1("6. 연구개발 결과의 활용계획 및 향후 과제")
+    w.h2("6-1. 활용 계획")
+    w.b("실증 기체 DJI Matrice 4T에 경로 파일(WPML)로 계획 경로와 구간 속도를 적용하여 실증")
+    w.b("실증 지역(고성) 왕복 시험에 계획기와 미션 내보내기를 적용하여 운용 절차를 검증")
+    w.b("배송·점검 운용 계획 도구로 활용: 출발 전 경로·속도·출발 판정, 비행 중 속도 갱신")
+    w.b("학술지 투고: 영문 원고 초안 준비(docs/paper) [확인요망: 투고 대상 학술지]")
+    w.b("지식재산: '드론 비행 금지 구역 회피 경로 제공 방법 및 장치' [확인요망: 특허 출원 여부와 청구 범위]")
+    w.h2("6-2. 향후 과제")
+    w.table(
+        "다음 시험에서 수행할 항목",
+        ["순위", "할 일", "이유"],
+        [
+            ["1", "M4T 정속 비행 전력 기록 (30초 호버, 같은 왕복을 5·7·10 m/s로 각 1회, 탑재 0 / 0.2 kg, 비행 기록 내려받기)", "공식 사양으로 맞춘 M4T 전력 모델을 실측으로 확인·보정"],
+            ["2", "M4T 의 DJI Pilot 2 에서 내보낸 경로 파일로 경로 파일을 만들어 Pilot 2 에서 불러오기 시험", "실증 기체에 계획 경로 적용"],
+            ["2-1", "같은 기체·배터리·탑재로 반복 실외 왕복 비행 (승인 경계 부근 출발 SoC 포함)", "정량 목표(안전여유 확보율)를 계획서 평가환경대로 재산정"],
+            ["3", "M4T 풍속·풍향 키(KeyWindSpeed 등) 값 기록 + 지상 풍속계 비교", "기체 바람 추정의 사용 가능 여부와 정확도 확인"],
+            ["4", "Mobile SDK V5 기반 속도 갱신 앱 개발", "M4T에서 비행 중 속도 갱신 (현재 MAVLink만 구현)"],
+            ["5", "X650 이륙 중량 측정과 속도별 왕복 3회 (5, 7, 10 m/s)", "4.66 kg 추정 확인, 고속 전력 곡선(항력 면적) 보정"],
+            ["6", "X650 BATT_CAPACITY = 10000, EK3_DRAG_BCOEF_X/Y 설정", "잔량 % 보정, 기체 바람 추정 활성화"],
+            ["7", "X650 지상국 기록(.tlog) 확보와 속도 명령(DO_CHANGE_SPEED) 송신 시험", "실제 수신 주기 확인, 폐루프 속도 갱신의 실기체 검증"],
+        ],
+        widths=[0.6, 3.2, 3.2],
+        font_pt=8.5,
+        align=["C", "L", "L"],
+    )
+    w.h2("6-3. 한계")
+    w.b("M4T 전력 모델은 공식 사양 두 점(무탑재)에 맞춘 것이며, 형상 동력·항전 전력은 가정값이고 탑재 상태·고속 구간은 실측 확인 전임")
+    w.b("X650 전력 모델의 항력 면적·형상 동력은 가정값이며, 속도 선택에 따른 절감 크기가 이 가정에 크게 좌우됨")
+    w.b("기존 경로 대비 비교와 폐루프 시험의 평가 바람은 실측이 아닌 더 새 예보이며, 비행 고도의 실측 바람과 예보의 차이는 아직 재지 못함 [자료필요: 비행 고도 실측 바람]")
+    w.b("실증 기체 M4T의 경로 파일(WPML) 기종 번호는 DJI 공식 문서로 확인하지 못해, 그 기체의 DJI Pilot 2 가 내보낸 파일에서 번호를 가져오는 방식으로 대응함 (실제 M4T 파일로는 미확인)")
+    w.b("SoH(배터리 노화)에 따른 유효 용량 감소는 검토 단계이며, 충전 지점을 경유하는 계획은 구현하지 않음 (계획서 1·2단계 일부)")
+    w.b("정량 목표의 확보율은 예보 오차 모형 안의 외란에서 산정한 값이며, 모형 밖의 큰 외란(풍향 30° 회전, 풍속 1.3배)에서는 목표에 못 미침")
+
+    # ===== 7장 =====
+    w.h1("7. 참고문헌")
+    refs = [
+        "전자통신동향분석, 제39권 제4호, pp. 10–20, 2024. doi:10.22648/ETRI.2024.J.390402 [확인요망: 저자·제목]",
+        "A. Nash, S. Koenig, C. Tovey, \"Lazy Theta*: Any-Angle Path Planning and Path Length Analysis in 3D,\" Proc. AAAI, 2010. doi:10.1609/aaai.v24i1.7566",
+        "M. Phillips, M. Likhachev, \"SIPP: Safe Interval Path Planning for Dynamic Environments,\" Proc. IEEE ICRA, 2011.",
+        "K. Yakovlev, A. Andreychuk, \"Any-Angle Pathfinding for Multiple Agents Based on SIPP Algorithm,\" Proc. ICAPS, 2017. doi:10.1609/icaps.v27i1.13856",
+        "J. G. Leishman, Principles of Helicopter Aerodynamics, Cambridge University Press, 2006.",
+        "Y. Zeng, J. Xu, R. Zhang, \"Energy Minimization for Wireless Communication With Rotary-Wing UAV,\" IEEE Trans. Wireless Commun., 2019. doi:10.1109/TWC.2019.2902559",
+        "T. A. Rodrigues et al., \"In-flight positional and energy use data set of a DJI Matrice 100 quadcopter for small package delivery,\" Scientific Data, 8, 155, 2021. doi:10.1038/s41597-021-00930-x",
+        "F. Betti Sorbelli et al., \"Energy-Constrained Delivery of Goods With Drones Under Varying Wind Conditions,\" IEEE Trans. ITS, 2021. doi:10.1109/TITS.2020.3044420",
+        "A. Thibbotuwawa et al., \"UAV Mission Planning Resistant to Weather Uncertainty,\" Sensors, 20(2), 515, 2020. doi:10.3390/s20020515",
+        "F. Lian et al., \"WA-LPA*: An Energy-Aware Path-Planning Algorithm for UAVs in Dynamic Wind Environments,\" Drones, 9(12), 850, 2025. doi:10.3390/drones9120850",
+        "F. Lian et al., \"Optimal Path Planning of Unmanned Aerial Vehicle with Wind Field,\" Proc. IEEE ITSC, 2025.",
+        "R. Gu, Y. Zhao, X. Ren, \"Integrating wind field analysis in UAV path planning: Enhancing safety and energy efficiency for urban logistics,\" Chinese J. Aeronautics, 39(1), 103605, 2026. doi:10.1016/j.cja.2025.103605",
+        "L. Blackmore, M. Ono, B. C. Williams, \"Chance-Constrained Optimal Path Planning With Obstacles,\" IEEE Trans. Robotics, 27(6), 2011. doi:10.1109/TRO.2011.2161160",
+        "H. Zhu, J. Alonso-Mora, \"Chance-Constrained Collision Avoidance for MAVs in Dynamic Environments,\" IEEE RA-L, 4(2), 2019. doi:10.1109/LRA.2019.2893494",
+        "M. Schäfer et al., \"Bringing up OpenSky: A large-scale ADS-B sensor network for research,\" Proc. IPSN, 2014. doi:10.1109/IPSN.2014.6846743",
+        "X. Olive, \"traffic, a toolbox for processing and analysing air traffic data,\" J. Open Source Software, 4(39), 1518, 2019. doi:10.21105/joss.01518",
+        "J. K. Stolaroff et al., \"Energy use and life cycle greenhouse gas emissions of drones for commercial package delivery,\" Nature Communications, 9, 409, 2018. doi:10.1038/s41467-017-02411-5",
+        "K. Dorling et al., \"Vehicle Routing Problems for Drone Delivery,\" IEEE Trans. SMC: Systems, 2017. doi:10.1109/TSMC.2016.2582745",
+        "J. Zhang et al., \"Energy consumption models for delivery drones: A comparison and assessment,\" Transportation Research Part D, 2021. doi:10.1016/j.trd.2020.102668",
+        "MAVLink Developer Guide, Common Message Set. https://mavlink.io/en/messages/common.html",
+        "DJI, Matrice 4 Series Specs. https://enterprise.dji.com/matrice-4-series/specs",
+        "DJI, Cloud API Documentation – DJI WPML (공개 저장소 dji-sdk/Cloud-API-Doc, 2024-11-07 판)",
+        "DJI, Mobile SDK V5 Release Note (v5.12.0, 2025-01-08: Matrice 4E/4T 지원 추가). https://developer.dji.com/doc/mobile-sdk-tutorial/en",
+        "DJI, Cloud API – Product Supported. https://developer.dji.com/doc/cloud-api-tutorial/en/overview/product-support.html",
+        "DJI, Cloud API – DJI WPML Common Elements. https://developer.dji.com/doc/cloud-api-tutorial/en/api-reference/dji-wpml/common-element.html",
+    ]
+    for i, r in enumerate(refs, 1):
+        w._p(f"    [{i}] {r}", P_BUL, C_BODY, kind="b")
+
+    # ===== 부록 =====
+    w.h1("부록. 산출물 목록", page_break=True)
+    w.chapter = "부록"
+    w.table(
+        "주요 산출물",
+        ["구분", "산출물", "위치 (저장소)"],
+        [
+            ["소스 코드", "경로계획·에너지 모델·실시간 엔진·웹 서버", "src/dpo/"],
+            ["보고서", "배포 보고서(Word), 신뢰도·현장 실증 보고서, 본 최종 보고서", "docs/*.docx, docs/*.hwpx"],
+            ["발표자료", "학술 발표(46장), 회의용(37장)", "docs/*.pptx"],
+            ["매뉴얼", "설치부터 첫 경로까지 사용자 매뉴얼", "docs/drone_soc_user_manual.docx"],
+            ["시험비행 분석", "2026-11-13 시험비행 분석 보고서, 비행 기록표 양식", "docs/drone_soc_flight_test_20261113.docx"],
+            ["자료 요청", "발주처 자료 요청서", "docs/drone_soc_data_request.docx"],
+            ["실험 결과", "E13–E16, SITL, 시험비행 결과 수치", "results/*.json, results/figures/"],
+            ["논문 원고", "영문 원고 초안, 참고문헌", "docs/paper/"],
+        ],
+        widths=[1.2, 3.4, 2.6],
+        align=["C", "L", "L"],
+    )
+
+    w.finish()
+    rep = doc.validate()
+    if rep.issues:
+        raise SystemExit(f"검증 실패: {rep.issues}")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    doc.save_to_path(str(out))
+    print("저장:", out)
+
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--out", default=str(ROOT / "docs" / "drone_soc_final_report.hwpx"))
+    ap.add_argument("--pi", default="", help="표지 연구책임자 (저장소에 넣는 판은 비움)")
+    a = ap.parse_args()
+    build(Path(a.out), pi=a.pi)

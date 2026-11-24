@@ -1,0 +1,39 @@
+{
+ "steps": [
+  {
+   "name": "r1_region_bar",
+   "note": ""
+  },
+  {
+   "name": "r2_dialog",
+   "note": ""
+  },
+  {
+   "name": "r3_progress",
+   "note": ""
+  },
+  {
+   "name": "r4_new_region",
+   "note": ""
+  },
+  {
+   "name": "r5_place_search",
+   "note": ""
+  }
+ ],
+ "site": {
+  "key": "r20261122145529",
+  "label": "대전 엑스포",
+  "hub_name": "대전 엑스포",
+  "user": true,
+  "lon": [
+   127.3645,
+   127.4091
+  ],
+  "lat": [
+   36.35748,
+   36.39352
+  ],
+  "truth": false
+ }
+}
